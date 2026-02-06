@@ -71,7 +71,7 @@ Reviews record governance decisions applied to dictionary entries,
 audio pronunciations, and folklore entries.
 
 Fields include reviewer reference (reviewer or administrator),
-content type (dictionary, folklore, audio), object identifier,
+content type (dictionary_entry, folklore_entry, audio_pronunciation), object identifier,
 decision (approved, rejected, revision requested), reviewer comments,
 and review timestamp.
 
