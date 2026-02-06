@@ -39,6 +39,8 @@ or General Ivatan), mandatory source declaration, self-knowledge flag,
 contributor reference, status (draft, pending, approved, rejected,
 archived), and timestamps.
 
+Approved dictionary entries may be improved by other contributors through a revision submission process. Revisions are reviewed independently and, if approved, update the published entry while preserving attribution and audit history. Full revision logs are visible to reviewers and administrators.
+
 Audio pronunciation is intentionally excluded and handled separately
 to allow an independent review lifecycle.
 
