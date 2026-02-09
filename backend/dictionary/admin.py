@@ -1,5 +1,6 @@
 from django.contrib import admin
 from .models import DictionaryEntry, AudioPronunciation
+from reviews.models import Review
 
 
 @admin.register(DictionaryEntry)
@@ -15,7 +16,33 @@ class DictionaryEntryAdmin(admin.ModelAdmin):
     list_filter = ('status', 'variant', 'part_of_speech')
     search_fields = ('ivatan_term', 'english_meaning')
     readonly_fields = ('created_at', 'updated_at')
+    actions = ['approve_entries', 'reject_entries']
 
+    def approve_entries(self, request, queryset):
+        for entry in queryset.filter(status='pending'):
+            entry.status = 'approved'
+            entry.save(update_fields=['status'])
+            Review.objects.create(
+                reviewer=request.user,
+                content_type='dictionary_entry',
+                object_id=entry.id,
+                decision='approved',
+                comments='Approved via admin review'
+            )
+    approve_entries.short_description = "Approve selected dictionary entries"
+
+    def reject_entries(self, request, queryset):
+        for entry in queryset.filter(status='pending'):
+            entry.status = 'rejected'
+            entry.save(update_fields=['status'])
+            Review.objects.create(
+                reviewer=request.user,
+                content_type='dictionary_entry',
+                object_id=entry.id,
+                decision='rejected',
+                comments='Rejected via admin review'
+            )
+    reject_entries.short_description = "Reject selected dictionary entries"
 
 @admin.register(AudioPronunciation)
 class AudioPronunciationAdmin(admin.ModelAdmin):
@@ -27,3 +54,30 @@ class AudioPronunciationAdmin(admin.ModelAdmin):
     )
     list_filter = ('status',)
     readonly_fields = ('created_at',)
+    actions = ['approve_audio', 'reject_audio']
+
+    def approve_audio(self, request, queryset):
+        for audio in queryset.filter(status='pending'):
+            audio.status = 'approved'
+            audio.save(update_fields=['status'])
+            Review.objects.create(
+                reviewer=request.user,
+                content_type='audio_pronunciation',
+                object_id=audio.id,
+                decision='approved',
+                comments='Audio approved via admin review'
+            )
+    approve_audio.short_description = "Approve selected audio pronunciations"
+
+    def reject_audio(self, request, queryset):
+        for audio in queryset.filter(status='pending'):
+            audio.status = 'rejected'
+            audio.save(update_fields=['status'])
+            Review.objects.create(
+                reviewer=request.user,
+                content_type='audio_pronunciation',
+                object_id=audio.id,
+                decision='rejected',
+                comments='Audio rejected via admin review'
+            )
+    reject_audio.short_description = "Reject selected audio pronunciations"
