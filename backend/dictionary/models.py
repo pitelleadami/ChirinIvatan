@@ -1,6 +1,7 @@
 import uuid
 from django.conf import settings
 from django.db import models
+from django.core.exceptions import ValidationError
 
 
 class DictionaryEntry(models.Model):
@@ -12,11 +13,11 @@ class DictionaryEntry(models.Model):
         ARCHIVED = 'archived', 'Archived'
 
     class Variant(models.TextChoices):
+        GENERAL = 'general', 'General Ivatan'
         ISAMURONG = 'isamurong', 'Isamurong'
         IVASAY = 'ivasay', 'Ivasay'
         ITBAYATEN = 'itbayaten', 'Itbayaten'
         ISABTANG = 'isabtang', 'Isabtang'
-        GENERAL = 'general', 'General Ivatan'
 
     class PartOfSpeech(models.TextChoices):
         NOUN = 'noun', 'Noun'
@@ -25,12 +26,15 @@ class DictionaryEntry(models.Model):
         ADVERB = 'adverb', 'Adverb'
         OTHER = 'other', 'Other'
 
-
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     ivatan_term = models.CharField(max_length=255)
-    syllabication = models.CharField(max_length=255, blank=True)
-    phonetic = models.CharField(max_length=255, blank=True)
+
+    variant = models.CharField(
+        max_length=20,
+        choices=Variant.choices,
+        default=Variant.GENERAL
+    )
 
     part_of_speech = models.CharField(
         max_length=20,
@@ -40,16 +44,17 @@ class DictionaryEntry(models.Model):
 
     english_meaning = models.TextField()
     example_sentence = models.TextField(blank=True)
+    example_translation = models.TextField(blank=True)
+
+    syllabication = models.CharField(max_length=255, blank=True)
+    phonetic = models.CharField(max_length=255, blank=True)
     inflected_forms = models.TextField(blank=True)
     etymology = models.TextField(blank=True)
+    usage_notes = models.TextField(blank=True)
+    synonyms = models.TextField(blank=True)
+    antonyms = models.TextField(blank=True)
 
-    variant = models.CharField(
-        max_length=20,
-        choices=Variant.choices,
-        default=Variant.GENERAL
-    )
-
-    source = models.TextField()
+    source = models.TextField(blank=True)
     self_knowledge = models.BooleanField(default=False)
 
     contributor = models.ForeignKey(
@@ -72,11 +77,30 @@ class DictionaryEntry(models.Model):
         related_name='revised_dictionary_entries'
     )
 
+    parent_term = models.ForeignKey(
+        'self',
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name='variants'
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    def clean(self):
+        if self.example_sentence and not self.example_translation:
+            raise ValidationError({
+                'example_translation': 'English translation is required when an example sentence is provided.'
+            })
+
+        if not self.self_knowledge and not self.source:
+            raise ValidationError({
+                'source': 'Source is required unless self-knowledge is declared.'
+            })
+
     def __str__(self):
-        return self.ivatan_term
+        return f"{self.ivatan_term} ({self.variant})"
 
 
 class AudioPronunciation(models.Model):
@@ -85,7 +109,6 @@ class AudioPronunciation(models.Model):
         PENDING = 'pending', 'Pending'
         APPROVED = 'approved', 'Approved'
         REJECTED = 'rejected', 'Rejected'
-        ARCHIVED = 'archived', 'Archived'
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
@@ -99,8 +122,7 @@ class AudioPronunciation(models.Model):
 
     contributor = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.PROTECT,
-        related_name='audio_contributions'
+        on_delete=models.PROTECT
     )
 
     status = models.CharField(
@@ -113,6 +135,7 @@ class AudioPronunciation(models.Model):
 
     def __str__(self):
         return f"Audio for {self.dictionary_entry.ivatan_term}"
+
 
 class DictionaryRevision(models.Model):
     class Status(models.TextChoices):
@@ -131,13 +154,12 @@ class DictionaryRevision(models.Model):
 
     revised_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.PROTECT,
-        related_name='dictionary_revisions'
+        on_delete=models.PROTECT
     )
 
-    # Optional proposed updates
     english_meaning = models.TextField(blank=True)
     example_sentence = models.TextField(blank=True)
+    example_translation = models.TextField(blank=True)
     usage_notes = models.TextField(blank=True)
     synonyms = models.TextField(blank=True)
     antonyms = models.TextField(blank=True)
@@ -150,6 +172,12 @@ class DictionaryRevision(models.Model):
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
+
+    def clean(self):
+        if self.example_sentence and not self.example_translation:
+            raise ValidationError({
+                'example_translation': 'English translation is required when an example sentence is provided.'
+            })
 
     def __str__(self):
         return f"Revision for {self.dictionary_entry.ivatan_term}"
