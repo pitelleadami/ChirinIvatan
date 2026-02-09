@@ -113,3 +113,43 @@ class AudioPronunciation(models.Model):
 
     def __str__(self):
         return f"Audio for {self.dictionary_entry.ivatan_term}"
+
+class DictionaryRevision(models.Model):
+    class Status(models.TextChoices):
+        DRAFT = 'draft', 'Draft'
+        PENDING = 'pending', 'Pending'
+        APPROVED = 'approved', 'Approved'
+        REJECTED = 'rejected', 'Rejected'
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    dictionary_entry = models.ForeignKey(
+        DictionaryEntry,
+        on_delete=models.CASCADE,
+        related_name='revisions'
+    )
+
+    revised_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name='dictionary_revisions'
+    )
+
+    # Optional proposed updates
+    english_meaning = models.TextField(blank=True)
+    example_sentence = models.TextField(blank=True)
+    usage_notes = models.TextField(blank=True)
+    synonyms = models.TextField(blank=True)
+    antonyms = models.TextField(blank=True)
+    etymology = models.TextField(blank=True)
+
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.DRAFT
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Revision for {self.dictionary_entry.ivatan_term}"
