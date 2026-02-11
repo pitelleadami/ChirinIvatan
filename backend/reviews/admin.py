@@ -11,6 +11,7 @@ class ReviewAdmin(admin.ModelAdmin):
 
     list_display = (
         "revision",
+        "review_round",
         "reviewer",
         "decision",
         "created_at",
@@ -18,6 +19,7 @@ class ReviewAdmin(admin.ModelAdmin):
 
     readonly_fields = (
         "revision",
+        "review_round",
         "reviewer",
         "decision",
         "notes",

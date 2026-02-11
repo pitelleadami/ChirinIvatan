@@ -12,13 +12,14 @@ This file controls:
 """
 
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import models, transaction
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
 from .models import Review
 from dictionary.models import EntryRevision, EntryStatus
-from dictionary.services import publish_revision
+from dictionary.services import finalize_approved_revision, publish_revision
+from dictionary.state_machine import validate_transition
 
 User = get_user_model()
 
@@ -44,6 +45,14 @@ def is_reviewer(user):
 # MAIN REVIEW LOGIC
 # ============================================================
 
+def _latest_flag_review(revision: EntryRevision):
+    return (
+        Review.objects.filter(revision=revision, decision=Review.Decision.FLAG)
+        .order_by("-review_round", "-created_at")
+        .first()
+    )
+
+
 @transaction.atomic
 def submit_review(*, revision: EntryRevision, reviewer, decision, notes=""):
     """
@@ -62,12 +71,23 @@ def submit_review(*, revision: EntryRevision, reviewer, decision, notes=""):
     """
 
     entry = revision.entry  # May be None for new submissions
+    latest_flag = _latest_flag_review(revision)
+    is_rereview = bool(
+        entry
+        and entry.status == EntryStatus.APPROVED_UNDER_REVIEW
+        and revision.status == EntryRevision.Status.APPROVED
+    )
 
     # --------------------------------------------------------
-    # 1. Only pending revisions may be reviewed
+    # 1. Validate reviewable state
     # --------------------------------------------------------
 
-    if revision.status != EntryRevision.Status.PENDING:
+    if decision == Review.Decision.FLAG:
+        if revision.status != EntryRevision.Status.APPROVED:
+            raise ValidationError("Only approved revisions can be flagged.")
+        if not entry or entry.status != EntryStatus.APPROVED:
+            raise ValidationError("Only approved published entries can be flagged.")
+    elif not (revision.status == EntryRevision.Status.PENDING or is_rereview):
         raise ValidationError("Only pending revisions can be reviewed.")
 
     # --------------------------------------------------------
@@ -78,11 +98,32 @@ def submit_review(*, revision: EntryRevision, reviewer, decision, notes=""):
         raise ValidationError("You cannot review your own submission.")
 
     # --------------------------------------------------------
-    # 3. Rejection must include notes
+    # 3. Review content rules
     # --------------------------------------------------------
 
     if decision == Review.Decision.REJECT and not notes.strip():
         raise ValidationError("Rejection requires reviewer notes.")
+    if decision == Review.Decision.FLAG and not notes.strip():
+        raise ValidationError("Flagging requires reviewer notes.")
+
+    if decision == Review.Decision.FLAG:
+        max_round = (
+            Review.objects.filter(revision=revision)
+            .aggregate(max_round=models.Max("review_round"))
+            .get("max_round")
+        )
+        target_round = (max_round or 0) + 1
+    elif is_rereview:
+        target_round = latest_flag.review_round if latest_flag else 1
+    else:
+        target_round = 0
+
+    if Review.objects.filter(
+        revision=revision,
+        reviewer=reviewer,
+        review_round=target_round,
+    ).exists():
+        raise ValidationError("You have already reviewed this revision in this round.")
 
     # --------------------------------------------------------
     # 4. Create review record
@@ -93,7 +134,22 @@ def submit_review(*, revision: EntryRevision, reviewer, decision, notes=""):
         reviewer=reviewer,
         decision=decision,
         notes=notes,
+        review_round=target_round,
     )
+
+    # ========================================================
+    # FLAG FOR RE-REVIEW
+    # ========================================================
+
+    if decision == Review.Decision.FLAG:
+        validate_transition(
+            entry.status,
+            EntryStatus.APPROVED_UNDER_REVIEW,
+            entity_name="DictionaryEntry",
+        )
+        entry.status = EntryStatus.APPROVED_UNDER_REVIEW
+        entry.save(update_fields=["status"])
+        return revision
 
     # ========================================================
     # IMMEDIATE REJECTION
@@ -101,8 +157,13 @@ def submit_review(*, revision: EntryRevision, reviewer, decision, notes=""):
 
     if decision == Review.Decision.REJECT:
 
-        # Re-review rejection (entry exists)
-        if entry and entry.status == EntryStatus.APPROVED_UNDER_REVIEW:
+        # Re-review rejection
+        if is_rereview:
+            validate_transition(
+                entry.status,
+                EntryStatus.REJECTED,
+                entity_name="DictionaryEntry",
+            )
             entry.status = EntryStatus.REJECTED
             entry.save(update_fields=["status"])
             return revision
@@ -120,6 +181,10 @@ def submit_review(*, revision: EntryRevision, reviewer, decision, notes=""):
         revision=revision,
         decision=Review.Decision.APPROVE,
     )
+
+    if is_rereview:
+        if latest_flag:
+            approvals = approvals.filter(review_round=latest_flag.review_round)
 
     reviewer_ids = set()
     admin_ids = set()
@@ -142,7 +207,12 @@ def submit_review(*, revision: EntryRevision, reviewer, decision, notes=""):
     # RE-REVIEW APPROVAL
     # ========================================================
 
-    if entry and entry.status == EntryStatus.APPROVED_UNDER_REVIEW:
+    if is_rereview:
+        validate_transition(
+            entry.status,
+            EntryStatus.APPROVED,
+            entity_name="DictionaryEntry",
+        )
         entry.status = EntryStatus.APPROVED
         entry.save(update_fields=["status"])
         return revision
@@ -168,5 +238,6 @@ def submit_review(*, revision: EntryRevision, reviewer, decision, notes=""):
         revision=revision,
         approvers=approvers,
     )
+    finalize_approved_revision(revision=revision)
 
     return revision

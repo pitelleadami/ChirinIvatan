@@ -24,7 +24,7 @@ def validate_transition(
     to_status: str,
     *,
     allow_same=False,
-    entity_name="Entry",
+    entity_name="FolkloreEntry",
 ) -> None:
     if can_transition(from_status, to_status, allow_same=allow_same):
         return
