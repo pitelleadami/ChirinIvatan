@@ -15,6 +15,7 @@ class EntryStatus(models.TextChoices):
     APPROVED_UNDER_REVIEW = "approved_under_review", "Approved (Under Review)"
     REJECTED = "rejected", "Rejected"
     ARCHIVED = "archived", "Archived"
+    DELETED = "deleted", "Deleted"
 
 
 # ============================================
@@ -210,6 +211,7 @@ class EntryRevision(models.Model):
     )
 
     reviewer_notes = models.TextField(blank=True)
+    is_base_snapshot = models.BooleanField(default=False)
 
     created_at = models.DateTimeField(auto_now_add=True)
     approved_at = models.DateTimeField(null=True, blank=True)

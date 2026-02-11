@@ -33,11 +33,17 @@ class Review(models.Model):
     )
 
     notes = models.TextField(blank=True)
+    review_round = models.PositiveIntegerField(default=0)
 
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        unique_together = ("revision", "reviewer")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("revision", "reviewer", "review_round"),
+                name="uniq_review_reviewer_per_round",
+            ),
+        ]
         ordering = ["created_at"]
 
     def __str__(self):
