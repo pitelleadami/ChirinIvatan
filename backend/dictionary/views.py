@@ -1,3 +1,9 @@
-from django.shortcuts import render
+# dictionary/views.py
+# TEMPORARY STUB
+# Views will be reimplemented after core models stabilize.
 
-# Create your views here.
+from django.http import HttpResponse
+
+
+def public_dictionary(request):
+    return HttpResponse("Public dictionary view – coming soon.")

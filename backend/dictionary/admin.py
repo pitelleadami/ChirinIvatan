@@ -1,152 +1,180 @@
-from django.contrib import admin
-from .models import DictionaryEntry, AudioPronunciation, DictionaryRevision
+from django.contrib import admin, messages
+from django.core.exceptions import ValidationError
+
+from dictionary.models import Entry, EntryRevision
 from reviews.models import Review
+from reviews.services import submit_review
 
 
 # =========================
-# VARIANT INLINE
+# ENTRY (READ-ONLY)
 # =========================
-class VariantInline(admin.TabularInline):
-    model = DictionaryEntry
-    fk_name = 'parent_term'
-    extra = 0
-    verbose_name = "Variant"
-    verbose_name_plural = "Variants"
 
-    def get_formset(self, request, obj=None, **kwargs):
-        formset = super().get_formset(request, obj, **kwargs)
-        # Prevent creating GENERAL inside variants
-        formset.form.base_fields['variant'].choices = [
-            c for c in formset.form.base_fields['variant'].choices
-            if c[0] != DictionaryEntry.Variant.GENERAL
-        ]
-        return formset
-
-
-# =========================
-# DICTIONARY ENTRY ADMIN
-# =========================
-@admin.register(DictionaryEntry)
-class DictionaryEntryAdmin(admin.ModelAdmin):
+@admin.register(Entry)
+class EntryAdmin(admin.ModelAdmin):
     list_display = (
-        'ivatan_term',
-        'variant',
-        'part_of_speech',
-        'status',
-        'contributor',
-        'created_at',
+        "term",
+        "part_of_speech",
+        "initial_contributor",
+        "last_revised_by",
+        "last_approved_at",
     )
 
-    list_filter = ('status', 'variant', 'part_of_speech')
-    search_fields = ('ivatan_term', 'english_meaning')
+    readonly_fields = (
+        "term",
+        "meaning",
+        "part_of_speech",
+        "initial_contributor",
+        "last_revised_by",
+        "last_approved_at",
+        "created_at",
+    )
 
-    readonly_fields = ('created_at', 'updated_at', 'last_revised_by')
+    def has_add_permission(self, request):
+        return False
 
-    actions = ('approve_entries', 'reject_entries')
+    def has_change_permission(self, request, obj=None):
+        return False
 
-    def get_inlines(self, request, obj):
-        # ONLY show variants under GENERAL Ivatan
-        if obj and obj.variant == DictionaryEntry.Variant.GENERAL:
-            return [VariantInline]
-        return []
+    def has_delete_permission(self, request, obj=None):
+        return False
 
-    def get_readonly_fields(self, request, obj=None):
-        ro = list(self.readonly_fields)
-        # Variants cannot redefine meaning or POS
-        if obj and obj.parent_term:
-            ro.extend(['english_meaning', 'part_of_speech'])
-        return ro
+@admin.register(EntryRevision)
+class EntryRevisionAdmin(admin.ModelAdmin):
+    """
+    Admin interface for EntryRevision.
 
-    def approve_entries(self, request, queryset):
-        for entry in queryset.filter(status=DictionaryEntry.Status.PENDING):
-            entry.status = DictionaryEntry.Status.APPROVED
-            entry.save(update_fields=['status'])
-            Review.objects.create(
-                reviewer=request.user,
-                content_type='dictionary_entry',
-                object_id=entry.id,
-                decision='approved',
-                comments='Approved via admin'
-            )
+    EntryRevision does NOT store the term directly.
+    The term lives inside Entry or inside proposed_data (for new submissions).
+    """
 
-    def reject_entries(self, request, queryset):
-        for entry in queryset.filter(status=DictionaryEntry.Status.PENDING):
-            entry.status = DictionaryEntry.Status.REJECTED
-            entry.save(update_fields=['status'])
-            Review.objects.create(
-                reviewer=request.user,
-                content_type='dictionary_entry',
-                object_id=entry.id,
-                decision='rejected',
-                comments='Rejected via admin'
-            )
+    # --------------------------------------------------------
+    # Admin List View
+    # --------------------------------------------------------
 
+    list_display = (
+        "get_term",
+        "status",
+        "contributor",
+        "created_at",
+        "approved_at",
+    )
 
-# =========================
-# AUDIO PRONUNCIATION ADMIN
-# =========================
-@admin.register(AudioPronunciation)
-class AudioPronunciationAdmin(admin.ModelAdmin):
-    list_display = ('dictionary_entry', 'status', 'contributor', 'created_at')
-    list_filter = ('status',)
-    readonly_fields = ('created_at',)
-    actions = ('approve_audio', 'reject_audio')
+    readonly_fields = (
+        "contributor",
+        "created_at",
+        "approved_at",
+    )
 
-    def approve_audio(self, request, queryset):
-        for audio in queryset.filter(status=AudioPronunciation.Status.PENDING):
-            audio.status = AudioPronunciation.Status.APPROVED
-            audio.save(update_fields=['status'])
-            Review.objects.create(
-                reviewer=request.user,
-                content_type='audio_pronunciation',
-                object_id=audio.id,
-                decision='approved',
-                comments='Audio approved'
-            )
+    actions = ["approve_revisions", "reject_revisions"]
 
-    def reject_audio(self, request, queryset):
-        for audio in queryset.filter(status=AudioPronunciation.Status.PENDING):
-            audio.status = AudioPronunciation.Status.REJECTED
-            audio.save(update_fields=['status'])
-            Review.objects.create(
-                reviewer=request.user,
-                content_type='audio_pronunciation',
-                object_id=audio.id,
-                decision='rejected',
-                comments='Audio rejected'
-            )
+    # --------------------------------------------------------
+    # Show term safely
+    # --------------------------------------------------------
 
+    def get_term(self, obj):
+        """
+        If revision is for an existing entry,
+        show the entry term.
 
-# =========================
-# DICTIONARY REVISION ADMIN
-# =========================
-@admin.register(DictionaryRevision)
-class DictionaryRevisionAdmin(admin.ModelAdmin):
-    list_display = ('dictionary_entry', 'revised_by', 'status', 'created_at')
-    list_filter = ('status',)
-    readonly_fields = ('created_at',)
-    actions = ('approve_revisions', 'reject_revisions')
+        If this is a new submission (entry is None),
+        show the proposed term from proposed_data JSON.
+        """
+        if obj.entry:
+            return obj.entry.term
+
+        # For new submissions
+        if obj.proposed_data and "term" in obj.proposed_data:
+            return obj.proposed_data.get("term")
+
+        return "New Submission"
+
+    get_term.short_description = "Term"
+
+    # --------------------------------------------------------
+    # Auto-assign contributor
+    # --------------------------------------------------------
+
+    def save_model(self, request, obj, form, change):
+        """
+        Automatically assign contributor
+        to the logged-in user when creating a revision.
+        """
+        if not change:
+            obj.contributor = request.user
+
+        super().save_model(request, obj, form, change)
+
+    # --------------------------------------------------------
+    # APPROVE ACTION
+    # --------------------------------------------------------
 
     def approve_revisions(self, request, queryset):
-        for rev in queryset.filter(status=DictionaryRevision.Status.PENDING):
-            entry = rev.dictionary_entry
-            for field in [
-                'english_meaning',
-                'example_sentence',
-                'example_translation',
-                'usage_notes',
-                'synonyms',
-                'antonyms',
-                'etymology',
-            ]:
-                val = getattr(rev, field)
-                if val:
-                    setattr(entry, field, val)
+        from reviews.services import submit_review
+        from reviews.models import Review
+        from django.core.exceptions import ValidationError
+        from django.contrib import messages
 
-            entry.last_revised_by = rev.revised_by
-            entry.save()
-            rev.status = DictionaryRevision.Status.APPROVED
-            rev.save()
+        success = 0
+
+        for revision in queryset:
+            try:
+                submit_review(
+                    revision=revision,
+                    reviewer=request.user,
+                    decision=Review.Decision.APPROVE,
+                    notes="Approved via admin",
+                )
+                success += 1
+            except ValidationError as e:
+                self.message_user(
+                    request,
+                    f"{revision.id}: {e.messages[0]}",
+                    messages.ERROR,
+                )
+
+        if success:
+            self.message_user(
+                request,
+                f"{success} revision(s) processed for approval.",
+                messages.SUCCESS,
+            )
+
+    approve_revisions.short_description = "Approve selected revisions"
+
+    # --------------------------------------------------------
+    # REJECT ACTION
+    # --------------------------------------------------------
 
     def reject_revisions(self, request, queryset):
-        queryset.update(status=DictionaryRevision.Status.REJECTED)
+        from reviews.services import submit_review
+        from reviews.models import Review
+        from django.core.exceptions import ValidationError
+        from django.contrib import messages
+
+        success = 0
+
+        for revision in queryset:
+            try:
+                submit_review(
+                    revision=revision,
+                    reviewer=request.user,
+                    decision=Review.Decision.REJECT,
+                    notes="Rejected via admin",
+                )
+                success += 1
+            except ValidationError as e:
+                self.message_user(
+                    request,
+                    f"{revision.id}: {e.messages[0]}",
+                    messages.ERROR,
+                )
+
+        if success:
+            self.message_user(
+                request,
+                f"{success} revision(s) rejected.",
+                messages.WARNING,
+            )
+
+    reject_revisions.short_description = "Reject selected revisions"
