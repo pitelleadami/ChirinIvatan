@@ -4,6 +4,7 @@ from django.test import TestCase
 
 from folklore.models import FolkloreEntry
 from folklore.services import transition_folklore_status
+from users.models import ContributionEvent
 
 
 User = get_user_model()
@@ -85,3 +86,59 @@ class FolkloreEntryModelTests(TestCase):
         )
         entry.refresh_from_db()
         self.assertEqual(entry.status, FolkloreEntry.Status.PENDING)
+
+    def test_approval_transition_awards_folklore_contribution(self):
+        entry = FolkloreEntry.objects.create(
+            title="Ariw",
+            content="Sample text",
+            category=FolkloreEntry.Category.PROVERB,
+            source="Oral account",
+            contributor=self.contributor,
+            status=FolkloreEntry.Status.PENDING,
+        )
+
+        transition_folklore_status(
+            entry=entry,
+            to_status=FolkloreEntry.Status.APPROVED,
+        )
+
+        self.assertEqual(
+            ContributionEvent.objects.filter(
+                user=self.contributor,
+                folklore_entry=entry,
+                contribution_type=ContributionEvent.Type.FOLKLORE_ENTRY,
+            ).count(),
+            1,
+        )
+
+    def test_reapproval_does_not_duplicate_folklore_contribution(self):
+        entry = FolkloreEntry.objects.create(
+            title="Ariw",
+            content="Sample text",
+            category=FolkloreEntry.Category.PROVERB,
+            source="Oral account",
+            contributor=self.contributor,
+            status=FolkloreEntry.Status.PENDING,
+        )
+
+        transition_folklore_status(
+            entry=entry,
+            to_status=FolkloreEntry.Status.APPROVED,
+        )
+        transition_folklore_status(
+            entry=entry,
+            to_status=FolkloreEntry.Status.APPROVED_UNDER_REVIEW,
+        )
+        transition_folklore_status(
+            entry=entry,
+            to_status=FolkloreEntry.Status.APPROVED,
+        )
+
+        self.assertEqual(
+            ContributionEvent.objects.filter(
+                user=self.contributor,
+                folklore_entry=entry,
+                contribution_type=ContributionEvent.Type.FOLKLORE_ENTRY,
+            ).count(),
+            1,
+        )

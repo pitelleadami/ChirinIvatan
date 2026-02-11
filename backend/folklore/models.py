@@ -54,6 +54,18 @@ class FolkloreEntry(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     def save(self, *args, **kwargs):
+        update_fields = kwargs.get("update_fields")
+
+        if (
+            self.status == self.Status.APPROVED
+            and not self.copyright_usage.strip()
+        ):
+            self.copyright_usage = self.DEFAULT_LICENSE
+            # If caller used update_fields, make sure auto-default license
+            # is actually persisted with the same save call.
+            if update_fields is not None and "copyright_usage" not in update_fields:
+                kwargs["update_fields"] = list(update_fields) + ["copyright_usage"]
+
         # Lock license once an entry has been approved. A license change
         # should happen through a new revision snapshot lifecycle.
         if self.pk:
@@ -66,12 +78,6 @@ class FolkloreEntry(models.Model):
                 raise ValidationError(
                     "Copyright/license is immutable after approval."
                 )
-
-        if (
-            self.status == self.Status.APPROVED
-            and not self.copyright_usage.strip()
-        ):
-            self.copyright_usage = self.DEFAULT_LICENSE
 
         super().save(*args, **kwargs)
 

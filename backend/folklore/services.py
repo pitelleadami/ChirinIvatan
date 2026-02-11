@@ -2,6 +2,7 @@ from django.db import transaction
 
 from folklore.models import FolkloreEntry
 from folklore.state_machine import validate_transition
+from users.contributions import award_folklore_entry
 
 
 @transaction.atomic
@@ -20,4 +21,13 @@ def transition_folklore_status(*, entry: FolkloreEntry, to_status: str) -> Folkl
     )
     entry.status = to_status
     entry.save(update_fields=["status"])
+
+    # Historical leaderboard rule:
+    # approved folklore contribution remains counted permanently.
+    if to_status == FolkloreEntry.Status.APPROVED:
+        award_folklore_entry(
+            user=entry.contributor,
+            entry=entry,
+        )
+
     return entry

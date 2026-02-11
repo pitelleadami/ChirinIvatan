@@ -20,6 +20,7 @@ from .models import Review
 from dictionary.models import EntryRevision, EntryStatus
 from dictionary.services import finalize_approved_revision, publish_revision
 from dictionary.state_machine import validate_transition
+from users.contributions import award_dictionary_term, award_revision
 
 User = get_user_model()
 
@@ -221,6 +222,7 @@ def submit_review(*, revision: EntryRevision, reviewer, decision, notes=""):
     # NORMAL APPROVAL (FIRST PUBLISH OR UPDATE)
     # ========================================================
 
+    was_new_submission = revision.entry is None
     revision.status = EntryRevision.Status.APPROVED
     revision.approved_at = timezone.now()
     revision.save(update_fields=["status", "approved_at"])
@@ -239,5 +241,20 @@ def submit_review(*, revision: EntryRevision, reviewer, decision, notes=""):
         approvers=approvers,
     )
     finalize_approved_revision(revision=revision)
+
+    # Contribution counters are historical and never decremented.
+    # We only award at approval time.
+    if was_new_submission and revision.entry and revision.entry.is_mother:
+        award_dictionary_term(
+            user=revision.contributor,
+            entry=revision.entry,
+            revision=revision,
+        )
+    elif revision.entry:
+        award_revision(
+            user=revision.contributor,
+            entry=revision.entry,
+            revision=revision,
+        )
 
     return revision
