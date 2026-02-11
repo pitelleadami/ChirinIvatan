@@ -26,6 +26,11 @@ ENTRY_SNAPSHOT_FIELDS = (
     "inflected_forms",
 )
 
+REVISION_HISTORY_LIMITS = {
+    "public": 5,
+    "staff": 15,  # reviewers/admins
+}
+
 
 def _snapshot_entry(entry: Entry) -> dict:
     """
@@ -40,6 +45,43 @@ def _snapshot_entry(entry: Entry) -> dict:
         else:
             snapshot[field] = value
     return snapshot
+
+
+def get_visible_revision_history(*, entry: Entry, audience: str = "public") -> dict:
+    """
+    Return role-scoped approved revision history.
+
+    Spec quote:
+    Public sees "Original approved version + last 5 approved revisions".
+    Reviewer/Admin sees "Original approved version + last 15 approved revisions".
+    """
+
+    if audience not in REVISION_HISTORY_LIMITS:
+        raise ValueError(f"Unknown audience '{audience}'.")
+
+    base_snapshot = (
+        EntryRevision.objects.filter(
+            entry=entry,
+            status=EntryRevision.Status.APPROVED,
+            is_base_snapshot=True,
+        )
+        .order_by("approved_at", "created_at")
+        .first()
+    )
+
+    recent_approved = list(
+        EntryRevision.objects.filter(
+            entry=entry,
+            status=EntryRevision.Status.APPROVED,
+            is_base_snapshot=False,
+        )
+        .order_by("-approved_at", "-created_at")[: REVISION_HISTORY_LIMITS[audience]]
+    )
+
+    return {
+        "base_snapshot": base_snapshot,
+        "recent_approved_revisions": recent_approved,
+    }
 
 
 def _enforce_approved_revision_retention(entry: Entry) -> None:
@@ -122,6 +164,9 @@ def publish_revision(*, revision, approvers):
             "initial_contributor": revision.contributor,
             "last_revised_by": revision.contributor,
             "last_approved_at": timezone.now(),
+            # First approved term starts as the authoritative mother term
+            # until grouped/promotion logic says otherwise.
+            "is_mother": True,
         }
 
         for field in ENTRY_SNAPSHOT_FIELDS:
