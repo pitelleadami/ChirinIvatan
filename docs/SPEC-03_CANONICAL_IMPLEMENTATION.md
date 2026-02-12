@@ -135,3 +135,20 @@ Role visibility:
 - For leaderboard behavior, use historical-count rule (archived/deleted still counted) from locked clarification.
 - Auto-archive applies to `REJECTED` inactivity flow as defined in locked state transitions.
 
+## 13. Folklore Revision API Contract
+
+- Folklore contributor workflow is revision-first:
+  - Create draft revision
+  - Edit draft revision
+  - Submit draft revision to pending
+- Reviewer folklore decisions are revision-scoped.
+- `POST /api/reviews/folklore/submit` accepts:
+  - `revision_id` (canonical)
+  - `entry_id` (compatibility fallback for legacy records without revision rows)
+- Reviewer dashboard folklore queues are revision-based and include `revision_id`.
+- Canonical contributor endpoints:
+  - `GET /api/folklore/revisions/my`
+  - `POST /api/folklore/revisions/create`
+  - `PATCH /api/folklore/revisions/<revision_id>`
+  - `POST /api/folklore/revisions/<revision_id>/submit`
+- Legacy contributor aliases remain supported for compatibility under `/api/folklore/entries/...`.

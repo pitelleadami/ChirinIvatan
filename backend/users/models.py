@@ -60,6 +60,13 @@ class ContributionEvent(models.Model):
         blank=True,
         related_name="contribution_events",
     )
+    folklore_revision = models.ForeignKey(
+        "folklore.FolkloreRevision",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="contribution_events",
+    )
 
     awarded_at = models.DateTimeField(auto_now_add=True)
 
@@ -69,6 +76,11 @@ class ContributionEvent(models.Model):
                 fields=("user", "dictionary_entry", "contribution_type"),
                 condition=models.Q(contribution_type="revision"),
                 name="uniq_revision_credit_per_user_entry",
+            ),
+            models.UniqueConstraint(
+                fields=("user", "folklore_entry", "contribution_type"),
+                condition=models.Q(contribution_type="revision"),
+                name="uniq_revision_credit_per_user_folklore_entry",
             ),
             models.UniqueConstraint(
                 fields=("user", "dictionary_entry", "contribution_type"),

@@ -2,6 +2,7 @@ from django.db import transaction
 from django.utils import timezone
 from dictionary.models import Entry, EntryRevision, EntryStatus
 from dictionary.state_machine import validate_transition
+from dictionary.variant_services import ensure_group_and_mother, maybe_promote_general_ivatan
 
 
 ENTRY_SNAPSHOT_FIELDS = (
@@ -10,6 +11,7 @@ ENTRY_SNAPSHOT_FIELDS = (
     "part_of_speech",
     "photo",
     "photo_source",
+    "photo_source_is_contributor_owned",
     "english_synonym",
     "ivatan_synonym",
     "english_antonym",
@@ -17,12 +19,14 @@ ENTRY_SNAPSHOT_FIELDS = (
     "pronunciation_text",
     "audio_pronunciation",
     "audio_source",
+    "audio_source_is_self_recorded",
     "variant_type",
     "usage_notes",
     "etymology",
     "example_sentence",
     "example_translation",
     "source_text",
+    "term_source_is_self_knowledge",
     "inflected_forms",
 )
 
@@ -175,6 +179,14 @@ def publish_revision(*, revision, approvers):
             if field in data:
                 create_kwargs[field] = data[field]
 
+        # Active media contributor attribution:
+        # when media is present in this approved submission, the revision
+        # contributor becomes the visible media contributor.
+        if data.get("audio_pronunciation"):
+            create_kwargs["audio_contributor"] = revision.contributor
+        if data.get("photo"):
+            create_kwargs["photo_contributor"] = revision.contributor
+
         entry = Entry.objects.create(**create_kwargs)
 
         revision.entry = entry
@@ -186,6 +198,8 @@ def publish_revision(*, revision, approvers):
 
     else:
         entry = revision.entry
+        old_audio = entry.audio_pronunciation.name if entry.audio_pronunciation else ""
+        old_photo = entry.photo.name if entry.photo else ""
         validate_transition(
             entry.status,
             EntryStatus.APPROVED,
@@ -206,6 +220,19 @@ def publish_revision(*, revision, approvers):
                 setattr(entry, field, data[field])
                 update_fields.append(field)
 
+        # If active media changed in this approved revision, update
+        # the media contributor attribution to the revising user.
+        if "audio_pronunciation" in data:
+            new_audio = entry.audio_pronunciation.name if entry.audio_pronunciation else ""
+            if new_audio != old_audio:
+                entry.audio_contributor = revision.contributor
+                update_fields.append("audio_contributor")
+        if "photo" in data:
+            new_photo = entry.photo.name if entry.photo else ""
+            if new_photo != old_photo:
+                entry.photo_contributor = revision.contributor
+                update_fields.append("photo_contributor")
+
         entry.save(update_fields=update_fields)
 
     # -------------------------------------------------------
@@ -213,6 +240,8 @@ def publish_revision(*, revision, approvers):
     # -------------------------------------------------------
 
     entry.last_approved_by.set(approvers)
+    ensure_group_and_mother(entry=entry)
+    maybe_promote_general_ivatan(entry=entry)
 
     return entry
 

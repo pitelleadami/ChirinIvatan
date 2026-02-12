@@ -79,6 +79,7 @@ class Entry(models.Model):
 
     photo = models.ImageField(upload_to="dictionary/photos/", null=True, blank=True)
     photo_source = models.TextField(blank=True)
+    photo_source_is_contributor_owned = models.BooleanField(default=False)
 
     english_synonym = models.CharField(max_length=255, blank=True)
     ivatan_synonym = models.CharField(max_length=255, blank=True)
@@ -100,6 +101,7 @@ class Entry(models.Model):
     )
 
     audio_source = models.TextField(blank=True)
+    audio_source_is_self_recorded = models.BooleanField(default=False)
 
     variant_type = models.CharField(max_length=100, blank=True)
 
@@ -110,8 +112,24 @@ class Entry(models.Model):
     example_translation = models.TextField(blank=True)
 
     source_text = models.TextField(blank=True)
+    term_source_is_self_knowledge = models.BooleanField(default=False)
 
     inflected_forms = models.JSONField(default=dict, blank=True)
+
+    audio_contributor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="audio_contributed_entries",
+        null=True,
+        blank=True,
+    )
+    photo_contributor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="photo_contributed_entries",
+        null=True,
+        blank=True,
+    )
 
     # -------------------------------
     # GOVERNANCE FIELDS
@@ -160,9 +178,12 @@ class Entry(models.Model):
         self.last_approved_by.set(approvers)
 
     def archive(self):
+        from dictionary.variant_services import handle_mother_removed_or_archived
+
         self.status = EntryStatus.ARCHIVED
         self.archived_at = timezone.now()
         self.save(update_fields=["status", "archived_at"])
+        handle_mother_removed_or_archived(entry=self, removed=False)
 
     def __str__(self):
         return self.term
