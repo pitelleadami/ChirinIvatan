@@ -49,6 +49,7 @@ class FolkloreEntry(models.Model):
         choices=Status.choices,
         default=Status.DRAFT
     )
+    archived_at = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -83,3 +84,53 @@ class FolkloreEntry(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class FolkloreRevision(models.Model):
+    """
+    Submission/revision object for folklore content.
+    """
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        PENDING = "pending", "Pending"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    entry = models.ForeignKey(
+        FolkloreEntry,
+        on_delete=models.CASCADE,
+        related_name="revisions",
+        null=True,
+        blank=True,
+    )
+
+    contributor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="folklore_revisions",
+    )
+
+    proposed_data = models.JSONField(
+        help_text="Full proposed snapshot of folklore entry fields."
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.DRAFT,
+    )
+
+    reviewer_notes = models.TextField(blank=True)
+    is_base_snapshot = models.BooleanField(default=False)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    approved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["created_at"]
+
+    def __str__(self):
+        return f"{self.id} ({self.status})"

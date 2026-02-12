@@ -30,17 +30,30 @@ def award_folklore_entry(*, user, entry):
     )
 
 
-def award_revision(*, user, entry, revision=None):
+def award_revision(*, user, entry=None, folklore_entry=None, revision=None, folklore_revision=None):
     """
     Locked rule:
     "Revisions are counted once per entry per contributor lifetime."
     """
 
+    if entry and folklore_entry:
+        raise ValueError("Provide either dictionary entry or folklore entry, not both.")
+    if not entry and not folklore_entry:
+        raise ValueError("A revision award requires a dictionary or folklore entry.")
+
+    if entry:
+        return ContributionEvent.objects.get_or_create(
+            user=user,
+            dictionary_entry=entry,
+            contribution_type=ContributionEvent.Type.REVISION,
+            defaults={"entry_revision": revision},
+        )
+
     return ContributionEvent.objects.get_or_create(
         user=user,
-        dictionary_entry=entry,
+        folklore_entry=folklore_entry,
         contribution_type=ContributionEvent.Type.REVISION,
-        defaults={"entry_revision": revision},
+        defaults={"folklore_revision": folklore_revision},
     )
 
 

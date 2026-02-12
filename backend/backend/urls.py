@@ -13,6 +13,8 @@ urlpatterns = [
     path('', public_dictionary, name='public_dictionary'),
     path("", include("users.urls")),
     path("", include("dictionary.urls")),
+    path("", include("folklore.urls")),
+    path("", include("reviews.urls")),
     path('admin/', admin.site.urls),
 ]
 
