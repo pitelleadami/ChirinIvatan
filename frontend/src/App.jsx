@@ -1,35 +1,68 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
+import { useEffect, useState } from 'react'
 import './App.css'
 
-function App() {
-  const [count, setCount] = useState(0)
+import HomePage from './pages/HomePage'
+import ReviewerDashboardPage from './pages/ReviewerDashboardPage'
+import DictionaryViewerPage from './pages/DictionaryViewerPage'
+import FolkloreViewerPage from './pages/FolkloreViewerPage'
+import FolkloreDraftBuilderPage from './pages/FolkloreDraftBuilderPage'
+import { ROUTES, navigate, normalizePath } from './lib/router'
+
+export default function App() {
+  const [pathname, setPathname] = useState(normalizePath(window.location.pathname))
+
+  useEffect(() => {
+    const onPopState = () => setPathname(normalizePath(window.location.pathname))
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [])
 
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.jsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
+    <main className="app-shell">
+      <header className="app-header">
+        <h1>Chirin Ivatan Console</h1>
+        <nav className="nav">
+          <button
+            className={pathname === ROUTES.home ? 'tab active' : 'tab'}
+            onClick={() => navigate(ROUTES.home)}
+          >
+            Home
+          </button>
+          <button
+            className={pathname === ROUTES.dashboard ? 'tab active' : 'tab'}
+            onClick={() => navigate(ROUTES.dashboard)}
+          >
+            Reviewer Dashboard
+          </button>
+          <button
+            className={pathname === ROUTES.dictionaryView ? 'tab active' : 'tab'}
+            onClick={() => navigate(ROUTES.dictionaryView)}
+          >
+            Dictionary Viewer
+          </button>
+          <button
+            className={pathname === ROUTES.folkloreView ? 'tab active' : 'tab'}
+            onClick={() => navigate(ROUTES.folkloreView)}
+          >
+            Folklore Viewer
+          </button>
+          <button
+            className={pathname === ROUTES.folkloreDraft ? 'tab active' : 'tab'}
+            onClick={() => navigate(ROUTES.folkloreDraft)}
+          >
+            Folklore Draft Builder
+          </button>
+          <a className="tab link" href="/admin/" target="_blank" rel="noreferrer">
+            Admin Login
+          </a>
+        </nav>
+      </header>
+
+      {pathname === ROUTES.home && <HomePage />}
+      {pathname === ROUTES.dashboard && <ReviewerDashboardPage />}
+      {pathname === ROUTES.dictionaryView && <DictionaryViewerPage />}
+      {pathname === ROUTES.folkloreView && <FolkloreViewerPage />}
+      {pathname === ROUTES.folkloreDraft && <FolkloreDraftBuilderPage />}
+    </main>
   )
 }
-
-export default App

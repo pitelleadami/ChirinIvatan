@@ -297,8 +297,10 @@ class ReviewerDashboardApiTests(TestCase):
 
         self.assertIn("pending_submissions", payload["dictionary"])
         self.assertIn("pending_rereview", payload["dictionary"])
+        self.assertIn("published_entries", payload["dictionary"])
         self.assertIn("pending_submissions", payload["folklore"])
         self.assertIn("pending_rereview", payload["folklore"])
+        self.assertIn("published_entries", payload["folklore"])
         self.assertIn("my_reviews", payload["reviews"])
         self.assertIn("awaiting_quorum_after_my_approval", payload["reviews"])
 
@@ -307,6 +309,8 @@ class ReviewerDashboardApiTests(TestCase):
         self.assertIn("pending_folklore_submissions", payload)
         self.assertIn("pending_rereview", payload)
         self.assertIn("pending_folklore_rereview", payload)
+        self.assertIn("published_entries", payload)
+        self.assertIn("published_folklore_entries", payload)
         self.assertIn("my_reviews", payload)
         self.assertIn("awaiting_quorum_after_my_approval", payload)
 
@@ -314,6 +318,56 @@ class ReviewerDashboardApiTests(TestCase):
             item["revision_id"] for item in payload["dictionary"]["pending_submissions"]
         }
         self.assertIn(str(rev.id), pending_ids)
+
+    def test_dashboard_includes_latest_approved_entries_for_flagging(self):
+        dictionary_entry = Entry.objects.create(
+            term="published-term",
+            status=EntryStatus.APPROVED,
+            initial_contributor=self.contributor,
+            last_revised_by=self.contributor,
+        )
+        dictionary_revision = EntryRevision.objects.create(
+            entry=dictionary_entry,
+            contributor=self.contributor,
+            proposed_data={"term": "published-term"},
+            status=EntryRevision.Status.APPROVED,
+        )
+
+        folklore_entry = FolkloreEntry.objects.create(
+            title="Published folklore",
+            content="Body",
+            category=FolkloreEntry.Category.MYTH,
+            municipality_source=FolkloreEntry.MunicipalitySource.BASCO,
+            source="Oral source",
+            contributor=self.contributor,
+            status=FolkloreEntry.Status.APPROVED,
+        )
+        folklore_revision = FolkloreRevision.objects.create(
+            entry=folklore_entry,
+            contributor=self.contributor,
+            proposed_data={
+                "title": "Published folklore",
+                "category": FolkloreEntry.Category.MYTH,
+            },
+            status=FolkloreRevision.Status.APPROVED,
+        )
+
+        self.client.force_login(self.reviewer1)
+        response = self.client.get("/api/reviews/dashboard")
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+
+        dictionary_ids = {
+            item["revision_id"]
+            for item in payload["dictionary"]["published_entries"]
+        }
+        folklore_ids = {
+            item["revision_id"]
+            for item in payload["folklore"]["published_entries"]
+        }
+
+        self.assertIn(str(dictionary_revision.id), dictionary_ids)
+        self.assertIn(str(folklore_revision.id), folklore_ids)
 
     def test_dictionary_submit_endpoint_flags_entry_under_review(self):
         entry = Entry.objects.create(

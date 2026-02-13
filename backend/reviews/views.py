@@ -67,6 +67,20 @@ def _serialize_pending_revision(revision: EntryRevision):
     }
 
 
+def _serialize_published_revision(revision: EntryRevision):
+    proposed_term = (revision.proposed_data or {}).get("term", "")
+    return {
+        "revision_id": str(revision.id),
+        "entry_id": str(revision.entry_id) if revision.entry_id else None,
+        "term": proposed_term,
+        "contributor_username": revision.contributor.username,
+        "created_at": revision.created_at.isoformat(),
+        "approved_at": revision.approved_at.isoformat() if revision.approved_at else None,
+        "status": revision.status,
+        "entry_status": revision.entry.status if revision.entry else None,
+    }
+
+
 def _serialize_pending_folklore(revision: FolkloreRevision):
     proposed_data = revision.proposed_data or {}
     return {
@@ -77,6 +91,21 @@ def _serialize_pending_folklore(revision: FolkloreRevision):
         "contributor_username": revision.contributor.username,
         "created_at": revision.created_at.isoformat(),
         "status": revision.status,
+    }
+
+
+def _serialize_published_folklore(revision: FolkloreRevision):
+    proposed_data = revision.proposed_data or {}
+    return {
+        "revision_id": str(revision.id),
+        "entry_id": str(revision.entry_id) if revision.entry_id else None,
+        "title": proposed_data.get("title", ""),
+        "category": proposed_data.get("category", ""),
+        "contributor_username": revision.contributor.username,
+        "created_at": revision.created_at.isoformat(),
+        "approved_at": revision.approved_at.isoformat() if revision.approved_at else None,
+        "status": revision.status,
+        "entry_status": revision.entry.status if revision.entry else None,
     }
 
 
@@ -108,6 +137,59 @@ def _serialize_review(review: Review):
         "created_at": review.created_at.isoformat(),
         "final_outcome": final_outcome,
     }
+
+def _latest_approved_dictionary_revisions(*, user):
+    """
+    Return one approved revision per approved dictionary entry.
+    Includes only entries currently in APPROVED state (flaggable).
+    """
+    revisions = (
+        EntryRevision.objects.filter(
+            status=EntryRevision.Status.APPROVED,
+            entry__status=EntryStatus.APPROVED,
+        )
+        .select_related("contributor", "entry")
+        .order_by("-approved_at", "-created_at")
+    )
+
+    latest_by_entry = {}
+    for revision in revisions:
+        if revision.entry_id and revision.entry_id not in latest_by_entry:
+            latest_by_entry[revision.entry_id] = revision
+
+    rows = []
+    for revision in latest_by_entry.values():
+        if revision.contributor_id == user.id:
+            continue
+        rows.append(_serialize_published_revision(revision))
+    return rows
+
+
+def _latest_approved_folklore_revisions(*, user):
+    """
+    Return one approved revision per approved folklore entry.
+    Includes only entries currently in APPROVED state (flaggable).
+    """
+    revisions = (
+        FolkloreRevision.objects.filter(
+            status=FolkloreRevision.Status.APPROVED,
+            entry__status=FolkloreEntry.Status.APPROVED,
+        )
+        .select_related("contributor", "entry")
+        .order_by("-approved_at", "-created_at")
+    )
+
+    latest_by_entry = {}
+    for revision in revisions:
+        if revision.entry_id and revision.entry_id not in latest_by_entry:
+            latest_by_entry[revision.entry_id] = revision
+
+    rows = []
+    for revision in latest_by_entry.values():
+        if revision.contributor_id == user.id:
+            continue
+        rows.append(_serialize_published_folklore(revision))
+    return rows
 
 
 @require_GET
@@ -197,6 +279,10 @@ def reviewer_dashboard_view(request):
         item["review_round"] = current_round
         pending_folklore_rereview.append(item)
 
+    # 2b) Published approved entries eligible to be flagged.
+    dictionary_published = _latest_approved_dictionary_revisions(user=user)
+    folklore_published = _latest_approved_folklore_revisions(user=user)
+
     # 3) My reviews + outcomes
     my_reviews_qs = Review.objects.filter(reviewer=user).select_related(
         "revision",
@@ -256,10 +342,12 @@ def reviewer_dashboard_view(request):
             "dictionary": {
                 "pending_submissions": pending_initial,
                 "pending_rereview": pending_rereview,
+                "published_entries": dictionary_published,
             },
             "folklore": {
                 "pending_submissions": pending_folklore,
                 "pending_rereview": pending_folklore_rereview,
+                "published_entries": folklore_published,
             },
             "reviews": {
                 "my_reviews": my_reviews,
@@ -270,6 +358,8 @@ def reviewer_dashboard_view(request):
             "pending_folklore_submissions": pending_folklore,
             "pending_rereview": pending_rereview,
             "pending_folklore_rereview": pending_folklore_rereview,
+            "published_entries": dictionary_published,
+            "published_folklore_entries": folklore_published,
             "my_reviews": my_reviews,
             "awaiting_quorum_after_my_approval": awaiting_quorum,
         }
