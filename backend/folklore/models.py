@@ -24,16 +24,31 @@ class FolkloreEntry(models.Model):
         PROVERB = 'proverb', 'Proverb'
         IDIOM = 'idiom', 'Idiom'
 
+    class MunicipalitySource(models.TextChoices):
+        BASCO = "Basco", "Basco"
+        MAHATAO = "Mahatao", "Mahatao"
+        IVANA = "Ivana", "Ivana"
+        UYUGAN = "Uyugan", "Uyugan"
+        SABTANG = "Sabtang", "Sabtang"
+        ITBAYAT = "Itbayat", "Itbayat"
+        NOT_APPLICABLE = "Not Applicable", "Not Applicable"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     title = models.CharField(max_length=255)
     content = models.TextField()
     category = models.CharField(max_length=20, choices=Category.choices)
-    municipality_source = models.CharField(max_length=255, blank=True, default="")
+    municipality_source = models.CharField(
+        max_length=32,
+        choices=MunicipalitySource.choices,
+        default=MunicipalitySource.NOT_APPLICABLE,
+    )
 
-    source = models.TextField()
+    source = models.TextField(blank=True, default="")
     self_knowledge = models.BooleanField(default=False)
     media_url = models.URLField(blank=True)
+    photo_upload = models.ImageField(upload_to="folklore/photos/", null=True, blank=True)
+    audio_upload = models.FileField(upload_to="folklore/audio/", null=True, blank=True)
     media_source = models.TextField(blank=True, default="")
     self_produced_media = models.BooleanField(default=False)
     copyright_usage = models.CharField(max_length=255, blank=True, default="")
@@ -56,6 +71,7 @@ class FolkloreEntry(models.Model):
 
     def save(self, *args, **kwargs):
         update_fields = kwargs.get("update_fields")
+        self.clean()
 
         if (
             self.status == self.Status.APPROVED
@@ -81,6 +97,20 @@ class FolkloreEntry(models.Model):
                 )
 
         super().save(*args, **kwargs)
+
+    def clean(self):
+        valid_municipalities = {choice for choice, _ in self.MunicipalitySource.choices}
+        if self.municipality_source not in valid_municipalities:
+            raise ValidationError("Invalid municipality_source value.")
+
+        if not self.self_knowledge and not self.source.strip():
+            raise ValidationError("Source is required unless marked as self-knowledge.")
+
+        has_media = bool(self.media_url.strip() or self.photo_upload or self.audio_upload)
+        if has_media and not self.self_produced_media and not self.media_source.strip():
+            raise ValidationError(
+                "Media source is required unless marked as self-produced."
+            )
 
     def __str__(self):
         return self.title
@@ -116,6 +146,8 @@ class FolkloreRevision(models.Model):
     proposed_data = models.JSONField(
         help_text="Full proposed snapshot of folklore entry fields."
     )
+    photo_upload = models.ImageField(upload_to="folklore/photos/", null=True, blank=True)
+    audio_upload = models.FileField(upload_to="folklore/audio/", null=True, blank=True)
 
     status = models.CharField(
         max_length=20,

@@ -3,6 +3,7 @@ from django.urls import path
 from reviews.views import (
     admin_override_view,
     reviewer_dashboard_view,
+    submit_dictionary_review_view,
     submit_folklore_review_view,
 )
 
@@ -10,6 +11,11 @@ from reviews.views import (
 urlpatterns = [
     path("api/reviews/dashboard", reviewer_dashboard_view, name="reviewer_dashboard"),
     path("api/reviews/admin/override", admin_override_view, name="admin_override"),
+    path(
+        "api/reviews/dictionary/submit",
+        submit_dictionary_review_view,
+        name="submit_dictionary_review",
+    ),
     path(
         "api/reviews/folklore/submit",
         submit_folklore_review_view,
