@@ -284,6 +284,84 @@ class ReviewerDashboardApiTests(TestCase):
         }
         self.assertIn(str(rev.id), awaiting_ids)
 
+    def test_dashboard_returns_grouped_sections_with_legacy_keys(self):
+        rev = self._pending_revision(contributor=self.contributor, term="grouped")
+        self.client.force_login(self.reviewer1)
+        response = self.client.get("/api/reviews/dashboard")
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+
+        self.assertIn("dictionary", payload)
+        self.assertIn("folklore", payload)
+        self.assertIn("reviews", payload)
+
+        self.assertIn("pending_submissions", payload["dictionary"])
+        self.assertIn("pending_rereview", payload["dictionary"])
+        self.assertIn("pending_submissions", payload["folklore"])
+        self.assertIn("pending_rereview", payload["folklore"])
+        self.assertIn("my_reviews", payload["reviews"])
+        self.assertIn("awaiting_quorum_after_my_approval", payload["reviews"])
+
+        # Backward compatibility keys remain available.
+        self.assertIn("pending_submissions", payload)
+        self.assertIn("pending_folklore_submissions", payload)
+        self.assertIn("pending_rereview", payload)
+        self.assertIn("pending_folklore_rereview", payload)
+        self.assertIn("my_reviews", payload)
+        self.assertIn("awaiting_quorum_after_my_approval", payload)
+
+        pending_ids = {
+            item["revision_id"] for item in payload["dictionary"]["pending_submissions"]
+        }
+        self.assertIn(str(rev.id), pending_ids)
+
+    def test_dictionary_submit_endpoint_flags_entry_under_review(self):
+        entry = Entry.objects.create(
+            term="api-flag-term",
+            status=EntryStatus.APPROVED,
+            initial_contributor=self.contributor,
+            last_revised_by=self.contributor,
+        )
+        revision = EntryRevision.objects.create(
+            entry=entry,
+            contributor=self.contributor,
+            proposed_data={"term": "api-flag-term"},
+            status=EntryRevision.Status.APPROVED,
+        )
+
+        self.client.force_login(self.reviewer1)
+        response = self.client.post(
+            "/api/reviews/dictionary/submit",
+            data=json.dumps(
+                {
+                    "revision_id": str(revision.id),
+                    "decision": "flag",
+                    "notes": "Flag via API endpoint",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        revision.refresh_from_db()
+        entry.refresh_from_db()
+        self.assertEqual(entry.status, EntryStatus.APPROVED_UNDER_REVIEW)
+
+    def test_dictionary_submit_endpoint_invalid_uuid_returns_400(self):
+        self.client.force_login(self.reviewer1)
+        response = self.client.post(
+            "/api/reviews/dictionary/submit",
+            data=json.dumps(
+                {
+                    "revision_id": "PASTE_REVISION_ID_HERE",
+                    "decision": "flag",
+                    "notes": "invalid id",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Invalid revision_id UUID", response.json()["detail"])
+
 
 class AdminOverrideApiTests(TestCase):
     def setUp(self):
@@ -608,3 +686,19 @@ class FolkloreReviewFlowTests(TestCase):
         revision = FolkloreRevision.objects.get(id=payload["revision_id"])
         self.assertEqual(revision.entry_id, entry.id)
         self.assertEqual(revision.status, FolkloreRevision.Status.PENDING)
+
+    def test_folklore_submit_endpoint_invalid_uuid_returns_400(self):
+        self.client.force_login(self.reviewer1)
+        response = self.client.post(
+            "/api/reviews/folklore/submit",
+            data=json.dumps(
+                {
+                    "revision_id": "PASTE_REVISION_ID_HERE",
+                    "decision": "approve",
+                    "notes": "invalid id",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Invalid revision_id UUID", response.json()["detail"])

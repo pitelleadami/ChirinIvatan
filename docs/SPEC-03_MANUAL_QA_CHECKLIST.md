@@ -1,141 +1,176 @@
-# SPEC-03 Manual QA Checklist
+# SPEC-03 Manual QA Checklist (Site-First)
 
-Purpose: verify end-to-end backend behavior after the SPEC-03 refactor.
+This version is optimized for browser/site QA.  
+Use Postman only if you want extra API-only checks.
 
-Assumptions:
-- Backend runs at `http://127.0.0.1:8000`
-- You have users for roles: contributor, reviewer, admin
-- You can authenticate requests (session or token, depending on your setup)
+Companion execution table:
+- `docs/SPEC-03_QA_EXECUTION_SHEET.md`
+Simple editable worksheet (no table):
+- `docs/SPEC-03_QA_WORKSHEET_EDITABLE.md`
 
-## 1) Baseline Health
+---
+
+## 1) Setup
+
+1. Open backend root:
+   - `cd /Users/admin/Documents/GitHub/ChirinIvatan/backend`
+2. Start server:
+   - `python3 manage.py runserver`
+3. Confirm users exist:
+   - contributor account
+   - reviewer account (`Reviewer` group)
+   - admin account (`Admin` group or superuser)
+4. Keep one browser for user pages and one for `/admin/`.
+
+---
+
+## 2) Baseline Health
 
 1. Run migrations:
    - `python3 manage.py migrate`
-2. Run full tests:
+2. Run tests:
    - `python3 manage.py test users reviews dictionary folklore`
 3. Expected:
-   - No migration pending
-   - Tests pass
+   - no migration errors
+   - tests pass
 
-## 2) Dictionary Approval Flow
+---
 
-1. Create a dictionary draft revision (new term) as contributor.
-2. Submit draft to `PENDING`.
-3. Approve as reviewer #1 (should remain pending).
-4. Approve as reviewer #2 or admin (should publish).
-5. Verify:
-   - Entry visible at `GET /api/dictionary/entries/<entry_id>`
-   - Revision status is `APPROVED`
-   - Entry status is `APPROVED`
+## 3) Browser-Only Access Checks
 
-## 3) Dictionary Re-Review Flow
+1. While logged out, open:
+   - `http://127.0.0.1:8000/api/reviews/dashboard`
+2. Expected:
+   - JSON with `{"detail":"Authentication required."}` and HTTP 401
+3. Log in as reviewer, open same URL.
+4. Expected:
+   - HTTP 200 JSON
+   - keys: `dictionary`, `folklore`, `reviews`
+5. Log in as a non-reviewer/non-admin account and open same URL.
+6. Expected:
+   - HTTP 403 with reviewer/admin access error
 
-1. Flag an approved revision via reviewer.
-2. Verify entry moves to `APPROVED_UNDER_REVIEW`.
-3. Re-review reject once:
-   - Entry should move to `REJECTED`.
-4. Repeat with fresh approved entry:
-   - Flag again
-   - Approve with quorum (2 reviewers or reviewer+admin)
-   - Entry returns to `APPROVED`
+---
 
-## 4) Folklore Contributor Revision Flow (Canonical)
+## 4) Dictionary QA from Site/Admin
 
-1. Create draft revision:
-   - `POST /api/folklore/revisions/create`
-2. List my revisions:
-   - `GET /api/folklore/revisions/my`
-3. Edit draft:
-   - `PATCH /api/folklore/revisions/<revision_id>`
-4. Submit draft:
-   - `POST /api/folklore/revisions/<revision_id>/submit`
-5. Verify:
-   - Revision status transitions `DRAFT -> PENDING`
-   - Required fields (`title/content/category/source`) enforced
+## A. Admin Form Field Exposure
+1. Open admin:
+   - `http://127.0.0.1:8000/admin/`
+2. Go to Dictionary -> Entry revisions -> open a revision.
+3. Expected:
+   - Real fields are visible (not only raw `proposed_data`):
+     - term, meaning, part_of_speech
+     - pronunciation/audio fields
+     - variant/source fields
+     - synonyms/antonyms
+     - inflected_forms
+     - photo fields
 
-## 5) Folklore Review Flow
+## B. Approval/Rejection Actions
+1. In Dictionary -> Entry revisions list, select a `pending` revision.
+2. Run action `Approve selected revisions`.
+3. Expected:
+   - revision transitions to `approved` once quorum is met
+   - entry is published/updated
+4. Select another `pending` revision and run `Reject selected revisions`.
+5. Expected:
+   - revision becomes `rejected`
 
-1. Reviewer approves pending folklore revision once:
-   - Should remain `PENDING`.
-2. Second quorum approval:
-   - Revision becomes `APPROVED`
-   - Entry is created/published and becomes `APPROVED`
-3. Flag approved folklore revision:
-   - Entry becomes `APPROVED_UNDER_REVIEW`
-4. Re-review reject once:
-   - Entry becomes `REJECTED`
+## C. Public Entry View Behavior
+1. Open:
+   - `http://127.0.0.1:8000/api/dictionary/entries/<entry_uuid>`
+2. Expected:
+   - `header`, `semantic_core`, `variant_section`, `connected_variants`, `contributors`, `attribution`, `revision_history`
+3. Verify masking:
+   - self-knowledge term source hidden
+   - self-recorded audio source hidden
+   - contributor-owned photo source hidden
+4. Verify revision history visibility:
+   - public account sees base snapshot + last 5
+   - reviewer/admin account sees base snapshot + last 15
 
-## 6) Folklore Review API Compatibility
+---
 
-1. Submit review using canonical payload:
-   - `POST /api/reviews/folklore/submit` with `revision_id`
-2. Submit review using compatibility payload:
-   - same endpoint with `entry_id` only
-3. Verify:
-   - Request succeeds
-   - For `entry_id` fallback, system derives/creates revision safely
+## 5) Folklore Contributor Flow (Site-Focused)
 
-## 7) Reviewer Dashboard
+Use your frontend contributor form if available.  
+If frontend is incomplete, use API endpoints from browser network calls.
 
-1. Open `GET /api/reviews/dashboard` as reviewer.
-2. Verify keys include:
-   - `pending_submissions`
-   - `pending_folklore_submissions` (revision-based)
-   - `pending_rereview`
-   - `pending_folklore_rereview`
-3. Verify filtering:
-   - Reviewer does not see items they already reviewed in same round
-   - Admin sees full pending list
+## A. Required Field Rules
+Expected behavior on create/update/submit draft:
+1. `title`, `content`, `category` are required.
+2. `source` required unless self-knowledge is checked.
+3. If media exists (URL/photo/audio), `media_source` required unless self-produced is checked.
+4. Municipality must be one of:
+   - `Basco`, `Mahatao`, `Ivana`, `Uyugan`, `Sabtang`, `Itbayat`, `Not Applicable`
+5. If `copyright_usage`
+   is left blank, license defaults to `CC BY-NC 4.0` at approval.
 
-## 8) Admin Override
+## B. Upload Checks
+1. Attach photo and submit draft.
+2. Expected:
+   - accepted and visible in revision payload/detail
+3. Attach audio and submit draft.
+4. Expected:
+   - accepted and visible in revision payload/detail
 
-1. Put dictionary entry under review, then call:
-   - `POST /api/reviews/admin/override` with `target_type=dictionary`
-2. Repeat for folklore:
-   - same endpoint with `target_type=folklore`
-3. Verify:
-   - Actions require admin + notes
-   - Actions update target state correctly
-   - Override record appears in admin audit
+---
 
-## 9) Public Read Surfaces
+## 6) Folklore Review Flow (Site + Reviewer)
 
-1. Dictionary detail:
-   - `GET /api/dictionary/entries/<entry_id>`
-   - Verify semantic core + variant sections + revision history limits
-2. Folklore list/detail:
-   - `GET /api/folklore/entries`
-   - `GET /api/folklore/entries/<entry_id>`
-3. Verify visibility:
-   - Public only sees `APPROVED` and `APPROVED_UNDER_REVIEW`
-   - Source masking works for self flags
+1. Reviewer opens:
+   - `http://127.0.0.1:8000/api/reviews/dashboard`
+2. Confirm folklore pending submissions appear under:
+   - `folklore.pending_submissions`
+3. Review decisions expected outcomes:
+   - first approve: may remain pending until quorum
+   - quorum approve: revision `approved`, entry `approved`
+   - flag approved entry: entry `approved_under_review`
+   - one reject during re-review: entry `rejected`
 
-## 10) Leaderboard and Profile
+Note:
+- If your frontend has no review action buttons yet, this is a frontend gap, not necessarily backend logic failure.
 
-1. Check global leaderboard:
-   - `GET /leaderboard/global`
-2. Check municipality leaderboard:
-   - `GET /leaderboard/municipality?municipality=<name>`
-3. Check public profile:
-   - `GET /api/users/<username>`
-4. Verify:
-   - Totals follow `dictionary_terms + folklore_entries + revisions`
-   - Revision contribution is unique per contributor per entry lifetime
+---
 
-## 11) Lifecycle Maintenance
+## 7) Public Folklore View
 
-1. Run:
+1. Open:
+   - `http://127.0.0.1:8000/api/folklore/entries`
+2. Expected:
+   - only `approved` or `approved_under_review` entries listed
+3. Open:
+   - `http://127.0.0.1:8000/api/folklore/entries/<entry_uuid>`
+4. Expected masking:
+   - `source` hidden when self-knowledge = true
+   - `media_source` hidden when self-produced-media = true
+
+---
+
+## 8) Governance and Lifecycle Checks
+
+1. In admin, confirm folklore `archived_at` is read-only.
+2. Confirm contributor-facing forms do not allow manual `archived_at`.
+3. Run maintenance:
    - `python3 manage.py run_lifecycle_maintenance`
-2. Verify logs include counts for:
-   - `dictionary_archived`, `dictionary_deleted`
-   - `folklore_archived`, `folklore_deleted`
-3. Confirm scheduled execution exists (cron/launchd/systemd).
+4. Expected:
+   - lifecycle transitions execute without errors
 
-## 12) Go/No-Go Criteria
+---
 
-Release-ready if all are true:
-- Full tests pass locally.
-- Dictionary + folklore approval/re-review paths pass manual checks.
-- Dashboard and admin override flows pass.
-- Public endpoints and attribution masking pass.
-- Leaderboard/profile counts remain correct after archive/delete lifecycle actions.
+## 9) Final Go/No-Go
+
+Mark GO only if all are true:
+1. Baseline tests pass.
+2. Role-based access responses are correct (401/403/200).
+3. Dictionary and folklore approval/rejection/re-review outcomes match spec.
+4. Folklore conditional validation rules behave exactly as expected.
+5. Public visibility and masking rules are correct.
+6. Revision history limits and audience visibility are correct.
+
+If any check fails, log:
+- exact URL or screen
+- user role used
+- payload/field values entered
+- actual vs expected outcome

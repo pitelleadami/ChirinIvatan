@@ -12,6 +12,7 @@ from reviews.services import (
     admin_override_folklore_entry,
     is_admin,
     is_reviewer,
+    submit_review,
     submit_folklore_review,
 )
 
@@ -252,6 +253,19 @@ def reviewer_dashboard_view(request):
 
     return JsonResponse(
         {
+            "dictionary": {
+                "pending_submissions": pending_initial,
+                "pending_rereview": pending_rereview,
+            },
+            "folklore": {
+                "pending_submissions": pending_folklore,
+                "pending_rereview": pending_folklore_rereview,
+            },
+            "reviews": {
+                "my_reviews": my_reviews,
+                "awaiting_quorum_after_my_approval": awaiting_quorum,
+            },
+            # Backward-compatible keys kept for existing clients.
             "pending_submissions": pending_initial,
             "pending_folklore_submissions": pending_folklore,
             "pending_rereview": pending_rereview,
@@ -370,11 +384,15 @@ def submit_folklore_review_view(request):
     if revision_id:
         try:
             revision = FolkloreRevision.objects.select_related("entry").get(id=revision_id)
+        except ValidationError:
+            return JsonResponse({"detail": "Invalid revision_id UUID."}, status=400)
         except FolkloreRevision.DoesNotExist:
             return JsonResponse({"detail": "Folklore revision not found."}, status=404)
     elif entry_id:
         try:
             entry = FolkloreEntry.objects.get(id=entry_id)
+        except ValidationError:
+            return JsonResponse({"detail": "Invalid entry_id UUID."}, status=400)
         except FolkloreEntry.DoesNotExist:
             return JsonResponse({"detail": "Folklore entry not found."}, status=404)
 
@@ -390,6 +408,62 @@ def submit_folklore_review_view(request):
         return JsonResponse({"detail": exc.messages[0]}, status=400)
 
     updated_entry = updated_revision.entry if updated_revision else None
+    return JsonResponse(
+        {
+            "revision_id": str(updated_revision.id),
+            "revision_status": updated_revision.status,
+            "entry_id": str(updated_entry.id) if updated_entry else None,
+            "entry_status": updated_entry.status if updated_entry else None,
+        }
+    )
+
+
+@require_POST
+def submit_dictionary_review_view(request):
+    user = request.user
+    if not user.is_authenticated:
+        return JsonResponse({"detail": "Authentication required."}, status=401)
+
+    try:
+        payload = json.loads(request.body or "{}")
+    except json.JSONDecodeError:
+        return JsonResponse({"detail": "Invalid JSON body."}, status=400)
+
+    revision_id = (payload.get("revision_id") or "").strip()
+    decision = (payload.get("decision") or "").strip()
+    notes = (payload.get("notes") or "").strip()
+
+    if not revision_id or not decision:
+        return JsonResponse(
+            {"detail": "revision_id and decision are required."},
+            status=400,
+        )
+
+    valid_decisions = set(Review.Decision.values)
+    if decision not in valid_decisions:
+        return JsonResponse(
+            {"detail": f"Invalid decision. Allowed: {sorted(valid_decisions)}"},
+            status=400,
+        )
+
+    try:
+        revision = EntryRevision.objects.select_related("entry").get(id=revision_id)
+    except ValidationError:
+        return JsonResponse({"detail": "Invalid revision_id UUID."}, status=400)
+    except EntryRevision.DoesNotExist:
+        return JsonResponse({"detail": "Dictionary revision not found."}, status=404)
+
+    try:
+        updated_revision = submit_review(
+            revision=revision,
+            reviewer=user,
+            decision=decision,
+            notes=notes,
+        )
+    except ValidationError as exc:
+        return JsonResponse({"detail": exc.messages[0]}, status=400)
+
+    updated_entry = updated_revision.entry
     return JsonResponse(
         {
             "revision_id": str(updated_revision.id),

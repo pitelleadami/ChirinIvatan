@@ -16,11 +16,20 @@ FOLKLORE_SNAPSHOT_FIELDS = (
     "media_source",
     "self_produced_media",
     "copyright_usage",
+    "photo_upload",
+    "audio_upload",
 )
 
 
 def _snapshot_entry(entry: FolkloreEntry) -> dict:
-    return {field: getattr(entry, field) for field in FOLKLORE_SNAPSHOT_FIELDS}
+    snapshot = {}
+    for field in FOLKLORE_SNAPSHOT_FIELDS:
+        value = getattr(entry, field)
+        if field in {"photo_upload", "audio_upload"}:
+            snapshot[field] = value.name if value else ""
+        else:
+            snapshot[field] = value
+    return snapshot
 
 
 @transaction.atomic
@@ -103,9 +112,18 @@ def publish_revision(*, revision: FolkloreRevision) -> FolkloreEntry:
     content = (data.get("content") or "").strip()
     category = (data.get("category") or "").strip()
     source = (data.get("source") or "").strip()
+    self_knowledge = bool(data.get("self_knowledge", False))
+    media_url = (data.get("media_url") or "").strip()
+    media_source = (data.get("media_source") or "").strip()
+    self_produced_media = bool(data.get("self_produced_media", False))
 
-    if not title or not content or not category or not source:
-        raise ValueError("Folklore revision must include title/content/category/source.")
+    if not title or not content or not category:
+        raise ValueError("Folklore revision must include title/content/category.")
+    if not self_knowledge and not source:
+        raise ValueError("Source is required unless marked as self-knowledge.")
+    has_media = bool(media_url or revision.photo_upload or revision.audio_upload)
+    if has_media and not self_produced_media and not media_source:
+        raise ValueError("Media source is required unless marked as self-produced.")
 
     if revision.entry is None:
         create_kwargs = {
@@ -115,6 +133,10 @@ def publish_revision(*, revision: FolkloreRevision) -> FolkloreEntry:
         for field in FOLKLORE_SNAPSHOT_FIELDS:
             if field in data:
                 create_kwargs[field] = data[field]
+        if revision.photo_upload:
+            create_kwargs["photo_upload"] = revision.photo_upload
+        if revision.audio_upload:
+            create_kwargs["audio_upload"] = revision.audio_upload
         entry = FolkloreEntry.objects.create(**create_kwargs)
         revision.entry = entry
         revision.save(update_fields=["entry"])
@@ -123,6 +145,10 @@ def publish_revision(*, revision: FolkloreRevision) -> FolkloreEntry:
         for field in FOLKLORE_SNAPSHOT_FIELDS:
             if field in data:
                 setattr(entry, field, data[field])
+        if revision.photo_upload:
+            entry.photo_upload = revision.photo_upload
+        if revision.audio_upload:
+            entry.audio_upload = revision.audio_upload
         entry.status = FolkloreEntry.Status.APPROVED
         entry.archived_at = None
         entry.save()
@@ -139,5 +165,7 @@ def create_revision_from_entry(*, entry: FolkloreEntry, contributor) -> Folklore
         entry=entry,
         contributor=contributor,
         proposed_data=_snapshot_entry(entry),
+        photo_upload=entry.photo_upload,
+        audio_upload=entry.audio_upload,
         status=FolkloreRevision.Status.DRAFT,
     )

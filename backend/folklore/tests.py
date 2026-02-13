@@ -2,6 +2,7 @@ import json
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 
 from folklore.models import FolkloreEntry, FolkloreRevision
@@ -209,6 +210,18 @@ class FolklorePublicApiTests(TestCase):
             1,
         )
 
+    def test_municipality_must_be_valid_choice(self):
+        with self.assertRaises(ValidationError):
+            FolkloreEntry.objects.create(
+                title="Invalid Municipality",
+                content="Sample",
+                category=FolkloreEntry.Category.MYTH,
+                municipality_source="invalid-town",
+                source="Oral account",
+                contributor=self.contributor,
+                status=FolkloreEntry.Status.DRAFT,
+            )
+
 
 class FolkloreContributorApiTests(TestCase):
     def setUp(self):
@@ -236,6 +249,76 @@ class FolkloreContributorApiTests(TestCase):
         )
         self.assertEqual(response.status_code, 401)
 
+    def test_create_requires_source_unless_self_knowledge(self):
+        self.client.force_login(self.owner)
+        response = self.client.post(
+            "/api/folklore/revisions/create",
+            data=json.dumps(
+                {
+                    "title": "Entry",
+                    "content": "Content",
+                    "category": FolkloreEntry.Category.MYTH,
+                    "source": "",
+                    "self_knowledge": False,
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("source", response.json()["detail"])
+
+        response = self.client.post(
+            "/api/folklore/revisions/create",
+            data=json.dumps(
+                {
+                    "title": "Self knowledge entry",
+                    "content": "Content",
+                    "category": FolkloreEntry.Category.MYTH,
+                    "source": "",
+                    "self_knowledge": True,
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 201)
+
+    def test_create_requires_media_source_when_media_not_self_produced(self):
+        self.client.force_login(self.owner)
+        response = self.client.post(
+            "/api/folklore/revisions/create",
+            data=json.dumps(
+                {
+                    "title": "Media Entry",
+                    "content": "Content",
+                    "category": FolkloreEntry.Category.MYTH,
+                    "source": "Oral account",
+                    "media_url": "https://example.com/video",
+                    "self_produced_media": False,
+                    "media_source": "",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("media_source", response.json()["detail"])
+
+        response = self.client.post(
+            "/api/folklore/revisions/create",
+            data=json.dumps(
+                {
+                    "title": "Self Produced Media Entry",
+                    "content": "Content",
+                    "category": FolkloreEntry.Category.MYTH,
+                    "source": "Oral account",
+                    "media_url": "https://example.com/video",
+                    "self_produced_media": True,
+                    "media_source": "",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 201)
+
     def test_create_draft_sets_owner_and_draft_status(self):
         self.client.force_login(self.owner)
         response = self.client.post(
@@ -256,6 +339,27 @@ class FolkloreContributorApiTests(TestCase):
         revision = FolkloreRevision.objects.get(id=payload["revision_id"])
         self.assertEqual(revision.contributor_id, self.owner.id)
         self.assertEqual(revision.status, FolkloreRevision.Status.DRAFT)
+
+    def test_create_draft_accepts_uploads(self):
+        self.client.force_login(self.owner)
+        photo = SimpleUploadedFile("sample.jpg", b"fake-image-bytes", content_type="image/jpeg")
+        audio = SimpleUploadedFile("sample.mp3", b"fake-audio-bytes", content_type="audio/mpeg")
+        response = self.client.post(
+            "/api/folklore/revisions/create",
+            data={
+                "title": "Upload Entry",
+                "content": "Content",
+                "category": FolkloreEntry.Category.MYTH,
+                "source": "Oral account",
+                "self_produced_media": "true",
+                "photo_upload": photo,
+                "audio_upload": audio,
+            },
+        )
+        self.assertEqual(response.status_code, 201)
+        revision = FolkloreRevision.objects.get(id=response.json()["revision_id"])
+        self.assertTrue(bool(revision.photo_upload))
+        self.assertTrue(bool(revision.audio_upload))
 
     def test_create_draft_legacy_entries_route_still_works(self):
         self.client.force_login(self.owner)

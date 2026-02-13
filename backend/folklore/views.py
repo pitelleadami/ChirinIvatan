@@ -21,6 +21,8 @@ def _serialize_folklore_entry(entry: FolkloreEntry):
         "municipality_source": entry.municipality_source,
         "status": entry.status,
         "contributor_username": entry.contributor.username,
+        "photo_upload_url": entry.photo_upload.url if entry.photo_upload else "",
+        "audio_upload_url": entry.audio_upload.url if entry.audio_upload else "",
         "created_at": entry.created_at.isoformat(),
     }
 
@@ -32,7 +34,10 @@ def _serialize_folklore_revision(revision: FolkloreRevision):
         "entry_id": str(revision.entry_id) if revision.entry_id else None,
         "title": proposed_data.get("title", ""),
         "category": proposed_data.get("category", ""),
+        "municipality_source": proposed_data.get("municipality_source", ""),
         "status": revision.status,
+        "photo_upload_url": revision.photo_upload.url if revision.photo_upload else "",
+        "audio_upload_url": revision.audio_upload.url if revision.audio_upload else "",
         "created_at": revision.created_at.isoformat(),
         "approved_at": revision.approved_at.isoformat() if revision.approved_at else None,
     }
@@ -51,6 +56,25 @@ def _parse_json_body(request):
         return None, JsonResponse({"detail": "Invalid JSON body."}, status=400)
 
 
+def _parse_request_payload(request):
+    content_type = (request.content_type or "").lower()
+    if "application/json" in content_type:
+        return _parse_json_body(request)
+
+    payload = {}
+    for key, value in request.POST.items():
+        payload[key] = value
+    return payload, None
+
+
+def _as_bool(value, default=False):
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _editable_payload_fields(payload):
     editable_fields = [
         "title",
@@ -64,7 +88,45 @@ def _editable_payload_fields(payload):
         "self_produced_media",
         "copyright_usage",
     ]
-    return {field: payload[field] for field in editable_fields if field in payload}
+    result = {field: payload[field] for field in editable_fields if field in payload}
+    for boolean_field in ("self_knowledge", "self_produced_media"):
+        if boolean_field in result:
+            result[boolean_field] = _as_bool(result[boolean_field], default=False)
+    return result
+
+
+def _submission_missing_fields(*, data, has_photo, has_audio):
+    missing = []
+    for field in ("title", "content", "category"):
+        if not str(data.get(field, "")).strip():
+            missing.append(field)
+
+    self_knowledge = _as_bool(data.get("self_knowledge"), default=False)
+    if not self_knowledge and not str(data.get("source", "")).strip():
+        missing.append("source")
+
+    has_media = bool(str(data.get("media_url", "")).strip() or has_photo or has_audio)
+    self_produced_media = _as_bool(data.get("self_produced_media"), default=False)
+    if has_media and not self_produced_media and not str(data.get("media_source", "")).strip():
+        missing.append("media_source")
+
+    return missing
+
+
+def _invalid_choice_errors(data):
+    errors = []
+
+    if "category" in data:
+        valid_categories = set(FolkloreEntry.Category.values)
+        if data["category"] not in valid_categories:
+            errors.append("category")
+
+    if "municipality_source" in data:
+        valid_municipalities = set(FolkloreEntry.MunicipalitySource.values)
+        if data["municipality_source"] not in valid_municipalities:
+            errors.append("municipality_source")
+
+    return errors
 
 
 @require_GET
@@ -99,12 +161,25 @@ def create_folklore_entry_view(request):
     if auth_error:
         return auth_error
 
-    payload, parse_error = _parse_json_body(request)
+    payload, parse_error = _parse_request_payload(request)
     if parse_error:
         return parse_error
 
-    required_fields = ["title", "content", "category", "source"]
-    missing = [field for field in required_fields if not str(payload.get(field, "")).strip()]
+    photo_upload = request.FILES.get("photo_upload")
+    audio_upload = request.FILES.get("audio_upload")
+
+    proposed_data = _editable_payload_fields(payload)
+    invalid_choices = _invalid_choice_errors(proposed_data)
+    if invalid_choices:
+        return JsonResponse(
+            {"detail": f"Invalid choice values: {', '.join(invalid_choices)}"},
+            status=400,
+        )
+    missing = _submission_missing_fields(
+        data=proposed_data,
+        has_photo=bool(photo_upload),
+        has_audio=bool(audio_upload),
+    )
     if missing:
         return JsonResponse(
             {"detail": f"Missing required fields: {', '.join(missing)}"},
@@ -113,11 +188,19 @@ def create_folklore_entry_view(request):
 
     revision = FolkloreRevision.objects.create(
         contributor=request.user,
-        proposed_data=_editable_payload_fields(payload),
+        proposed_data=proposed_data,
+        photo_upload=photo_upload,
+        audio_upload=audio_upload,
         status=FolkloreRevision.Status.DRAFT,
     )
     return JsonResponse(
-        {"revision_id": str(revision.id), "status": revision.status},
+        {
+            "revision_id": str(revision.id),
+            "status": revision.status,
+            "license_notice": (
+                "If copyright_usage is empty at approval, default CC BY-NC 4.0 is applied."
+            ),
+        },
         status=201,
     )
 
@@ -128,7 +211,7 @@ def update_folklore_draft_view(request, revision_id):
     if auth_error:
         return auth_error
 
-    payload, parse_error = _parse_json_body(request)
+    payload, parse_error = _parse_request_payload(request)
     if parse_error:
         return parse_error
 
@@ -145,13 +228,34 @@ def update_folklore_draft_view(request, revision_id):
     updates = _editable_payload_fields(payload)
     if not updates:
         return JsonResponse({"detail": "No editable fields provided."}, status=400)
+    invalid_choices = _invalid_choice_errors(updates)
+    if invalid_choices:
+        return JsonResponse(
+            {"detail": f"Invalid choice values: {', '.join(invalid_choices)}"},
+            status=400,
+        )
 
     next_payload = dict(revision.proposed_data or {})
     next_payload.update(updates)
     revision.proposed_data = next_payload
-    revision.save(update_fields=["proposed_data"])
+    update_fields = ["proposed_data"]
+    if "photo_upload" in request.FILES:
+        revision.photo_upload = request.FILES["photo_upload"]
+        update_fields.append("photo_upload")
+    if "audio_upload" in request.FILES:
+        revision.audio_upload = request.FILES["audio_upload"]
+        update_fields.append("audio_upload")
+    revision.save(update_fields=update_fields)
 
-    return JsonResponse({"revision_id": str(revision.id), "status": revision.status})
+    return JsonResponse(
+        {
+            "revision_id": str(revision.id),
+            "status": revision.status,
+            "license_notice": (
+                "If copyright_usage is empty at approval, default CC BY-NC 4.0 is applied."
+            ),
+        }
+    )
 
 
 @require_http_methods(["POST"])
@@ -170,9 +274,12 @@ def submit_folklore_entry_view(request, revision_id):
     if revision.status != FolkloreRevision.Status.DRAFT:
         return JsonResponse({"detail": "Only DRAFT revisions can be submitted."}, status=400)
 
-    required_fields = ["title", "content", "category", "source"]
     payload = revision.proposed_data or {}
-    missing = [field for field in required_fields if not str(payload.get(field, "")).strip()]
+    missing = _submission_missing_fields(
+        data=payload,
+        has_photo=bool(revision.photo_upload),
+        has_audio=bool(revision.audio_upload),
+    )
     if missing:
         return JsonResponse(
             {"detail": f"Missing required fields: {', '.join(missing)}"},
@@ -182,7 +289,15 @@ def submit_folklore_entry_view(request, revision_id):
     revision.status = FolkloreRevision.Status.PENDING
     revision.save(update_fields=["status"])
 
-    return JsonResponse({"revision_id": str(revision.id), "status": revision.status})
+    return JsonResponse(
+        {
+            "revision_id": str(revision.id),
+            "status": revision.status,
+            "license_notice": (
+                "If copyright_usage is empty at approval, default CC BY-NC 4.0 is applied."
+            ),
+        }
+    )
 
 
 @require_GET
@@ -205,6 +320,8 @@ def folklore_entry_detail_view(request, entry_id):
             # Hide source details if contributor marked the content/media as self-owned.
             "source": "" if entry.self_knowledge else entry.source,
             "media_url": entry.media_url,
+            "photo_upload_url": entry.photo_upload.url if entry.photo_upload else "",
+            "audio_upload_url": entry.audio_upload.url if entry.audio_upload else "",
             "media_source": "" if entry.self_produced_media else entry.media_source,
             "copyright_usage": entry.copyright_usage,
             "contributor": entry.contributor.username,
