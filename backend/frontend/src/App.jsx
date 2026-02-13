@@ -47,20 +47,33 @@ function App() {
   const [error, setError] = useState('')
   const [notesByRevisionId, setNotesByRevisionId] = useState({})
   const [actionBusyId, setActionBusyId] = useState('')
+  const [rowResultByRevisionId, setRowResultByRevisionId] = useState({})
+  const [rowErrorByRevisionId, setRowErrorByRevisionId] = useState({})
   const [actionMessage, setActionMessage] = useState('')
 
   const dictionaryRows = dashboard?.dictionary?.pending_submissions || []
   const dictionaryRereviewRows = dashboard?.dictionary?.pending_rereview || []
+  const dictionaryPublishedRows = dashboard?.dictionary?.published_entries || []
   const folkloreRows = dashboard?.folklore?.pending_submissions || []
   const folkloreRereviewRows = dashboard?.folklore?.pending_rereview || []
+  const folklorePublishedRows = dashboard?.folklore?.published_entries || []
 
   const hasRows = useMemo(
     () =>
       dictionaryRows.length ||
       dictionaryRereviewRows.length ||
+      dictionaryPublishedRows.length ||
       folkloreRows.length ||
-      folkloreRereviewRows.length,
-    [dictionaryRows, dictionaryRereviewRows, folkloreRows, folkloreRereviewRows]
+      folkloreRereviewRows.length ||
+      folklorePublishedRows.length,
+    [
+      dictionaryRows,
+      dictionaryRereviewRows,
+      dictionaryPublishedRows,
+      folkloreRows,
+      folkloreRereviewRows,
+      folklorePublishedRows,
+    ]
   )
 
   async function loadDashboard() {
@@ -91,8 +104,13 @@ function App() {
 
   async function submitDecision({ kind, revisionId, decision }) {
     const notes = getNotes(revisionId).trim()
+    setRowErrorByRevisionId((prev) => ({ ...prev, [revisionId]: '' }))
+
     if ((decision === 'reject' || decision === 'flag') && !notes) {
-      setError('Reject and flag require notes.')
+      setRowErrorByRevisionId((prev) => ({
+        ...prev,
+        [revisionId]: 'Reject and flag require notes.',
+      }))
       return
     }
 
@@ -106,7 +124,7 @@ function App() {
         : '/api/reviews/folklore/submit'
 
     try {
-      await apiRequest(path, {
+      const payload = await apiRequest(path, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -115,16 +133,37 @@ function App() {
           notes,
         }),
       })
+      setRowResultByRevisionId((prev) => ({
+        ...prev,
+        [revisionId]: {
+          decision,
+          revisionStatus: payload.revision_status,
+          entryStatus: payload.entry_status,
+        },
+      }))
       setActionMessage(`Saved ${decision} decision for revision ${revisionId}.`)
       await loadDashboard()
     } catch (requestError) {
-      setError(requestError.message)
+      setRowErrorByRevisionId((prev) => ({
+        ...prev,
+        [revisionId]: requestError.message,
+      }))
     } finally {
       setActionBusyId('')
     }
   }
 
-  function QueueSection({ title, rows, kind }) {
+  function actionHint(mode, row) {
+    if (mode === 'published') {
+      return 'Published queue: use flag to trigger re-review.'
+    }
+    if (row.review_round !== undefined) {
+      return 'Re-review round: one reject will immediately move entry to rejected.'
+    }
+    return 'Approve needs quorum: 2 reviewers, or 1 reviewer + 1 admin.'
+  }
+
+  function QueueSection({ title, rows, kind, mode }) {
     return (
       <section className="panel">
         <h2>{title}</h2>
@@ -132,6 +171,9 @@ function App() {
         {rows.map((row) => {
           const revisionId = row.revision_id
           const disabled = actionBusyId === revisionId
+          const canApprove = mode !== 'published'
+          const canReject = mode !== 'published'
+          const canFlag = mode === 'published'
           return (
             <article className="queue-card" key={revisionId}>
               <div className="queue-header">
@@ -141,6 +183,7 @@ function App() {
               <p className="meta">Revision: {revisionId}</p>
               <p className="meta">Entry: {row.entry_id || 'new submission'}</p>
               {row.review_round !== undefined && <p className="meta">Round: {row.review_round}</p>}
+              <p className="hint">{actionHint(mode, row)}</p>
 
               <label className="notes-label" htmlFor={`notes-${revisionId}`}>
                 Review notes (required for reject/flag)
@@ -154,24 +197,42 @@ function App() {
               />
 
               <div className="actions">
-                <button disabled={disabled} onClick={() => submitDecision({ kind, revisionId, decision: 'approve' })}>
+                <button
+                  disabled={disabled || !canApprove}
+                  onClick={() => submitDecision({ kind, revisionId, decision: 'approve' })}
+                  title={canApprove ? '' : 'Approve is for pending/re-review queues.'}
+                >
                   Approve
                 </button>
                 <button
                   className="warning"
-                  disabled={disabled}
+                  disabled={disabled || !canReject}
                   onClick={() => submitDecision({ kind, revisionId, decision: 'reject' })}
+                  title={canReject ? '' : 'Reject is for pending/re-review queues.'}
                 >
                   Reject
                 </button>
                 <button
                   className="secondary"
-                  disabled={disabled}
+                  disabled={disabled || !canFlag}
                   onClick={() => submitDecision({ kind, revisionId, decision: 'flag' })}
+                  title={canFlag ? '' : 'Flag is available only in Published Entries.'}
                 >
                   Flag for re-review
                 </button>
               </div>
+
+              {rowErrorByRevisionId[revisionId] && (
+                <p className="inline-error">{rowErrorByRevisionId[revisionId]}</p>
+              )}
+
+              {rowResultByRevisionId[revisionId] && (
+                <p className="inline-ok">
+                  Last action: {rowResultByRevisionId[revisionId].decision} | revision status:{' '}
+                  {rowResultByRevisionId[revisionId].revisionStatus || 'n/a'} | entry status:{' '}
+                  {rowResultByRevisionId[revisionId].entryStatus || 'n/a'}
+                </p>
+              )}
             </article>
           )
         })}
@@ -190,6 +251,7 @@ function App() {
           <p className="muted">
             Tip: open <a href="/admin/" target="_blank" rel="noreferrer">/admin/</a> from this same frontend host.
           </p>
+          <p className="muted">Use at least two reviewer/admin accounts to complete approval quorum.</p>
         </div>
         <button disabled={loading} onClick={loadDashboard}>
           {loading ? 'Loading...' : 'Load Dashboard'}
@@ -210,10 +272,42 @@ function App() {
 
       {dashboard && (
         <div className="grid">
-          <QueueSection title="Dictionary Pending Submissions" rows={dictionaryRows} kind="dictionary" />
-          <QueueSection title="Dictionary Re-review Queue" rows={dictionaryRereviewRows} kind="dictionary" />
-          <QueueSection title="Folklore Pending Submissions" rows={folkloreRows} kind="folklore" />
-          <QueueSection title="Folklore Re-review Queue" rows={folkloreRereviewRows} kind="folklore" />
+          <QueueSection
+            title="Dictionary Pending Submissions"
+            rows={dictionaryRows}
+            kind="dictionary"
+            mode="pending"
+          />
+          <QueueSection
+            title="Dictionary Re-review Queue"
+            rows={dictionaryRereviewRows}
+            kind="dictionary"
+            mode="rereview"
+          />
+          <QueueSection
+            title="Dictionary Published Entries (Flag Eligible)"
+            rows={dictionaryPublishedRows}
+            kind="dictionary"
+            mode="published"
+          />
+          <QueueSection
+            title="Folklore Pending Submissions"
+            rows={folkloreRows}
+            kind="folklore"
+            mode="pending"
+          />
+          <QueueSection
+            title="Folklore Re-review Queue"
+            rows={folkloreRereviewRows}
+            kind="folklore"
+            mode="rereview"
+          />
+          <QueueSection
+            title="Folklore Published Entries (Flag Eligible)"
+            rows={folklorePublishedRows}
+            kind="folklore"
+            mode="published"
+          />
         </div>
       )}
 

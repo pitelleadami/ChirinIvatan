@@ -25,7 +25,16 @@ SECRET_KEY = 'django-insecure-z_c-&hx!cdt^&pe7hxms8k@yz20_m!)g55s_ibf920&nzti9t1
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [
+    "127.0.0.1",
+    "localhost",
+]
+
+# Allow frontend dev server origins to send CSRF-protected POST requests.
+CSRF_TRUSTED_ORIGINS = [
+    "http://127.0.0.1:5173",
+    "http://localhost:5173",
+]
 
 
 # Application definition

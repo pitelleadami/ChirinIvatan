@@ -591,6 +591,7 @@ Screen: `Admin Override Panel` (if implemented)
 - `/.well-known/appspecific/com.chrome.devtools.json` 404 is harmless.
 - If browser console shows HTML parse error on JSON parse, check server traceback.
 - Use actual UUIDs from dashboard/list responses, never placeholders.
+- Frontend design handoff reference: `docs/SPEC-03_FRONTEND_FIGMA_HANDOFF.md`
 
 Minimum acceptance gate:
 1. `python3 manage.py migrate`

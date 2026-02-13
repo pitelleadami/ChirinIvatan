@@ -56,6 +56,12 @@
   font-size: 13px;
 }
 
+.hint {
+  margin: 6px 0;
+  color: #334155;
+  font-size: 12px;
+}
+
 .notes-label {
   display: block;
   margin-top: 8px;
@@ -133,4 +139,16 @@ button:disabled {
 .review-list {
   margin: 0;
   padding-left: 18px;
+}
+
+.inline-error {
+  margin-top: 8px;
+  color: #991b1b;
+  font-size: 12px;
+}
+
+.inline-ok {
+  margin-top: 8px;
+  color: #166534;
+  font-size: 12px;
 }
