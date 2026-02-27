@@ -1,3 +1,14 @@
+"""
+dictionary/admin.py
+
+Admin tooling for dictionary governance workflows.
+
+Key idea:
+- Admin forms expose real domain fields from revision JSON so non-technical
+  reviewers can inspect/edit proposed snapshots.
+- Bulk actions call review services (same rules as API), not custom shortcuts.
+"""
+
 from django import forms
 from django.contrib import admin, messages
 from django.contrib.admin.helpers import ActionForm

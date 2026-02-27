@@ -1,3 +1,10 @@
+/*
+  DictionaryViewerPage.jsx
+
+  Manual inspector for dictionary entry detail payload.
+  Useful for QA and backend contract verification.
+*/
+
 import { useEffect, useState } from 'react'
 
 import { apiRequest } from '../lib/api'

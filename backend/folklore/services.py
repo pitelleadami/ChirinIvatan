@@ -1,3 +1,14 @@
+"""
+folklore/services.py
+
+Write-side folklore business logic.
+
+Main responsibilities:
+- validate/publish approved revisions into live entries
+- enforce revision retention policies
+- apply lifecycle-safe state transitions
+"""
+
 from django.db import transaction
 from django.utils import timezone
 
@@ -22,6 +33,7 @@ FOLKLORE_SNAPSHOT_FIELDS = (
 
 
 def _snapshot_entry(entry: FolkloreEntry) -> dict:
+    # Build JSON snapshot from current live entry for draft revision bootstrap.
     snapshot = {}
     for field in FOLKLORE_SNAPSHOT_FIELDS:
         value = getattr(entry, field)
@@ -71,6 +83,8 @@ def transition_folklore_status(*, entry: FolkloreEntry, to_status: str) -> Folkl
 
 
 def _enforce_approved_revision_retention(entry: FolkloreEntry) -> None:
+    # Keep max 20 approved non-base revisions.
+    # Oldest non-base approved revisions are deleted first.
     approved_non_base = FolkloreRevision.objects.filter(
         entry=entry,
         status=FolkloreRevision.Status.APPROVED,
@@ -87,6 +101,7 @@ def _enforce_approved_revision_retention(entry: FolkloreEntry) -> None:
 
 @transaction.atomic
 def finalize_approved_revision(*, revision: FolkloreRevision) -> FolkloreRevision:
+    # First approved revision becomes immutable base snapshot.
     if revision.status != FolkloreRevision.Status.APPROVED:
         raise ValueError("Only approved revisions can be finalized.")
     if not revision.entry_id:
@@ -107,6 +122,13 @@ def finalize_approved_revision(*, revision: FolkloreRevision) -> FolkloreRevisio
 
 @transaction.atomic
 def publish_revision(*, revision: FolkloreRevision) -> FolkloreEntry:
+    """
+    Apply approved revision payload to live folklore entry.
+
+    Handles:
+    - first publish (creates FolkloreEntry)
+    - update publish (modifies existing FolkloreEntry)
+    """
     data = revision.proposed_data or {}
     title = (data.get("title") or "").strip()
     content = (data.get("content") or "").strip()
@@ -158,6 +180,7 @@ def publish_revision(*, revision: FolkloreRevision) -> FolkloreEntry:
 
 @transaction.atomic
 def create_revision_from_entry(*, entry: FolkloreEntry, contributor) -> FolkloreRevision:
+    # Preferred path for starting edits on approved folklore entries.
     if entry is None:
         raise ValueError("Cannot create folklore revision without an existing entry.")
 

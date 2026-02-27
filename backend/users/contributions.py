@@ -4,6 +4,19 @@ from django.db import models
 from users.models import ContributionEvent
 
 
+"""
+users/contributions.py
+
+Purpose:
+- Central helper functions for awarding contribution credit.
+- Keeps credit rules in one place so services/views stay consistent.
+
+Important rule:
+- Do not manually create ContributionEvent rows in random files.
+- Use these helpers so uniqueness and linking remain consistent.
+"""
+
+
 User = get_user_model()
 
 
@@ -12,6 +25,10 @@ def award_dictionary_term(*, user, entry, revision=None):
     Historical rule:
     Approved original dictionary contributions are recorded once and
     never decremented later.
+
+    Return shape:
+    - (event, created)
+    created=False means credit already existed (no double-count).
     """
 
     return ContributionEvent.objects.get_or_create(
@@ -23,6 +40,13 @@ def award_dictionary_term(*, user, entry, revision=None):
 
 
 def award_folklore_entry(*, user, entry):
+    """
+    Award first-time folklore contribution credit.
+
+    Troubleshooting:
+    - If contributor says score did not increase, check `created` flag.
+    - If created=False, user already had credit for this entry.
+    """
     return ContributionEvent.objects.get_or_create(
         user=user,
         folklore_entry=entry,
@@ -34,6 +58,10 @@ def award_revision(*, user, entry=None, folklore_entry=None, revision=None, folk
     """
     Locked rule:
     "Revisions are counted once per entry per contributor lifetime."
+
+    Safe usage:
+    - pass exactly one target: dictionary entry OR folklore entry
+    - pass related revision when available for audit traceability
     """
 
     if entry and folklore_entry:
@@ -58,6 +86,13 @@ def award_revision(*, user, entry=None, folklore_entry=None, revision=None, folk
 
 
 def contribution_summary_for_user(*, user):
+    """
+    Lightweight aggregation helper.
+
+    Used for:
+    - profile summary cards
+    - quick leaderboard-style totals
+    """
     qs = ContributionEvent.objects.filter(user=user)
     counts = qs.values("contribution_type").annotate(c=models.Count("id"))
     by_type = {item["contribution_type"]: item["c"] for item in counts}
@@ -76,6 +111,13 @@ def contribution_summary_for_user(*, user):
 
 
 def _leaderboard_queryset():
+    """
+    Legacy aggregate queryset.
+
+    Note:
+    Newer leaderboard endpoints often use cached stats table.
+    This helper is still kept for compatibility and tests.
+    """
     return (
         User.objects.all()
         .annotate(
@@ -113,11 +155,13 @@ def _leaderboard_queryset():
 
 
 def global_leaderboard(*, limit=50):
+    """Return top users globally ordered by total contribution count."""
     qs = _leaderboard_queryset().order_by("-total", "-last_contribution_at", "username")
     return qs[:limit]
 
 
 def municipality_leaderboard(*, municipality, limit=50):
+    """Return top users within one municipality by total contribution count."""
     qs = (
         _leaderboard_queryset()
         .filter(profile__municipality__iexact=municipality)

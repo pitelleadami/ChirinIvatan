@@ -1,3 +1,11 @@
+"""
+folklore/state_machine.py
+
+Single source of truth for allowed folklore entry status transitions.
+
+Keep transition map synchronized with governance spec and tests.
+"""
+
 from django.core.exceptions import ValidationError
 
 

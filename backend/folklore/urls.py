@@ -1,3 +1,10 @@
+"""
+folklore/urls.py
+
+Folklore API route map.
+Includes both revision-centric and legacy entry-centric aliases for compatibility.
+"""
+
 from django.urls import path
 
 from folklore.views import (
@@ -11,6 +18,7 @@ from folklore.views import (
 
 
 urlpatterns = [
+    # Canonical endpoints (recommended for new clients)
     path("api/folklore/entries", folklore_entries_list_view, name="folklore_entries_list"),
     path(
         "api/folklore/revisions/my",
@@ -37,6 +45,7 @@ urlpatterns = [
         my_folklore_entries_view,
         name="my_folklore_entries",
     ),
+    # Backward-compatible aliases retained for existing clients/docs.
     path(
         "api/folklore/entries/create",
         create_folklore_entry_view,

@@ -5,6 +5,10 @@ from dictionary.state_machine import validate_transition
 from dictionary.variant_services import ensure_group_and_mother, maybe_promote_general_ivatan
 
 
+# Dictionary publishing service:
+# - Takes approved revisions and applies them to live entries.
+# - Preserves base snapshot and revision retention rules.
+# - Keeps mother/variant group state in sync after publish.
 ENTRY_SNAPSHOT_FIELDS = (
     "term",
     "meaning",
@@ -151,6 +155,7 @@ def publish_revision(*, revision, approvers):
     - Metadata updates
     """
 
+    # `proposed_data` is the canonical payload from reviewable revision JSON.
     data = revision.proposed_data or {}
     term = data.get("term")
 
@@ -239,6 +244,7 @@ def publish_revision(*, revision, approvers):
     # Update approval metadata
     # -------------------------------------------------------
 
+    # Approval metadata and group/mother logic are updated after data write.
     entry.last_approved_by.set(approvers)
     ensure_group_and_mother(entry=entry)
     maybe_promote_general_ivatan(entry=entry)
@@ -258,6 +264,8 @@ def create_revision_from_entry(*, entry: Entry, contributor) -> EntryRevision:
     if entry is None:
         raise ValueError("Cannot create a revision without an approved Entry.")
 
+    # Troubleshooting tip:
+    # If users complain that revisions start "blank", ensure this function is used.
     revision = EntryRevision.objects.create(
         entry=entry,
         proposed_data=_snapshot_entry(entry),

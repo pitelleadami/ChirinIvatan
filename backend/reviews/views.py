@@ -1,3 +1,13 @@
+"""
+reviews/views.py
+
+API layer for review workflows.
+
+Design intent:
+- Keep heavy governance rules in services.py.
+- Keep this file focused on request parsing, role checks, and response shaping.
+"""
+
 import json
 
 from django.core.exceptions import ValidationError
@@ -31,6 +41,7 @@ def _active_rereview_round(revision: EntryRevision):
 
 
 def _approval_sets_for_round(revision: EntryRevision, round_number: int):
+    # Quorum depends on reviewer/admin composition, so we split sets by role.
     approvals = Review.objects.filter(
         revision=revision,
         review_round=round_number,
@@ -56,6 +67,7 @@ def _quorum_met(reviewer_ids, admin_ids):
 
 
 def _serialize_pending_revision(revision: EntryRevision):
+    # Queue serializer for dictionary pending workflow.
     proposed_term = (revision.proposed_data or {}).get("term", "")
     return {
         "revision_id": str(revision.id),
@@ -68,6 +80,7 @@ def _serialize_pending_revision(revision: EntryRevision):
 
 
 def _serialize_published_revision(revision: EntryRevision):
+    # Queue serializer for approved dictionary revisions (flag candidates).
     proposed_term = (revision.proposed_data or {}).get("term", "")
     return {
         "revision_id": str(revision.id),
@@ -82,6 +95,7 @@ def _serialize_published_revision(revision: EntryRevision):
 
 
 def _serialize_pending_folklore(revision: FolkloreRevision):
+    # Queue serializer for folklore pending workflow.
     proposed_data = revision.proposed_data or {}
     return {
         "revision_id": str(revision.id),
@@ -95,6 +109,7 @@ def _serialize_pending_folklore(revision: FolkloreRevision):
 
 
 def _serialize_published_folklore(revision: FolkloreRevision):
+    # Queue serializer for approved folklore revisions (flag candidates).
     proposed_data = revision.proposed_data or {}
     return {
         "revision_id": str(revision.id),
@@ -110,6 +125,7 @@ def _serialize_published_folklore(revision: FolkloreRevision):
 
 
 def _serialize_review(review: Review):
+    # Dashboard history serializer with interpreted final outcome.
     revision = review.revision
     entry = revision.entry if revision else None
     active_round = _active_rereview_round(revision) if revision else None
@@ -194,6 +210,16 @@ def _latest_approved_folklore_revisions(*, user):
 
 @require_GET
 def reviewer_dashboard_view(request):
+    """
+    Main dashboard endpoint for reviewer/admin queues.
+
+    Returned buckets:
+    - dictionary pending submissions
+    - dictionary pending re-review
+    - dictionary published entries (flaggable)
+    - folklore equivalents
+    - user's own review history summary
+    """
     user = request.user
     if not user.is_authenticated:
         return JsonResponse({"detail": "Authentication required."}, status=401)
@@ -368,6 +394,7 @@ def reviewer_dashboard_view(request):
 
 @require_POST
 def admin_override_view(request):
+    # High-authority endpoint: admin-only state override for disputed entries.
     user = request.user
     if not user.is_authenticated:
         return JsonResponse({"detail": "Authentication required."}, status=401)
@@ -442,6 +469,7 @@ def admin_override_view(request):
 
 @require_POST
 def submit_folklore_review_view(request):
+    # Accept approve/reject/flag decisions for folklore revision workflow.
     user = request.user
     if not user.is_authenticated:
         return JsonResponse({"detail": "Authentication required."}, status=401)
@@ -510,6 +538,7 @@ def submit_folklore_review_view(request):
 
 @require_POST
 def submit_dictionary_review_view(request):
+    # Accept approve/reject/flag decisions for dictionary revision workflow.
     user = request.user
     if not user.is_authenticated:
         return JsonResponse({"detail": "Authentication required."}, status=401)

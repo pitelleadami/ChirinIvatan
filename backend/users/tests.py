@@ -1,7 +1,9 @@
 import json
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
+from django.core.exceptions import ValidationError
 from django.test import TestCase
 
 from dictionary.models import Entry, EntryRevision, EntryStatus
@@ -9,7 +11,22 @@ from folklore.models import FolkloreEntry
 from reviews.models import Review
 from reviews.services import submit_review
 from users.contributions import contribution_summary_for_user, global_leaderboard
-from users.models import ContributionEvent, UserProfile
+from users.models import (
+    ContributionEvent,
+    GamificationConfig,
+    MunicipalityMonthlyWinner,
+    MunicipalityStats,
+    RecognitionEvent,
+    RoleApplication,
+    RoleOnboardingRecord,
+    UserContributionStats,
+    UserProfile,
+)
+from users.recognition import (
+    build_gamification_profile_payload,
+    contributor_level_for_user,
+    recompute_user_gamification,
+)
 
 
 User = get_user_model()
@@ -333,3 +350,250 @@ class PublicUserProfileApiTests(TestCase):
         payload = response.json()
         self.assertEqual(payload["lists"]["approved_mother_terms"], [])
         self.assertEqual(payload["lists"]["approved_folklore_entries"], [])
+
+
+class RoleOnboardingFlowTests(TestCase):
+    def setUp(self):
+        self.reviewer_group, _ = Group.objects.get_or_create(name="Reviewer")
+        self.admin_group, _ = Group.objects.get_or_create(name="Admin")
+
+        self.reviewer_a = User.objects.create_user(username="reviewer_a", password="testpass123")
+        self.reviewer_a.groups.add(self.reviewer_group)
+
+        self.reviewer_b = User.objects.create_user(username="reviewer_b", password="testpass123")
+        self.reviewer_b.groups.add(self.reviewer_group)
+
+        self.admin_user = User.objects.create_user(username="admin_user", password="testpass123")
+        self.admin_user.groups.add(self.admin_group)
+
+        self.applicant = User.objects.create_user(username="applicant", password="testpass123")
+        self.invitee = User.objects.create_user(username="invitee", password="testpass123")
+
+    def test_contributor_application_activates_with_single_reviewer_approval(self):
+        self.client.force_login(self.applicant)
+        create = self.client.post(
+            "/api/users/role-applications",
+            data=json.dumps({"target_role": "contributor"}),
+            content_type="application/json",
+        )
+        self.assertEqual(create.status_code, 201)
+        application_id = create.json()["application_id"]
+
+        self.client.force_login(self.reviewer_a)
+        decide = self.client.post(
+            f"/api/users/role-applications/{application_id}/decide",
+            data=json.dumps({"decision": "approve", "notes": "looks good"}),
+            content_type="application/json",
+        )
+        self.assertEqual(decide.status_code, 200)
+        self.assertEqual(decide.json()["application_status"], RoleApplication.Status.APPROVED)
+
+        profile = self.client.get(f"/api/users/{self.applicant.username}").json()
+        self.assertIn(
+            "Approved as Contributor by reviewer_a",
+            profile["header"]["onboarding_accountability"]["contributor"],
+        )
+
+    def test_reviewer_application_requires_two_reviewers(self):
+        self.client.force_login(self.applicant)
+        create = self.client.post(
+            "/api/users/role-applications",
+            data=json.dumps({"target_role": "reviewer"}),
+            content_type="application/json",
+        )
+        self.assertEqual(create.status_code, 201)
+        application_id = create.json()["application_id"]
+
+        self.client.force_login(self.reviewer_a)
+        decide_1 = self.client.post(
+            f"/api/users/role-applications/{application_id}/decide",
+            data=json.dumps({"decision": "approve", "notes": "approve 1"}),
+            content_type="application/json",
+        )
+        self.assertEqual(decide_1.status_code, 200)
+        self.assertEqual(decide_1.json()["application_status"], RoleApplication.Status.PENDING)
+
+        self.client.force_login(self.reviewer_b)
+        decide_2 = self.client.post(
+            f"/api/users/role-applications/{application_id}/decide",
+            data=json.dumps({"decision": "approve", "notes": "approve 2"}),
+            content_type="application/json",
+        )
+        self.assertEqual(decide_2.status_code, 200)
+        self.assertEqual(decide_2.json()["application_status"], RoleApplication.Status.APPROVED)
+
+        self.applicant.refresh_from_db()
+        self.assertTrue(self.applicant.groups.filter(name="Reviewer").exists())
+
+    def test_reviewer_application_can_activate_via_reviewer_plus_admin(self):
+        self.client.force_login(self.applicant)
+        create = self.client.post(
+            "/api/users/role-applications",
+            data=json.dumps({"target_role": "reviewer"}),
+            content_type="application/json",
+        )
+        self.assertEqual(create.status_code, 201)
+        application_id = create.json()["application_id"]
+
+        self.client.force_login(self.reviewer_a)
+        self.client.post(
+            f"/api/users/role-applications/{application_id}/decide",
+            data=json.dumps({"decision": "approve", "notes": "reviewer approval"}),
+            content_type="application/json",
+        )
+
+        self.client.force_login(self.admin_user)
+        decide_2 = self.client.post(
+            f"/api/users/role-applications/{application_id}/decide",
+            data=json.dumps({"decision": "approve", "notes": "admin approval"}),
+            content_type="application/json",
+        )
+        self.assertEqual(decide_2.status_code, 200)
+        self.assertEqual(decide_2.json()["application_status"], RoleApplication.Status.APPROVED)
+
+    def test_single_reviewer_can_directly_invite_reviewer(self):
+        self.client.force_login(self.reviewer_a)
+        invite = self.client.post(
+            "/api/users/role-invitations",
+            data=json.dumps({"username": self.invitee.username, "role": "reviewer"}),
+            content_type="application/json",
+        )
+        self.assertEqual(invite.status_code, 201)
+        self.assertEqual(invite.json()["method"], RoleOnboardingRecord.Method.INVITED)
+        self.assertIn("Invited as Reviewer by reviewer_a", invite.json()["accountability_label"])
+
+        self.invitee.refresh_from_db()
+        self.assertTrue(self.invitee.groups.filter(name="Reviewer").exists())
+
+
+class CulturalStewardshipTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="culture_user", password="testpass123")
+        self.reviewer = User.objects.create_user(username="culture_reviewer", password="testpass123")
+        reviewer_group, _ = Group.objects.get_or_create(name="Reviewer")
+        self.reviewer.groups.add(reviewer_group)
+
+    def _approve_dictionary_submission(self, term, contributor=None):
+        contributor = contributor or self.user
+        revision = EntryRevision.objects.create(
+            contributor=contributor,
+            proposed_data={"term": term},
+            status=EntryRevision.Status.PENDING,
+        )
+        submit_review(
+            revision=revision,
+            reviewer=self.reviewer,
+            decision=Review.Decision.APPROVE,
+            notes="approve one",
+        )
+        reviewer_two = User.objects.create_user(
+            username=f"culture_reviewer_{term}",
+            password="testpass123",
+        )
+        reviewer_two.groups.add(Group.objects.get(name="Reviewer"))
+        submit_review(
+            revision=revision,
+            reviewer=reviewer_two,
+            decision=Review.Decision.APPROVE,
+            notes="approve two",
+        )
+        revision.refresh_from_db()
+        return revision
+
+    def test_level_uses_preserved_entries_language(self):
+        for i in range(5):
+            self._approve_dictionary_submission(term=f"term_{i}")
+
+        level = contributor_level_for_user(self.user)
+        self.assertEqual(level["current_level"]["title"], "Language Contributor")
+        self.assertEqual(level["approved_entries"], 5)
+
+        response = self.client.get(f"/api/users/{self.user.username}/cultural-stewardship")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("You preserved", payload["language"]["headline"])
+
+    def test_profile_includes_gamification_block(self):
+        response = self.client.get(f"/api/users/{self.user.username}")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("gamification", payload)
+        self.assertIn("contributor_level", payload["gamification"])
+        self.assertIn("dictionary_badges", payload["gamification"])
+
+
+class GamificationAdvancedFeaturesTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="advanced_user", password="testpass123")
+
+    def test_admin_config_can_override_level_titles_and_thresholds(self):
+        GamificationConfig.objects.create(
+            name="default",
+            contributor_levels=[
+                {"number": 0, "title": "Starter", "threshold": 0},
+                {"number": 1, "title": "Custom Title", "threshold": 1},
+            ],
+            reviewer_levels=[
+                {"number": 0, "title": "Reviewer", "threshold": 0},
+            ],
+            dictionary_badges=[
+                {"key": "word_contributor", "name": "Word Contributor", "threshold": 1},
+            ],
+            folklore_badges=[
+                {"key": "story_contributor", "name": "Story Contributor", "threshold": 1},
+            ],
+            quality_badge={
+                "key": "accuracy_champion",
+                "name": "Accuracy Champion",
+                "threshold": 1,
+                "max_rejections": 0,
+            },
+        )
+
+        stats, _ = UserContributionStats.objects.get_or_create(user=self.user)
+        stats.combined_total = 1
+        stats.dictionary_original_total = 1
+        stats.save()
+
+        payload = build_gamification_profile_payload(self.user)
+        self.assertEqual(payload["contributor_level"]["title"], "Custom Title")
+
+    @patch("users.recognition._current_month_key", return_value="2026-03")
+    def test_month_rollover_creates_municipality_winner_events(self, _mock_month):
+        MunicipalityStats.objects.create(
+            municipality="Basco",
+            dictionary_month=5,
+            folklore_month=2,
+            combined_month=7,
+            last_month_calculated="2026-02",
+        )
+        MunicipalityStats.objects.create(
+            municipality="Ivana",
+            dictionary_month=3,
+            folklore_month=6,
+            combined_month=9,
+            last_month_calculated="2026-02",
+        )
+
+        recompute_user_gamification(self.user)
+
+        winners = MunicipalityMonthlyWinner.objects.filter(month_key="2026-02")
+        self.assertEqual(winners.count(), 3)
+        self.assertTrue(
+            RecognitionEvent.objects.filter(
+                event_type=RecognitionEvent.EventType.MUNICIPALITY_WIN,
+                reference_id="combined:2026-02",
+            ).exists()
+        )
+
+    def test_gamification_config_validation_rejects_invalid_json_shape(self):
+        config = GamificationConfig(
+            name="broken",
+            contributor_levels=[],
+            reviewer_levels=[],
+            dictionary_badges=[],
+            folklore_badges=[],
+            quality_badge={},
+        )
+        with self.assertRaises(ValidationError):
+            config.full_clean()

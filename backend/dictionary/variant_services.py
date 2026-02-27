@@ -4,6 +4,9 @@ from django.db.models import Min, Q
 from dictionary.models import Entry, EntryRevision, EntryStatus, VariantGroup
 
 
+# Variant-group service:
+# - Maintains mother term selection and deterministic fallback.
+# - Keeps grouping logic centralized so review/publish code stays simple.
 GENERAL_VARIANT_ALIASES = {"general", "general ivatan"}
 
 
@@ -114,6 +117,8 @@ def recompute_mother_for_group(*, group: VariantGroup, exclude_entry_id=None):
     new mother = earliest approved, non-archived variant by submission timestamp.
     """
 
+    # Candidate pool follows governance rule:
+    # approved + non-archived statuses only.
     candidates = list(
         group.entries.filter(status__in=_published_statuses())
         .exclude(id=exclude_entry_id)
@@ -131,6 +136,7 @@ def recompute_mother_for_group(*, group: VariantGroup, exclude_entry_id=None):
         _set_group_mother_flags(group=group, mother_entry=None)
         return None
 
+    # Deterministic order: first approved timestamp, then created_at, then id.
     candidates.sort(
         key=lambda item: (
             item.first_approved_at or item.created_at,

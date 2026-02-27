@@ -1,3 +1,10 @@
+/*
+  QueueSection.jsx
+
+  Reusable review queue card list used by reviewer dashboard.
+  Receives row data + callbacks from parent page.
+*/
+
 function actionHint(mode, row) {
   if (mode === 'published') {
     return 'Published queue: use flag to trigger re-review.'

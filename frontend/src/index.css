@@ -1,9 +1,24 @@
 :root {
-  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  line-height: 1.45;
+  --bg-app: #ecf0e6;
+  --bg-panel: #f8f9f6;
+  --bg-panel-strong: #ffffff;
+  --text-primary: #122312;
+  --text-muted: #5f685b;
+  --border-default: #d4dbc9;
+  --action-primary: #1f5f28;
+  --action-primary-hover: #184b20;
+  --action-secondary: #2f3f34;
+  --action-danger: #9a2d2d;
+  --status-success-bg: #e8f5eb;
+  --status-success-text: #14522a;
+  --status-error-bg: #fbeceb;
+  --status-error-text: #812121;
+
+  font-family: 'Manrope', 'Avenir Next', 'Segoe UI', sans-serif;
+  line-height: 1.5;
   font-weight: 400;
-  color: #1f2937;
-  background: #f4f6fb;
+  color: var(--text-primary);
+  background: var(--bg-app);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -18,13 +33,27 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  background: linear-gradient(180deg, #dbe7bf 0 104px, var(--bg-app) 104px 100%);
 }
 
 a {
-  color: #1e3a8a;
+  color: var(--action-primary);
   text-decoration: none;
 }
 
 a:hover {
   text-decoration: underline;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0 0 8px;
+  font-family: 'Fraunces', 'Iowan Old Style', 'Times New Roman', serif;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+p {
+  margin: 0 0 8px;
 }

@@ -1,3 +1,14 @@
+"""
+dictionary/state_machine.py
+
+Single source of truth for allowed dictionary entry status transitions.
+
+If you need to change lifecycle behavior:
+1) update transition map
+2) update tests
+3) verify review/archive/delete workflows still pass
+"""
+
 from django.core.exceptions import ValidationError
 
 

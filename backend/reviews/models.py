@@ -1,3 +1,14 @@
+"""
+reviews/models.py
+
+Review persistence models.
+
+Contains:
+- Review: dictionary review actions by round
+- FolkloreReview: folklore equivalent
+- ReviewAdminOverride: admin emergency authority actions
+"""
+
 import uuid
 from django.conf import settings
 from django.db import models
@@ -6,6 +17,13 @@ from folklore.models import FolkloreEntry, FolkloreRevision
 
 
 class Review(models.Model):
+    """
+    Dictionary review record.
+
+    `review_round` supports:
+    - round 0: initial review
+    - round N>0: re-review rounds triggered by flags
+    """
     class Decision(models.TextChoices):
         APPROVE = "approve", "Approve"
         REJECT = "reject", "Reject"
@@ -18,8 +36,8 @@ class Review(models.Model):
         EntryRevision,
         on_delete=models.CASCADE,
         related_name="reviews",
-        null=True,      # TEMPORARY for migration
-        blank=True,     # TEMPORARY for migration
+        null=True,      # kept nullable for migration/backward compatibility
+        blank=True,     # kept nullable for migration/backward compatibility
     )
 
     reviewer = models.ForeignKey(
@@ -52,6 +70,11 @@ class Review(models.Model):
 
 
 class ReviewAdminOverride(models.Model):
+    """
+    Admin override audit record.
+
+    Used for high-priority moderation decisions that supersede normal quorum flow.
+    """
     class TargetType(models.TextChoices):
         DICTIONARY = "dictionary", "Dictionary"
         FOLKLORE = "folklore", "Folklore"
@@ -105,6 +128,11 @@ class ReviewAdminOverride(models.Model):
 
 
 class FolkloreReview(models.Model):
+    """
+    Folklore review record.
+
+    Mirrors dictionary review model semantics.
+    """
     class Decision(models.TextChoices):
         APPROVE = "approve", "Approve"
         REJECT = "reject", "Reject"

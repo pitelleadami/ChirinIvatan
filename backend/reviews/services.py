@@ -54,6 +54,7 @@ def is_reviewer(user):
 # ============================================================
 
 def _latest_flag_review(revision: EntryRevision):
+    # Re-review decisions are scoped to the latest flag round.
     return (
         Review.objects.filter(revision=revision, decision=Review.Decision.FLAG)
         .order_by("-review_round", "-created_at")
@@ -62,6 +63,7 @@ def _latest_flag_review(revision: EntryRevision):
 
 
 def _latest_folklore_flag_review(revision: FolkloreRevision):
+    # Folklore equivalent of the dictionary flag lookup.
     return (
         FolkloreReview.objects.filter(
             folklore_revision=revision,
@@ -73,6 +75,7 @@ def _latest_folklore_flag_review(revision: FolkloreRevision):
 
 
 def _require_admin_with_notes(*, admin_user, notes: str):
+    # Admin overrides are high-impact actions, so notes are mandatory for auditability.
     if not is_admin(admin_user):
         raise ValidationError("Only admins can perform override actions.")
     if not notes.strip():
@@ -255,6 +258,7 @@ def submit_folklore_review(
         and revision.status == FolkloreRevision.Status.APPROVED
     )
 
+    # Phase 1: validate state and role access.
     if decision == FolkloreReview.Decision.FLAG:
         if revision.status != FolkloreRevision.Status.APPROVED:
             raise ValidationError("Only approved folklore revisions can be flagged.")
@@ -295,6 +299,7 @@ def submit_folklore_review(
     ).exists():
         raise ValidationError("You have already reviewed this folklore entry in this round.")
 
+    # Phase 2: persist this review action for the current review round.
     FolkloreReview.objects.create(
         folklore_revision=revision,
         reviewer=reviewer,
@@ -322,6 +327,7 @@ def submit_folklore_review(
         revision.save(update_fields=["status"])
         return revision
 
+    # Phase 3: compute quorum using unique reviewer/admin actors.
     approvals = FolkloreReview.objects.filter(
         folklore_revision=revision,
         decision=FolkloreReview.Decision.APPROVE,
