@@ -1,0 +1,36 @@
+# /etc/systemd/system/chirin-backend.service
+#
+# Copy this file to your server and edit placeholders:
+# - <APP_USER>
+# - <APP_GROUP>
+# - <VENV_PATH>
+# - <BACKEND_ROOT>
+# - <SOCKET_OR_BIND>
+
+[Unit]
+Description=Chirin Ivatan Django Backend (Gunicorn)
+After=network.target
+
+[Service]
+Type=simple
+User=<APP_USER>
+Group=<APP_GROUP>
+WorkingDirectory=<BACKEND_ROOT>
+
+# Load environment variables from backend/.env.production
+EnvironmentFile=<BACKEND_ROOT>/.env.production
+
+Environment=PYTHONUNBUFFERED=1
+
+ExecStart=<VENV_PATH>/bin/gunicorn backend.wsgi:application \
+  --bind <SOCKET_OR_BIND> \
+  --workers 3 \
+  --timeout 120 \
+  --access-logfile - \
+  --error-logfile -
+
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

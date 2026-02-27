@@ -1,0 +1,171 @@
+#!/usr/bin/env bash
+# Bootstrap script template for Ubuntu server deployment
+#
+# What this script does:
+# 1) Installs system dependencies (Python, Node, Nginx, PostgreSQL client, certbot)
+# 2) Creates app directories
+# 3) Sets up Python virtual environment
+# 4) Installs backend/frontend dependencies
+# 5) Runs Django migrate + collectstatic
+# 6) Installs systemd and Nginx configs from deploy templates
+# 7) Starts backend service and reloads Nginx
+#
+# IMPORTANT:
+# - Review and edit variables below before running.
+# - Run as a sudo-capable user on Ubuntu.
+# - This script is a template; adjust paths and domains to your setup.
+
+set -euo pipefail
+
+# ----------------------------
+# Editable variables
+# ----------------------------
+APP_USER="ubuntu"
+APP_GROUP="ubuntu"
+PROJECT_NAME="chirin"
+PROJECT_ROOT="/srv/chirin"
+REPO_URL="https://github.com/<your-org-or-user>/ChirinIvatan.git"
+REPO_BRANCH="main"
+
+DOMAIN_FRONTEND="yourdomain.com"
+DOMAIN_FRONTEND_WWW="www.yourdomain.com"
+DOMAIN_API="api.yourdomain.com"
+
+PYTHON_BIN="python3"
+NODE_SETUP_MAJOR="20"
+
+# Paths
+BACKEND_ROOT="${PROJECT_ROOT}/backend"
+FRONTEND_ROOT="${PROJECT_ROOT}/frontend"
+VENV_PATH="${BACKEND_ROOT}/.venv"
+
+SYSTEMD_TARGET="/etc/systemd/system/chirin-backend.service"
+NGINX_TARGET="/etc/nginx/sites-available/chirin.conf"
+
+# ----------------------------
+# Safety checks
+# ----------------------------
+if [[ "$(id -u)" -eq 0 ]]; then
+  echo "Do not run this script as root directly. Use a sudo-capable user."
+  exit 1
+fi
+
+if [[ -z "${REPO_URL}" || "${REPO_URL}" == *"<your-org-or-user>"* ]]; then
+  echo "Please set REPO_URL before running."
+  exit 1
+fi
+
+if [[ "${DOMAIN_FRONTEND}" == "yourdomain.com" ]]; then
+  echo "Please set DOMAIN_FRONTEND / DOMAIN_API before running."
+  exit 1
+fi
+
+echo "[1/10] Updating apt packages"
+sudo apt-get update -y
+sudo apt-get upgrade -y
+
+echo "[2/10] Installing system packages"
+sudo apt-get install -y \
+  git curl build-essential \
+  nginx certbot python3-certbot-nginx \
+  python3 python3-venv python3-pip \
+  postgresql-client
+
+echo "[3/10] Installing Node.js ${NODE_SETUP_MAJOR}.x"
+curl -fsSL "https://deb.nodesource.com/setup_${NODE_SETUP_MAJOR}.x" | sudo -E bash -
+sudo apt-get install -y nodejs
+
+echo "[4/10] Creating project directories"
+sudo mkdir -p "${PROJECT_ROOT}"
+sudo chown -R "${APP_USER}:${APP_GROUP}" "${PROJECT_ROOT}"
+
+echo "[5/10] Cloning/updating repository"
+if [[ ! -d "${PROJECT_ROOT}/.git" ]]; then
+  git clone --branch "${REPO_BRANCH}" "${REPO_URL}" "${PROJECT_ROOT}"
+else
+  git -C "${PROJECT_ROOT}" fetch --all
+  git -C "${PROJECT_ROOT}" checkout "${REPO_BRANCH}"
+  git -C "${PROJECT_ROOT}" pull --ff-only
+fi
+
+echo "[6/10] Preparing backend virtualenv and dependencies"
+cd "${BACKEND_ROOT}"
+"${PYTHON_BIN}" -m venv "${VENV_PATH}"
+source "${VENV_PATH}/bin/activate"
+pip install --upgrade pip
+# Install Django stack dependencies inferred from project usage.
+# If you later add requirements files, switch to: pip install -r requirements.txt
+pip install django gunicorn psycopg2-binary pillow
+
+echo "[7/10] Preparing frontend dependencies and build"
+cd "${FRONTEND_ROOT}"
+npm ci
+npm run build
+
+# Copy frontend build to a stable Nginx path.
+sudo mkdir -p /var/www/chirin/frontend
+sudo rsync -a --delete "${FRONTEND_ROOT}/dist/" /var/www/chirin/frontend/dist/
+
+# Ensure static/media roots exist.
+sudo mkdir -p /var/www/chirin/static /var/www/chirin/media
+sudo chown -R "${APP_USER}:${APP_GROUP}" /var/www/chirin
+
+echo "[8/10] Running backend migrate + collectstatic"
+cd "${BACKEND_ROOT}"
+
+# Expect backend/.env.production to exist and contain real values.
+if [[ ! -f "${BACKEND_ROOT}/.env.production" ]]; then
+  echo "Missing ${BACKEND_ROOT}/.env.production"
+  echo "Copy from backend/.env.production.example and fill real values first."
+  exit 1
+fi
+
+set -a
+source "${BACKEND_ROOT}/.env.production"
+set +a
+
+python3 manage.py migrate
+python3 manage.py collectstatic --noinput
+python3 manage.py check
+
+echo "[9/10] Installing systemd + nginx configs"
+# systemd service from template
+sudo cp "${PROJECT_ROOT}/deploy/systemd/chirin-backend.service.example" "${SYSTEMD_TARGET}"
+sudo sed -i "s#<APP_USER>#${APP_USER}#g" "${SYSTEMD_TARGET}"
+sudo sed -i "s#<APP_GROUP>#${APP_GROUP}#g" "${SYSTEMD_TARGET}"
+sudo sed -i "s#<VENV_PATH>#${VENV_PATH}#g" "${SYSTEMD_TARGET}"
+sudo sed -i "s#<BACKEND_ROOT>#${BACKEND_ROOT}#g" "${SYSTEMD_TARGET}"
+sudo sed -i "s#<SOCKET_OR_BIND>#127.0.0.1:8000#g" "${SYSTEMD_TARGET}"
+
+# nginx config from template
+sudo cp "${PROJECT_ROOT}/deploy/nginx/chirin.conf.example" "${NGINX_TARGET}"
+sudo sed -i "s#yourdomain.com#${DOMAIN_FRONTEND}#g" "${NGINX_TARGET}"
+sudo sed -i "s#www.yourdomain.com#${DOMAIN_FRONTEND_WWW}#g" "${NGINX_TARGET}"
+sudo sed -i "s#api.yourdomain.com#${DOMAIN_API}#g" "${NGINX_TARGET}"
+sudo sed -i "s#/var/www/chirin/frontend/dist#/var/www/chirin/frontend/dist#g" "${NGINX_TARGET}"
+sudo sed -i "s#/var/www/chirin/static#/var/www/chirin/static#g" "${NGINX_TARGET}"
+sudo sed -i "s#/var/www/chirin/media#/var/www/chirin/media#g" "${NGINX_TARGET}"
+
+# enable nginx site
+if [[ ! -L /etc/nginx/sites-enabled/chirin.conf ]]; then
+  sudo ln -s "${NGINX_TARGET}" /etc/nginx/sites-enabled/chirin.conf
+fi
+if [[ -L /etc/nginx/sites-enabled/default ]]; then
+  sudo rm /etc/nginx/sites-enabled/default
+fi
+
+sudo nginx -t
+
+# enable/restart services
+sudo systemctl daemon-reload
+sudo systemctl enable --now chirin-backend
+sudo systemctl restart chirin-backend
+sudo systemctl reload nginx
+
+echo "[10/10] Obtaining SSL certificates"
+echo "Run these commands manually after DNS is pointing to this server:"
+echo "  sudo certbot --nginx -d ${DOMAIN_FRONTEND} -d ${DOMAIN_FRONTEND_WWW}"
+echo "  sudo certbot --nginx -d ${DOMAIN_API}"
+
+echo "Bootstrap complete."
+echo "Next: follow docs/SPEC-03_DEPLOYMENT_CHECKLIST.md smoke tests."

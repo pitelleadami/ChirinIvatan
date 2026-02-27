@@ -4,6 +4,18 @@ Status: locked handoff for reimplementation
 Audience: backend + frontend engineers rebuilding this exact system  
 Goal: zero room for interpretation drift
 
+Implementation status snapshot (2026-02-27):
+- Backend core workflows: implemented and passing automated tests.
+- Database/migrations: clean (`makemigrations --check` no changes, `migrate --plan` no pending ops).
+- Operational checks: `manage.py check` clean.
+- Main remaining work: frontend product pages/UX polish and graphics/brand integration.
+- Optional backend enhancements can continue, but are not blockers for UI build.
+
+Canonical path note:
+- Active backend root: `backend/`
+- Active frontend root: `frontend/`
+- Use only these two roots for all new development and onboarding.
+
 ---
 
 ## 1. Scope, Sources, and Non-Negotiables

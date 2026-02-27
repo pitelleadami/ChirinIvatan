@@ -1,3 +1,14 @@
+"""
+dictionary/models.py
+
+Core dictionary data structures.
+
+Model roles:
+- Entry: current live/public record.
+- EntryRevision: reviewable snapshots over time.
+- VariantGroup: mother/variant relationship container.
+"""
+
 import uuid
 from django.conf import settings
 from django.db import models
@@ -9,6 +20,7 @@ from django.utils import timezone
 # ============================================
 
 class EntryStatus(models.TextChoices):
+    # Entry-level state machine values.
     DRAFT = "draft", "Draft"
     PENDING = "pending", "Pending"
     APPROVED = "approved", "Approved"
@@ -70,9 +82,8 @@ class Entry(models.Model):
 
     is_mother = models.BooleanField(default=False)
 
-    # -------------------------------
-    # SEMANTIC CORE (MOTHER ONLY)
-    # -------------------------------
+    # Semantic core fields:
+    # authoritative on mother term and inherited by variants in UI.
 
     meaning = models.TextField(blank=True)
     part_of_speech = models.CharField(max_length=100, blank=True)
@@ -86,9 +97,8 @@ class Entry(models.Model):
     english_antonym = models.CharField(max_length=255, blank=True)
     ivatan_antonym = models.CharField(max_length=255, blank=True)
 
-    # -------------------------------
-    # VARIANT-SPECIFIC FIELDS
-    # -------------------------------
+    # Variant-specific fields:
+    # these are editable per variant entry.
 
     term = models.CharField(max_length=255)
 
@@ -116,6 +126,7 @@ class Entry(models.Model):
 
     inflected_forms = models.JSONField(default=dict, blank=True)
 
+    # Attribution fields for currently active media assets.
     audio_contributor = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -131,9 +142,7 @@ class Entry(models.Model):
         blank=True,
     )
 
-    # -------------------------------
-    # GOVERNANCE FIELDS
-    # -------------------------------
+    # Governance + audit fields.
 
     status = models.CharField(
         max_length=30,
@@ -172,12 +181,14 @@ class Entry(models.Model):
     # -------------------------------
 
     def approve(self, approvers):
+        # Entry-level helper used by workflows that finalize approval state.
         self.status = EntryStatus.APPROVED
         self.last_approved_at = timezone.now()
         self.save(update_fields=["status", "last_approved_at"])
         self.last_approved_by.set(approvers)
 
     def archive(self):
+        # Archive also triggers mother fallback recomputation when needed.
         from dictionary.variant_services import handle_mother_removed_or_archived
 
         self.status = EntryStatus.ARCHIVED
@@ -197,6 +208,10 @@ class EntryRevision(models.Model):
     """
     All submissions (new terms, edits, media changes, variant additions)
     are represented as revisions.
+
+    Beginner mental model:
+    - Entry = what public sees now
+    - EntryRevision = proposed/approved versions across time
     """
 
     class Status(models.TextChoices):

@@ -1,3 +1,13 @@
+"""
+folklore/admin.py
+
+Admin moderation interface for folklore entries/revisions.
+
+Design:
+- Entry admin: inspect live records.
+- Revision admin: execute approve/reject/flag via service layer.
+"""
+
 from django import forms
 from django.contrib import admin, messages
 from django.contrib.admin.helpers import ActionForm

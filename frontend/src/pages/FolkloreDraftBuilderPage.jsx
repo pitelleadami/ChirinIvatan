@@ -1,3 +1,13 @@
+/*
+  FolkloreDraftBuilderPage.jsx
+
+  Contributor workflow page for:
+  - create draft
+  - update draft
+  - submit draft
+  - review your own revision list
+*/
+
 import { useState } from 'react'
 
 import { apiRequest } from '../lib/api'

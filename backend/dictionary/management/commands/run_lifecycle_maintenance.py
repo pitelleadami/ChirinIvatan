@@ -1,3 +1,11 @@
+"""
+Management command: run_lifecycle_maintenance
+
+Applies lifecycle automation for dictionary and folklore entries:
+- auto-archive old rejected entries
+- auto-delete old archived entries
+"""
+
 from datetime import timedelta
 
 from django.core.management.base import BaseCommand

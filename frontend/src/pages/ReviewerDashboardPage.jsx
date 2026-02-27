@@ -1,3 +1,12 @@
+/*
+  ReviewerDashboardPage.jsx
+
+  Main moderation workspace:
+  - load all review queues
+  - submit approve/reject/flag decisions
+  - display per-row result/error feedback
+*/
+
 import { useMemo, useState } from 'react'
 
 import QueueSection from '../components/QueueSection'

@@ -1,3 +1,10 @@
+/*
+  FolkloreViewerPage.jsx
+
+  Public folklore browser + detail inspector.
+  Supports quick loading from URL query (`?entry_id=<uuid>`).
+*/
+
 import { useEffect, useState } from 'react'
 
 import { apiRequest } from '../lib/api'

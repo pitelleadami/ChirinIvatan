@@ -1,4 +1,16 @@
-from django.http import Http404, HttpResponse, JsonResponse
+"""
+dictionary/views.py
+
+This file serves dictionary read APIs.
+It assembles response payloads using governance-aware visibility rules.
+
+Quick troubleshooting:
+- Missing expected field in response: check serializer helper in this file.
+- Wrong revision history length: check audience role + services history limits.
+- Semantic mismatch on variant pages: check `_semantic_source_entry`.
+"""
+
+from django.http import Http404, JsonResponse
 from django.views.decorators.http import require_GET
 
 from dictionary.models import Entry, EntryRevision, EntryStatus
@@ -6,10 +18,24 @@ from dictionary.services import get_visible_revision_history
 
 
 def public_dictionary(request):
-    return HttpResponse("Public dictionary view – coming soon.")
+    # Root API index for local development sanity checks.
+    return JsonResponse(
+        {
+            "service": "Chirin Ivatan Backend",
+            "status": "ok",
+            "docs_hint": "Use project docs under /docs for full workflow guides.",
+            "key_endpoints": {
+                "reviews_dashboard": "/api/reviews/dashboard",
+                "dictionary_entry_detail": "/api/dictionary/entries/<entry_uuid>",
+                "folklore_entries": "/api/folklore/entries",
+                "user_profile": "/api/users/<username>",
+            },
+        }
+    )
 
 
 def _is_reviewer_or_admin(user):
+    # Staff audience gets deeper revision visibility than public audience.
     if not user.is_authenticated:
         return False
     if user.is_superuser:
@@ -18,6 +44,7 @@ def _is_reviewer_or_admin(user):
 
 
 def _serialize_revision(revision):
+    # Canonical revision serializer used for history responses.
     return {
         "id": str(revision.id),
         "status": revision.status,
@@ -30,6 +57,7 @@ def _serialize_revision(revision):
 
 
 def _media_url(request, file_field):
+    # Build absolute URL because frontend may run on different origin/port.
     if not file_field:
         return ""
     return request.build_absolute_uri(file_field.url)
@@ -53,6 +81,7 @@ def _semantic_source_entry(entry: Entry):
 
 
 def _serialize_connected_variants(entry: Entry):
+    # Connected variants shown in entry detail page.
     if not entry.variant_group_id:
         return []
 
@@ -76,6 +105,7 @@ def _serialize_connected_variants(entry: Entry):
 
 
 def _serialize_contributors(entry: Entry):
+    # Contributor section in public detail page.
     approved_revision_contributors = (
         EntryRevision.objects.filter(
             entry=entry,
@@ -146,6 +176,18 @@ def _serialize_attribution(entry: Entry):
 
 @require_GET
 def dictionary_entry_detail_view(request, entry_id):
+    """
+    Main dictionary term detail endpoint.
+
+    Includes:
+    - header
+    - semantic_core
+    - variant_section
+    - connected_variants
+    - contributors
+    - attribution
+    - revision_history
+    """
     try:
         entry = (
             Entry.objects.select_related(

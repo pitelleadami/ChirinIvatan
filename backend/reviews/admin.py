@@ -1,3 +1,13 @@
+"""
+reviews/admin.py
+
+Read-only audit views for review decisions and admin overrides.
+
+Why read-only:
+- preserves governance integrity
+- prevents accidental tampering with historical review evidence
+"""
+
 from django.contrib import admin
 from .models import FolkloreReview, Review, ReviewAdminOverride
 

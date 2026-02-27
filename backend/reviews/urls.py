@@ -1,3 +1,12 @@
+"""
+reviews/urls.py
+
+Review governance endpoints:
+- reviewer dashboard
+- decision submission
+- admin override
+"""
+
 from django.urls import path
 
 from reviews.views import (

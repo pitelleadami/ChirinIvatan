@@ -1,3 +1,16 @@
+"""
+folklore/views.py
+
+This file handles folklore API endpoints for:
+- list/detail read views
+- draft create/update/submit workflow
+- contributor-owned revision listing
+
+Troubleshooting:
+- Validation errors usually come from conditional source/media rules.
+- Missing uploads usually means request content type/body format mismatch.
+"""
+
 import json
 
 from django.core.exceptions import ValidationError
@@ -14,6 +27,7 @@ VISIBLE_PUBLIC_STATUSES = [
 
 
 def _serialize_folklore_entry(entry: FolkloreEntry):
+    # Public-list/detail serializer for live folklore entry rows.
     return {
         "entry_id": str(entry.id),
         "title": entry.title,
@@ -28,6 +42,7 @@ def _serialize_folklore_entry(entry: FolkloreEntry):
 
 
 def _serialize_folklore_revision(revision: FolkloreRevision):
+    # Contributor-facing serializer for draft/pending/approved revision rows.
     proposed_data = revision.proposed_data or {}
     return {
         "revision_id": str(revision.id),
@@ -44,12 +59,14 @@ def _serialize_folklore_revision(revision: FolkloreRevision):
 
 
 def _require_authenticated(request):
+    # Shared auth guard for write endpoints.
     if request.user.is_authenticated:
         return None
     return JsonResponse({"detail": "Authentication required."}, status=401)
 
 
 def _parse_json_body(request):
+    # Safe JSON parser: returns controlled 400 on malformed body.
     try:
         return json.loads(request.body or "{}"), None
     except json.JSONDecodeError:
@@ -57,6 +74,7 @@ def _parse_json_body(request):
 
 
 def _parse_request_payload(request):
+    # Supports both JSON and multipart form submissions (for media uploads).
     content_type = (request.content_type or "").lower()
     if "application/json" in content_type:
         return _parse_json_body(request)
@@ -76,6 +94,7 @@ def _as_bool(value, default=False):
 
 
 def _editable_payload_fields(payload):
+    # Whitelist editable fields so unexpected keys are ignored.
     editable_fields = [
         "title",
         "content",
@@ -96,6 +115,7 @@ def _editable_payload_fields(payload):
 
 
 def _submission_missing_fields(*, data, has_photo, has_audio):
+    # Enforces required fields and conditional source/media-source rules.
     missing = []
     for field in ("title", "content", "category"):
         if not str(data.get(field, "")).strip():
@@ -114,6 +134,7 @@ def _submission_missing_fields(*, data, has_photo, has_audio):
 
 
 def _invalid_choice_errors(data):
+    # Explicit enum-choice validation for cleaner user-facing errors.
     errors = []
 
     if "category" in data:
@@ -205,8 +226,15 @@ def create_folklore_entry_view(request):
     )
 
 
-@require_http_methods(["PATCH"])
+@require_http_methods(["PATCH", "POST"])
 def update_folklore_draft_view(request, revision_id):
+    """
+    Update a folklore draft revision.
+
+    Supports both PATCH and POST for practical browser/client compatibility:
+    - PATCH is canonical REST method.
+    - POST fallback helps clients that struggle with multipart PATCH payloads.
+    """
     auth_error = _require_authenticated(request)
     if auth_error:
         return auth_error

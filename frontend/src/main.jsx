@@ -1,3 +1,10 @@
+/*
+  main.jsx
+
+  Frontend bootstrap entry point.
+  Mounts the root React app into #root.
+*/
+
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'

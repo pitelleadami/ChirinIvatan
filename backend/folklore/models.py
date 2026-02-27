@@ -1,3 +1,13 @@
+"""
+folklore/models.py
+
+Folklore domain models.
+
+Split:
+- FolkloreEntry: current public row.
+- FolkloreRevision: reviewable snapshot workflow.
+"""
+
 import uuid
 from django.conf import settings
 from django.db import models
@@ -5,6 +15,15 @@ from django.core.exceptions import ValidationError
 
 
 class FolkloreEntry(models.Model):
+    """
+    Live/public folklore entry.
+
+    Embedded safeguards:
+    - conditional source validation
+    - conditional media-source validation
+    - auto-default license assignment on approval
+    - license immutability after approval
+    """
     DEFAULT_LICENSE = "CC BY-NC 4.0"
 
     class Status(models.TextChoices):
@@ -70,6 +89,7 @@ class FolkloreEntry(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     def save(self, *args, **kwargs):
+        # Always validate before persisting.
         update_fields = kwargs.get("update_fields")
         self.clean()
 
@@ -99,6 +119,7 @@ class FolkloreEntry(models.Model):
         super().save(*args, **kwargs)
 
     def clean(self):
+        # Controlled-choice validation.
         valid_municipalities = {choice for choice, _ in self.MunicipalitySource.choices}
         if self.municipality_source not in valid_municipalities:
             raise ValidationError("Invalid municipality_source value.")
@@ -119,6 +140,10 @@ class FolkloreEntry(models.Model):
 class FolkloreRevision(models.Model):
     """
     Submission/revision object for folklore content.
+
+    Beginner model:
+    - live entry = current public state
+    - revision row = submitted version waiting for approval lifecycle
     """
 
     class Status(models.TextChoices):
