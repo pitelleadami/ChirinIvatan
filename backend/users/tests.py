@@ -351,6 +351,20 @@ class PublicUserProfileApiTests(TestCase):
         self.assertEqual(payload["lists"]["approved_mother_terms"], [])
         self.assertEqual(payload["lists"]["approved_folklore_entries"], [])
 
+    def test_public_profile_works_without_user_profile_row(self):
+        bare_user = User.objects.create_user(
+            username="bare_user",
+            password="testpass123",
+        )
+
+        response = self.client.get(f"/api/users/{bare_user.username}")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["header"]["username"], bare_user.username)
+        self.assertEqual(payload["header"]["municipality"], "")
+        self.assertEqual(payload["header"]["affiliation"], "")
+
 
 class RoleOnboardingFlowTests(TestCase):
     def setUp(self):
@@ -464,6 +478,34 @@ class RoleOnboardingFlowTests(TestCase):
 
         self.invitee.refresh_from_db()
         self.assertTrue(self.invitee.groups.filter(name="Reviewer").exists())
+
+    def test_admin_users_endpoint_lists_people_with_profiles_and_stats(self):
+        contributor_group, _ = Group.objects.get_or_create(name="Contributor")
+        self.applicant.groups.add(contributor_group)
+        profile, _ = UserProfile.objects.get_or_create(user=self.applicant)
+        profile.municipality = "Basco"
+        profile.affiliation = "Community archive"
+        profile.save()
+        stats, _ = UserContributionStats.objects.get_or_create(user=self.applicant)
+        stats.combined_total = 3
+        stats.review_completed_total = 1
+        stats.save()
+
+        self.client.force_login(self.admin_user)
+        response = self.client.get("/api/admin/users?q=Basco&group=Contributor")
+
+        self.assertEqual(response.status_code, 200)
+        rows = response.json()["rows"]
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["username"], self.applicant.username)
+        self.assertEqual(rows[0]["profile"]["municipality"], "Basco")
+        self.assertEqual(rows[0]["stats"]["combined_total"], 3)
+        self.assertIn("Contributor", rows[0]["groups"])
+
+    def test_admin_users_endpoint_requires_admin_access(self):
+        self.client.force_login(self.reviewer_a)
+        response = self.client.get("/api/admin/users")
+        self.assertEqual(response.status_code, 403)
 
 
 class CulturalStewardshipTests(TestCase):

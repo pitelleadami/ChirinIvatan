@@ -1,5 +1,10 @@
+@import url('https://fonts.googleapis.com/css2?family=Baskervville+SC&family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,700;0,9..144,800;1,9..144,400;1,9..144,700;1,9..144,800&family=Manrope:wght@400;500;600;700;800&display=swap');
+
 :root {
-  --bg-app: #ecf0e6;
+  /* Color tokens (from Figma 00 Foundations) */
+  --bg-app: rgba(113, 188, 32, 0.05);
+  --bg-topbar: #e9efc3;
+  --bg-panel-soft: #f8f9f6;
   --bg-panel: #f8f9f6;
   --bg-panel-strong: #ffffff;
   --text-primary: #122312;
@@ -13,8 +18,48 @@
   --status-success-text: #14522a;
   --status-error-bg: #fbeceb;
   --status-error-text: #812121;
+  --white: #ffffff;
 
-  font-family: 'Manrope', 'Avenir Next', 'Segoe UI', sans-serif;
+  /* Typography tokens */
+  --font-heading: 'Fraunces', 'Iowan Old Style', 'Times New Roman', serif;
+  --font-body: 'Manrope', 'Avenir Next', 'Segoe UI', sans-serif;
+  --type-h1-size: 52px;
+  --type-h1-line: 60px;
+  --type-h2-size: 34px;
+  --type-h2-line: 42px;
+  --type-h3-size: 24px;
+  --type-h3-line: 32px;
+  --type-body-size: 16px;
+  --type-body-line: 26px;
+  --type-meta-size: 13px;
+  --type-meta-line: 20px;
+  --type-button-size: 14px;
+  --type-button-line: 20px;
+
+  /* Spacing tokens */
+  --space-8: 8px;
+  --space-10: 10px;
+  --space-12: 12px;
+  --space-14: 14px;
+  --space-16: 16px;
+  --space-20: 20px;
+  --space-24: 24px;
+  --space-32: 32px;
+  --space-40: 40px;
+
+  /* Radius tokens */
+  --radius-8: 8px;
+  --radius-10: 10px;
+  --radius-12: 12px;
+  --radius-pill: 999px;
+
+  /* Component helper tokens */
+  --input-border: var(--border-default);
+  --badge-border: var(--border-default);
+  --badge-bg: var(--bg-panel-soft);
+  --meta-color: var(--text-muted);
+
+  font-family: var(--font-body);
   line-height: 1.5;
   font-weight: 400;
   color: var(--text-primary);
@@ -33,7 +78,7 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background: linear-gradient(180deg, #dbe7bf 0 104px, var(--bg-app) 104px 100%);
+  background: var(--bg-app);
 }
 
 a {
@@ -48,12 +93,12 @@ a:hover {
 h1,
 h2,
 h3 {
-  margin: 0 0 8px;
-  font-family: 'Fraunces', 'Iowan Old Style', 'Times New Roman', serif;
+  margin: 0 0 var(--space-8);
+  font-family: var(--font-heading);
   font-weight: 700;
   letter-spacing: -0.02em;
 }
 
 p {
-  margin: 0 0 8px;
+  margin: 0 0 var(--space-8);
 }

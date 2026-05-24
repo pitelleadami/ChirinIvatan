@@ -501,7 +501,8 @@ def submit_review(*, revision: EntryRevision, reviewer, decision, notes=""):
 
         # Normal rejection
         revision.status = EntryRevision.Status.REJECTED
-        revision.save(update_fields=["status"])
+        revision.reviewer_notes = notes
+        revision.save(update_fields=["status", "reviewer_notes"])
         return revision
 
     # ========================================================

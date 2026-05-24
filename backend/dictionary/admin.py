@@ -33,6 +33,7 @@ class EntryRevisionAdminForm(forms.ModelForm):
     meaning = forms.CharField(required=False, widget=forms.Textarea)
     part_of_speech = forms.CharField(required=False)
     pronunciation_text = forms.CharField(required=False)
+    phonetic = forms.CharField(required=False)
     audio_pronunciation = forms.FileField(required=False)
     audio_source = forms.CharField(required=False, widget=forms.Textarea)
     audio_source_is_self_recorded = forms.BooleanField(required=False)
@@ -67,6 +68,7 @@ class EntryRevisionAdminForm(forms.ModelForm):
                 "meaning": entry.meaning,
                 "part_of_speech": entry.part_of_speech,
                 "pronunciation_text": entry.pronunciation_text,
+                "phonetic": entry.phonetic,
                 "audio_source": entry.audio_source,
                 "audio_source_is_self_recorded": entry.audio_source_is_self_recorded,
                 "variant_type": entry.variant_type,
@@ -94,6 +96,7 @@ class EntryRevisionAdminForm(forms.ModelForm):
             "meaning",
             "part_of_speech",
             "pronunciation_text",
+            "phonetic",
             "audio_source",
             "variant_type",
             "usage_notes",
@@ -132,6 +135,7 @@ class EntryRevisionAdminForm(forms.ModelForm):
             "meaning",
             "part_of_speech",
             "pronunciation_text",
+            "phonetic",
             "audio_source",
             "variant_type",
             "usage_notes",

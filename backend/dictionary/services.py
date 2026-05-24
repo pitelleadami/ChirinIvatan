@@ -21,6 +21,7 @@ ENTRY_SNAPSHOT_FIELDS = (
     "english_antonym",
     "ivatan_antonym",
     "pronunciation_text",
+    "phonetic",
     "audio_pronunciation",
     "audio_source",
     "audio_source_is_self_recorded",
@@ -86,9 +87,19 @@ def get_visible_revision_history(*, entry: Entry, audience: str = "public") -> d
         .order_by("-approved_at", "-created_at")[: REVISION_HISTORY_LIMITS[audience]]
     )
 
+    recent_rejected = list(
+        EntryRevision.objects.filter(
+            entry=entry,
+            status=EntryRevision.Status.REJECTED,
+            is_base_snapshot=False,
+        )
+        .order_by("-created_at")[: REVISION_HISTORY_LIMITS[audience]]
+    )
+
     return {
         "base_snapshot": base_snapshot,
         "recent_approved_revisions": recent_approved,
+        "recent_rejected_revisions": recent_rejected,
     }
 
 

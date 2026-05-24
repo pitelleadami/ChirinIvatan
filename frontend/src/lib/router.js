@@ -1,10 +1,18 @@
 export const ROUTES = {
   home: '/',
+  login: '/login',
+  about: '/about',
+  yaru: '/yaru',
+  faqs: '/faqs',
+  manual: '/manual',
   dashboard: '/dashboard',
+  adminApplications: '/admin-applications',
   dictionaryView: '/dictionary-view',
+  dictionaryDraft: '/dictionary-draft',
   folkloreView: '/folklore-view',
   folkloreDraft: '/folklore-draft',
   profileView: '/profile-view',
+  profileEdit: '/profile-edit',
   leaderboards: '/leaderboards',
   roleCenter: '/roles',
 }

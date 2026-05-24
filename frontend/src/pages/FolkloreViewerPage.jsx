@@ -8,12 +8,66 @@
 import { useEffect, useState } from 'react'
 
 import { apiRequest } from '../lib/api'
+import { ROUTES, navigate } from '../lib/router'
 
-export default function FolkloreViewerPage() {
+function formatDate(value) {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('en', { month: 'short', day: 'numeric', year: 'numeric' }).format(date)
+}
+
+function getYouTubeEmbedUrl(value) {
+  if (!value) return ''
+  try {
+    const url = new URL(value)
+    if (url.hostname.includes('youtube.com')) {
+      const videoId = url.searchParams.get('v')
+      return videoId ? `https://www.youtube.com/embed/${videoId}` : ''
+    }
+    if (url.hostname === 'youtu.be') {
+      const videoId = url.pathname.replace('/', '')
+      return videoId ? `https://www.youtube.com/embed/${videoId}` : ''
+    }
+  } catch {
+    return ''
+  }
+  return ''
+}
+
+function DetailRow({ label, value, maskedLabel = '[hidden]' }) {
+  const displayValue = value || maskedLabel
+  return (
+    <div className="detail-row">
+      <dt>{label}</dt>
+      <dd>{displayValue}</dd>
+    </div>
+  )
+}
+
+function MediaLink({ label, url }) {
+  if (!url) {
+    return <DetailRow label={label} value="-" maskedLabel="-" />
+  }
+
+  return (
+    <div className="detail-row">
+      <dt>{label}</dt>
+      <dd>
+        <a href={url} target="_blank" rel="noreferrer">
+          Open media
+        </a>
+      </dd>
+    </div>
+  )
+}
+
+export default function FolkloreViewerPage({ currentUser }) {
   const [entryId, setEntryId] = useState('')
   const [loadingList, setLoadingList] = useState(false)
   const [loadingDetail, setLoadingDetail] = useState(false)
   const [error, setError] = useState('')
+  const [listLoaded, setListLoaded] = useState(false)
   const [listRows, setListRows] = useState([])
   const [detail, setDetail] = useState(null)
 
@@ -24,6 +78,7 @@ export default function FolkloreViewerPage() {
       // Beginner note: this endpoint only returns public-visible folklore entries.
       const payload = await apiRequest('/api/folklore/entries')
       setListRows(payload.rows || [])
+      setListLoaded(true)
     } catch (requestError) {
       setError(requestError.message)
     } finally {
@@ -71,68 +126,104 @@ export default function FolkloreViewerPage() {
 
   return (
     <>
-      <section className="panel">
-        <h2>Folklore Viewer</h2>
-        <p className="muted">
-          View public folklore entries and inspect source/media masking behavior from a readable page.
-        </p>
-        <div className="field">
-          <label htmlFor="folklore-entry-id">Entry UUID</label>
+      <section className="folklore-hero-panel">
+        <div className="viewer-hero-heading">
+          <div>
+            <p className="profile-kicker">Ivatan Folklore Archive</p>
+            <h2>Folklore</h2>
+            <p className="muted">Browse community-approved stories, songs, proverbs, idioms, and legends.</p>
+          </div>
+          {currentUser?.is_authenticated && (
+            <button onClick={() => navigate(ROUTES.folkloreDraft)}>Add Folklore Entry</button>
+          )}
+        </div>
+        <div className="folklore-lookup-row">
           <input
             id="folklore-entry-id"
             value={entryId}
             onChange={(event) => setEntryId(event.target.value)}
-            placeholder="e.g. 6f1c7e07-8a6f-4fc1-..."
+            placeholder="Open by entry UUID"
           />
-        </div>
-        <div className="actions">
           <button disabled={loadingDetail} onClick={() => loadDetail()}>
-            {loadingDetail ? 'Loading Detail...' : 'Load Detail'}
+            {loadingDetail ? 'Loading...' : 'Open'}
           </button>
-          <button className="ghost" disabled={loadingList} onClick={loadPublicList}>
-            {loadingList ? 'Refreshing List...' : 'Refresh Public List'}
+          <button className="ghost" disabled={loadingList} onClick={() => loadPublicList()}>
+            {loadingList ? 'Refreshing...' : 'Refresh'}
           </button>
         </div>
       </section>
 
       {error && <div className="alert error">{error}</div>}
 
-      <section className="panel">
-        <h3>Public List</h3>
-        {listRows.length === 0 && <p className="muted">No rows loaded yet.</p>}
-        {listRows.map((row) => (
-          <article key={row.entry_id} className="queue-card">
-            <p className="meta">Title: {row.title}</p>
-            <p className="meta">Category: {row.category}</p>
-            <p className="meta">Municipality: {row.municipality_source}</p>
-            <p className="meta">Status: {row.status}</p>
-            <div className="actions">
-              <button
-                className="ghost"
-                onClick={() => loadDetail(row.entry_id)}
-              >
-                Open Detail
+      <section className="folklore-browser">
+        <div className="section-heading">
+          <div>
+            <h3>Public Collection</h3>
+            <p className="muted">Only approved and approved-under-review entries appear here.</p>
+          </div>
+          {listLoaded && <span className="badge">{listRows.length} entries</span>}
+        </div>
+        {!listLoaded && loadingList && <p className="muted">Loading public folklore entries...</p>}
+        {!listLoaded && !loadingList && <p className="muted">Public list not loaded yet.</p>}
+        {listLoaded && listRows.length === 0 && <p className="muted">No public folklore entries found.</p>}
+        <div className="folklore-card-grid">
+          {listRows.map((row) => (
+            <article key={row.entry_id} className="folklore-card">
+              <p className="profile-kicker">{row.category || 'Folklore'}</p>
+              <h3>{row.title || '(untitled folklore)'}</h3>
+              <p className="meta">{row.municipality_source || '-'} | {formatDate(row.created_at)}</p>
+              <p className="meta">Contributor: {row.contributor_username || '-'}</p>
+              <button className="ghost" onClick={() => loadDetail(row.entry_id)}>
+                Read Entry
               </button>
-            </div>
-          </article>
-        ))}
+            </article>
+          ))}
+        </div>
       </section>
 
       {detail && (
-        <section className="panel">
-          <h3>Entry Detail</h3>
-          <p className="meta">Entry ID: {detail.entry_id}</p>
-          <p className="meta">Title: {detail.title}</p>
-          <p className="meta">Category: {detail.category}</p>
-          <p className="meta">Municipality: {detail.municipality_source}</p>
-          <p className="meta">Status: {detail.status}</p>
-          <p className="meta">Contributor: {detail.contributor}</p>
-          <p className="meta">Source (masked if self-knowledge): {detail.source || '[hidden]'}</p>
-          <p className="meta">Media Source (masked if self-produced): {detail.media_source || '[hidden]'}</p>
-          <p className="meta">Media URL: {detail.media_url || '-'}</p>
-          <p className="meta">Photo URL: {detail.photo_upload_url || '-'}</p>
-          <p className="meta">Audio URL: {detail.audio_upload_url || '-'}</p>
-          <p className="meta">Copyright: {detail.copyright_usage || '-'}</p>
+        <section className="folklore-detail-panel">
+          <div className="section-heading">
+            <div>
+              <p className="profile-kicker">{detail.category || 'Folklore Entry'}</p>
+              <h3>{detail.title || '(untitled folklore)'}</h3>
+              <p className="muted">{detail.municipality_source || '-'} | Contributed by {detail.contributor || '-'}</p>
+            </div>
+            <span className="badge">{detail.status}</span>
+          </div>
+
+          <div className="detail-layout">
+            <article className="detail-main">
+              {getYouTubeEmbedUrl(detail.media_url) && (
+                <div className="youtube-embed-wrap">
+                  <iframe
+                    src={getYouTubeEmbedUrl(detail.media_url)}
+                    title={detail.title || 'Folklore video'}
+                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                    allowFullScreen
+                  />
+                </div>
+              )}
+              {detail.photo_upload_url && <img className="folklore-photo-preview" src={detail.photo_upload_url} alt="" />}
+              <h2>{detail.title || '(untitled folklore)'}</h2>
+              <p className="story-text">{detail.content || 'No content provided.'}</p>
+            </article>
+
+            <aside className="detail-side">
+              <dl className="detail-list">
+                <DetailRow label="Category" value={detail.category} maskedLabel="-" />
+                <DetailRow label="Municipality" value={detail.municipality_source} maskedLabel="-" />
+                <DetailRow label="Contributor" value={detail.contributor} maskedLabel="-" />
+                <DetailRow label="Date Added" value={formatDate(detail.created_at)} maskedLabel="-" />
+                <DetailRow label="Source" value={detail.source} />
+                <DetailRow label="Media Source" value={detail.media_source} />
+                <MediaLink label="Media URL" url={detail.media_url} />
+                <MediaLink label="Photo" url={detail.photo_upload_url} />
+                <MediaLink label="Audio" url={detail.audio_upload_url} />
+                <DetailRow label="Copyright" value={detail.copyright_usage} maskedLabel="-" />
+              </dl>
+            </aside>
+          </div>
         </section>
       )}
     </>

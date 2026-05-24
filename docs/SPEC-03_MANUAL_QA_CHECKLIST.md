@@ -54,7 +54,31 @@ Simple editable worksheet (no table):
 
 ## 4) Dictionary QA from Site/Admin
 
-## A. Admin Form Field Exposure
+## A. Contributor Dictionary Draft Builder
+1. Open frontend dictionary contributor page:
+   - `http://127.0.0.1:5174/dictionary-draft`
+2. Create a new draft with:
+   - term
+   - meaning
+   - part_of_speech
+   - optional variant/source/example fields
+3. Expected:
+   - draft created successfully
+   - revision ID displayed
+4. Update the same draft.
+5. Expected:
+   - latest field values persist
+6. Submit the draft.
+7. Expected:
+   - status transitions from `draft` to `pending`
+8. Start a revision from an existing approved entry ID.
+9. Expected:
+   - current approved entry values prefill into a new draft revision
+10. For `inflected_forms`, enter invalid JSON and submit/update.
+11. Expected:
+   - controlled validation error
+
+## B. Admin Form Field Exposure
 1. Open admin:
    - `http://127.0.0.1:8000/admin/`
 2. Go to Dictionary -> Entry revisions -> open a revision.
@@ -67,7 +91,7 @@ Simple editable worksheet (no table):
      - inflected_forms
      - photo fields
 
-## B. Approval/Rejection Actions
+## C. Approval/Rejection Actions
 1. In Dictionary -> Entry revisions list, select a `pending` revision.
 2. Run action `Approve selected revisions`.
 3. Expected:
@@ -77,7 +101,7 @@ Simple editable worksheet (no table):
 5. Expected:
    - revision becomes `rejected`
 
-## C. Public Entry View Behavior
+## D. Public Entry View Behavior
 1. Open:
    - `http://127.0.0.1:8000/api/dictionary/entries/<entry_uuid>`
 2. Expected:
@@ -164,10 +188,11 @@ Note:
 Mark GO only if all are true:
 1. Baseline tests pass.
 2. Role-based access responses are correct (401/403/200).
-3. Dictionary and folklore approval/rejection/re-review outcomes match spec.
-4. Folklore conditional validation rules behave exactly as expected.
-5. Public visibility and masking rules are correct.
-6. Revision history limits and audience visibility are correct.
+3. Dictionary contributor draft flow works (create/start-edit/update/submit).
+4. Dictionary and folklore approval/rejection/re-review outcomes match spec.
+5. Folklore conditional validation rules behave exactly as expected.
+6. Public visibility and masking rules are correct.
+7. Revision history limits and audience visibility are correct.
 
 If any check fails, log:
 - exact URL or screen

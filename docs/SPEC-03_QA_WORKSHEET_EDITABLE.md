@@ -88,6 +88,30 @@ If all items below pass and no item is blocked, you can reasonably mark backend/
   - Remarks:
   - Evidence:
 
+- [ ] `DI-02A` Contributor dictionary page can create a new draft
+  - How to check: Open frontend Dictionary Draft Builder, enter required fields, create draft, confirm revision ID appears.
+  - Status:
+  - Remarks:
+  - Evidence:
+
+- [ ] `DI-02B` Contributor dictionary page can start edit from approved entry
+  - How to check: Paste approved entry ID into Dictionary Draft Builder, start revision, confirm approved values preload into form.
+  - Status:
+  - Remarks:
+  - Evidence:
+
+- [ ] `DI-02C` Contributor dictionary page can update existing draft
+  - How to check: Change one or more fields in draft form, update draft, then reload own revisions and confirm values persist.
+  - Status:
+  - Remarks:
+  - Evidence:
+
+- [ ] `DI-02D` Invalid `inflected_forms` JSON gives controlled error
+  - How to check: Enter invalid JSON in `inflected_forms`, create/update draft, confirm readable validation error.
+  - Status:
+  - Remarks:
+  - Evidence:
+
 - [ ] `DI-03` First approve only: remains pending (no quorum yet)
   - How to check: As reviewer A, approve a pending revision once; confirm still pending.
   - Status:

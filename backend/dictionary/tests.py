@@ -1,5 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
@@ -439,6 +440,277 @@ class DictionaryEntryDetailApiTests(TestCase):
         self.assertIsNone(attribution["audio"]["contributed_by"])
         self.assertEqual(attribution["photo"]["source"], "")
         self.assertEqual(attribution["photo"]["contributed_by"], "api_contrib")
+
+
+class DictionaryRevisionApiTests(TestCase):
+    def setUp(self):
+        self.contributor = User.objects.create_user(
+            username="dict_contributor",
+            password="testpass123",
+        )
+        self.other_user = User.objects.create_user(
+            username="dict_other",
+            password="testpass123",
+        )
+        self.entry = Entry.objects.create(
+            term="rayu",
+            meaning="far",
+            part_of_speech="adjective",
+            status=EntryStatus.APPROVED,
+            initial_contributor=self.contributor,
+            last_revised_by=self.contributor,
+            inflected_forms={"root": "rayu"},
+        )
+
+    def test_create_update_submit_and_list_dictionary_revision(self):
+        self.client.force_login(self.contributor)
+
+        create_response = self.client.post(
+            "/api/dictionary/revisions/create",
+            data={
+                "term": "chirin",
+                "meaning": "word or language",
+                "part_of_speech": "noun",
+                "phonetic": "/tʃi.rin/",
+                "term_source_is_self_knowledge": "true",
+                "inflected_forms": '{"plural": "chirin"}',
+            },
+        )
+        self.assertEqual(create_response.status_code, 201)
+        revision_id = create_response.json()["revision_id"]
+        self.assertEqual(create_response.json()["proposed_data"]["phonetic"], "/tʃi.rin/")
+
+        update_response = self.client.post(
+            f"/api/dictionary/revisions/{revision_id}",
+            data={
+                "meaning": "language; speech",
+                "variant_type": "general",
+            },
+        )
+        self.assertEqual(update_response.status_code, 200)
+        self.assertEqual(update_response.json()["meaning"], "language; speech")
+
+        list_response = self.client.get("/api/dictionary/revisions/my")
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(len(list_response.json()["rows"]), 1)
+
+        submit_response = self.client.post(
+            f"/api/dictionary/revisions/{revision_id}/submit"
+        )
+        self.assertEqual(submit_response.status_code, 200)
+        self.assertEqual(submit_response.json()["status"], EntryRevision.Status.PENDING)
+
+    def test_start_revision_from_existing_entry_uses_snapshot(self):
+        self.client.force_login(self.other_user)
+
+        response = self.client.post(
+            f"/api/dictionary/entries/{self.entry.id}/revisions/start"
+        )
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertEqual(payload["entry_id"], str(self.entry.id))
+        self.assertEqual(payload["term"], "rayu")
+        self.assertEqual(payload["meaning"], "far")
+
+    def test_submit_requires_term(self):
+        revision = EntryRevision.objects.create(
+            contributor=self.contributor,
+            proposed_data={"meaning": "missing term"},
+            status=EntryRevision.Status.DRAFT,
+        )
+        self.client.force_login(self.contributor)
+
+        response = self.client.post(f"/api/dictionary/revisions/{revision.id}/submit")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("headword is required", response.json()["detail"])
+
+    def test_submit_requires_meaning(self):
+        revision = EntryRevision.objects.create(
+            contributor=self.contributor,
+            proposed_data={"term": "missing-meaning"},
+            status=EntryRevision.Status.DRAFT,
+        )
+        self.client.force_login(self.contributor)
+
+        response = self.client.post(f"/api/dictionary/revisions/{revision.id}/submit")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("meaning is required", response.json()["detail"])
+
+    def test_submit_requires_audio_source_when_audio_not_self_recorded(self):
+        revision = EntryRevision.objects.create(
+            contributor=self.contributor,
+            proposed_data={
+                "term": "with-audio",
+                "meaning": "has audio",
+                "term_source_is_self_knowledge": True,
+                "audio_pronunciation": "dictionary/audio/sample.mp3",
+                "audio_source_is_self_recorded": False,
+                "audio_source": "",
+            },
+            status=EntryRevision.Status.DRAFT,
+        )
+        self.client.force_login(self.contributor)
+
+        response = self.client.post(f"/api/dictionary/revisions/{revision.id}/submit")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("audio source is required", response.json()["detail"])
+
+    def test_submit_requires_photo_source_when_photo_not_contributor_owned(self):
+        revision = EntryRevision.objects.create(
+            contributor=self.contributor,
+            proposed_data={
+                "term": "with-photo",
+                "meaning": "has photo",
+                "term_source_is_self_knowledge": True,
+                "photo": "dictionary/photos/sample.jpg",
+                "photo_source_is_contributor_owned": False,
+                "photo_source": "",
+            },
+            status=EntryRevision.Status.DRAFT,
+        )
+        self.client.force_login(self.contributor)
+
+        response = self.client.post(f"/api/dictionary/revisions/{revision.id}/submit")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("photo source is required", response.json()["detail"])
+
+    def test_submit_requires_headword_source_when_not_self_knowledge(self):
+        revision = EntryRevision.objects.create(
+            contributor=self.contributor,
+            proposed_data={
+                "term": "with-source-gap",
+                "meaning": "missing citation",
+                "term_source_is_self_knowledge": False,
+                "source_text": "",
+            },
+            status=EntryRevision.Status.DRAFT,
+        )
+        self.client.force_login(self.contributor)
+
+        response = self.client.post(f"/api/dictionary/revisions/{revision.id}/submit")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("headword source is required", response.json()["detail"])
+
+    def test_create_requires_headword_source_when_not_self_knowledge(self):
+        self.client.force_login(self.contributor)
+
+        response = self.client.post(
+            "/api/dictionary/revisions/create",
+            data={
+                "term": "source-gap",
+                "meaning": "missing source",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("headword source is required", response.json()["detail"])
+
+    def test_user_cannot_update_someone_elses_revision(self):
+        revision = EntryRevision.objects.create(
+            contributor=self.contributor,
+            proposed_data={"term": "private"},
+            status=EntryRevision.Status.DRAFT,
+        )
+        self.client.force_login(self.other_user)
+
+        response = self.client.post(
+            f"/api/dictionary/revisions/{revision.id}",
+            data={"term": "changed"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_invalid_inflected_forms_returns_400(self):
+        self.client.force_login(self.contributor)
+
+        response = self.client.post(
+            "/api/dictionary/revisions/create",
+            data={
+                "term": "bad-json",
+                "inflected_forms": "not json",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("inflected_forms", response.json()["detail"])
+
+    def test_create_revision_accepts_structured_variants(self):
+        self.client.force_login(self.contributor)
+
+        response = self.client.post(
+            "/api/dictionary/revisions/create",
+            data={
+                "term": "main-term",
+                "meaning": "main meaning",
+                "variant_type": "General Ivatan",
+                "term_source_is_self_knowledge": "true",
+                "variants": '[{"term": "variant-term", "variant_type": "Isamurong", "pronunciation_text": "va-ri-ant"}]',
+            },
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["variants"][0]["term"], "variant-term")
+        self.assertEqual(response.json()["variants"][0]["variant_type"], "Isamurong")
+
+    def test_create_revision_accepts_variant_audio_upload(self):
+        self.client.force_login(self.contributor)
+
+        response = self.client.post(
+            "/api/dictionary/revisions/create",
+            data={
+                "term": "main-term",
+                "meaning": "main meaning",
+                "term_source_is_self_knowledge": "true",
+                "variants": '[{"term": "variant-term", "variant_type": "Isamurong", "pronunciation_text": "va-ri-ant"}]',
+                "variant_audio_0": SimpleUploadedFile(
+                    "variant.wav",
+                    b"RIFF....WAVEfmt ",
+                    content_type="audio/wav",
+                ),
+            },
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertIn(
+            "dictionary/audio/variant",
+            response.json()["variants"][0]["audio_pronunciation"],
+        )
+
+    def test_invalid_variants_returns_400(self):
+        self.client.force_login(self.contributor)
+
+        response = self.client.post(
+            "/api/dictionary/revisions/create",
+            data={
+                "term": "bad-variants",
+                "meaning": "bad variants meaning",
+                "variants": "not json",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("variants", response.json()["detail"])
+
+    def test_invalid_variant_item_returns_400(self):
+        self.client.force_login(self.contributor)
+
+        response = self.client.post(
+            "/api/dictionary/revisions/create",
+            data={
+                "term": "bad-variant-item",
+                "meaning": "bad variant item meaning",
+                "variants": '["not an object"]',
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("variant", response.json()["detail"])
 
 
 class VariantGovernanceTests(TestCase):

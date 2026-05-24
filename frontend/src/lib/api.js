@@ -28,10 +28,17 @@ export async function apiRequest(path, options = {}) {
   })
 
   let body = {}
+  let rawText = ''
   try {
-    body = await response.json()
+    rawText = await response.text()
+    body = rawText ? JSON.parse(rawText) : {}
   } catch {
-    body = { detail: `Request failed with status ${response.status}` }
+    const csrfFailure = rawText.includes('CSRF verification failed')
+    body = {
+      detail: csrfFailure
+        ? 'CSRF verification failed. Confirm backend trusts the current Vite port and refresh after logging in.'
+        : `Request failed with status ${response.status}`,
+    }
   }
 
   if (!response.ok) {

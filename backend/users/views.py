@@ -11,8 +11,10 @@ business rules live in services (role_onboarding.py, recognition.py),
 while this file handles request parsing and response shaping.
 """
 
-from django.contrib.auth import get_user_model
+from django.contrib.auth import authenticate, get_user_model, login, logout
 from django.http import Http404, JsonResponse
+from django.db.models import Q
+from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_http_methods
 import json
 
@@ -24,6 +26,7 @@ from users.models import (
     MunicipalityStats,
     RecognitionEvent,
     RoleApplication,
+    UserProfile,
 )
 from users.role_onboarding import (
     can_screen_roles,
@@ -31,6 +34,7 @@ from users.role_onboarding import (
     decide_role_application,
     format_accountability_label,
     invite_user_to_role,
+    is_admin,
 )
 from users.recognition import (
     build_gamification_profile_payload,
@@ -41,6 +45,205 @@ from django.core.exceptions import ValidationError
 
 
 User = get_user_model()
+
+
+def _safe_profile(user):
+    try:
+        return user.profile
+    except UserProfile.DoesNotExist:
+        return None
+
+
+def _serialize_auth_user(user):
+    profile = _safe_profile(user)
+    groups = list(user.groups.order_by("name").values_list("name", flat=True))
+    photo_url = ""
+    if profile and profile.profile_photo:
+        photo_url = profile.profile_photo.url
+    return {
+        "username": user.username,
+        "is_authenticated": user.is_authenticated,
+        "is_staff": user.is_staff,
+        "is_superuser": user.is_superuser,
+        "groups": groups,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "municipality": profile.municipality if profile else "",
+        "profile_photo": photo_url,
+    }
+
+
+def _serialize_private_profile(request, user):
+    profile, _ = UserProfile.objects.get_or_create(user=user)
+    photo_url = ""
+    if profile.profile_photo:
+        photo_url = request.build_absolute_uri(profile.profile_photo.url)
+    return {
+        "username": user.username,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "email": user.email,
+        "municipality": profile.municipality,
+        "affiliation": profile.affiliation,
+        "occupation": profile.occupation,
+        "bio": profile.bio,
+        "profile_photo": photo_url,
+    }
+
+
+def _serialize_role_application(request, application):
+    applicant = application.applicant
+    profile = _safe_profile(applicant)
+    groups = list(applicant.groups.order_by("name").values_list("name", flat=True))
+    decisions = application.decisions.select_related("decided_by").order_by("created_at")
+    return {
+        "application_id": str(application.id),
+        "target_role": application.target_role,
+        "status": application.status,
+        "created_at": application.created_at.isoformat(),
+        "updated_at": application.updated_at.isoformat(),
+        "decided_at": application.decided_at.isoformat() if application.decided_at else None,
+        "applicant": {
+            "username": applicant.username,
+            "first_name": applicant.first_name,
+            "last_name": applicant.last_name,
+            "email": applicant.email,
+            "municipality": profile.municipality if profile else "",
+            "affiliation": profile.affiliation if profile else "",
+            "occupation": profile.occupation if profile else "",
+            "groups": groups,
+            "profile_photo": (
+                request.build_absolute_uri(profile.profile_photo.url)
+                if profile and profile.profile_photo
+                else ""
+            ),
+        },
+        "decisions": [
+            {
+                "decision_id": str(row.id),
+                "decision": row.decision,
+                "notes": row.notes,
+                "decided_by": row.decided_by.username,
+                "created_at": row.created_at.isoformat(),
+            }
+            for row in decisions
+        ],
+    }
+
+
+def _serialize_admin_user(request, user):
+    profile = _safe_profile(user)
+    stats = getattr(user, "contribution_stats", None)
+    groups = list(user.groups.order_by("name").values_list("name", flat=True))
+    profile_photo = ""
+    if profile and profile.profile_photo:
+        profile_photo = request.build_absolute_uri(profile.profile_photo.url)
+
+    return {
+        "user_id": user.id,
+        "username": user.username,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "email": user.email,
+        "is_active": user.is_active,
+        "is_staff": user.is_staff,
+        "is_superuser": user.is_superuser,
+        "date_joined": user.date_joined.isoformat(),
+        "last_login": user.last_login.isoformat() if user.last_login else None,
+        "groups": groups,
+        "profile": {
+            "municipality": profile.municipality if profile else "",
+            "affiliation": profile.affiliation if profile else "",
+            "occupation": profile.occupation if profile else "",
+            "bio": profile.bio if profile else "",
+            "profile_photo": profile_photo,
+        },
+        "stats": {
+            "combined_total": stats.combined_total if stats else 0,
+            "dictionary_original_total": stats.dictionary_original_total if stats else 0,
+            "folklore_original_total": stats.folklore_original_total if stats else 0,
+            "review_completed_total": stats.review_completed_total if stats else 0,
+            "total_rejections": stats.total_rejections if stats else 0,
+        },
+        "pending_applications": user.role_applications.filter(status=RoleApplication.Status.PENDING).count(),
+    }
+
+
+@ensure_csrf_cookie
+@require_GET
+def auth_csrf_view(request):
+    return JsonResponse({"detail": "CSRF cookie set."})
+
+
+@require_GET
+def auth_me_view(request):
+    if not request.user.is_authenticated:
+        return JsonResponse({"is_authenticated": False})
+    return JsonResponse(_serialize_auth_user(request.user))
+
+
+@require_http_methods(["POST"])
+def auth_login_view(request):
+    payload, error = _parse_json_body(request)
+    if error:
+        return error
+
+    username = (payload.get("username") or "").strip()
+    password = payload.get("password") or ""
+    if not username or not password:
+        return JsonResponse({"detail": "Username and password are required."}, status=400)
+
+    user = authenticate(request, username=username, password=password)
+    if user is None:
+        return JsonResponse({"detail": "Invalid username or password."}, status=400)
+    if not user.is_active:
+        return JsonResponse({"detail": "This account is inactive."}, status=403)
+
+    login(request, user)
+    return JsonResponse(_serialize_auth_user(user))
+
+
+@require_http_methods(["POST"])
+def auth_logout_view(request):
+    logout(request)
+    return JsonResponse({"is_authenticated": False})
+
+
+@require_http_methods(["GET", "POST", "PATCH"])
+def my_profile_view(request):
+    auth_error = _require_authenticated(request)
+    if auth_error:
+        return auth_error
+
+    user = request.user
+    profile, _ = UserProfile.objects.get_or_create(user=user)
+
+    if request.method == "GET":
+        return JsonResponse(_serialize_private_profile(request, user))
+
+    if request.content_type and request.content_type.startswith("multipart/form-data"):
+        payload = request.POST
+        uploaded_photo = request.FILES.get("profile_photo")
+    else:
+        payload, error = _parse_json_body(request)
+        if error:
+            return error
+        uploaded_photo = None
+
+    for field in ["first_name", "last_name", "email"]:
+        if field in payload:
+            setattr(user, field, (payload.get(field) or "").strip())
+
+    for field in ["municipality", "affiliation", "occupation", "bio"]:
+        if field in payload:
+            setattr(profile, field, (payload.get(field) or "").strip())
+
+    if uploaded_photo:
+        profile.profile_photo = uploaded_photo
+
+    user.save(update_fields=["first_name", "last_name", "email"])
+    profile.save()
+    return JsonResponse(_serialize_private_profile(request, user))
 
 
 @require_GET
@@ -119,7 +322,7 @@ def public_user_profile_view(request, username):
     if not user:
         raise Http404("User not found.")
 
-    profile = getattr(user, "profile", None)
+    profile = _safe_profile(user)
     photo_url = ""
     if profile and profile.profile_photo:
         photo_url = request.build_absolute_uri(profile.profile_photo.url)
@@ -175,6 +378,8 @@ def public_user_profile_view(request, username):
         {
             "header": {
                 "username": user.username,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
                 "profile_photo": photo_url,
                 "municipality": profile.municipality if profile else "",
                 "affiliation": profile.affiliation if profile else "",
@@ -344,6 +549,56 @@ def my_role_applications_view(request):
             ]
         }
     )
+
+
+@require_GET
+def admin_role_applications_view(request):
+    auth_error = _require_authenticated(request)
+    if auth_error:
+        return auth_error
+    if not is_admin(request.user):
+        return JsonResponse({"detail": "Admin access required."}, status=403)
+
+    status = (request.GET.get("status") or "").strip().lower()
+    rows = RoleApplication.objects.select_related("applicant", "applicant__profile").prefetch_related(
+        "applicant__groups",
+        "decisions__decided_by",
+    )
+    if status:
+        rows = rows.filter(status=status)
+    rows = rows.order_by("-created_at")
+
+    return JsonResponse({"rows": [_serialize_role_application(request, row) for row in rows]})
+
+
+@require_GET
+def admin_users_view(request):
+    auth_error = _require_authenticated(request)
+    if auth_error:
+        return auth_error
+    if not is_admin(request.user):
+        return JsonResponse({"detail": "Admin access required."}, status=403)
+
+    query = (request.GET.get("q") or "").strip()
+    group = (request.GET.get("group") or "").strip()
+
+    rows = User.objects.select_related("profile", "contribution_stats").prefetch_related("groups")
+    if query:
+        rows = rows.filter(
+            Q(username__icontains=query)
+            | Q(first_name__icontains=query)
+            | Q(last_name__icontains=query)
+            | Q(email__icontains=query)
+            | Q(profile__municipality__icontains=query)
+            | Q(profile__affiliation__icontains=query)
+        )
+    if group == "Admin":
+        rows = rows.filter(Q(groups__name="Admin") | Q(is_superuser=True))
+    elif group and group != "all":
+        rows = rows.filter(groups__name=group)
+
+    rows = rows.order_by("username").distinct()
+    return JsonResponse({"rows": [_serialize_admin_user(request, row) for row in rows]})
 
 
 @require_http_methods(["POST"])

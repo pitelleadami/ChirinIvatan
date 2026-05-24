@@ -163,7 +163,18 @@ def folklore_entries_list_view(request):
         .select_related("contributor")
         .order_by("title")
     )
-    return JsonResponse({"rows": [_serialize_folklore_entry(entry) for entry in entries]})
+    return JsonResponse(
+        {
+            "rows": [_serialize_folklore_entry(entry) for entry in entries],
+            "counts": {
+                "visible_total": entries.count(),
+                "approved": entries.filter(status=FolkloreEntry.Status.APPROVED).count(),
+                "approved_under_review": entries.filter(
+                    status=FolkloreEntry.Status.APPROVED_UNDER_REVIEW
+                ).count(),
+            },
+        }
+    )
 
 
 @require_http_methods(["GET"])
