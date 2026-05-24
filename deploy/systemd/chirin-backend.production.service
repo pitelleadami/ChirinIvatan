@@ -1,0 +1,24 @@
+[Unit]
+Description=Chirin Ivatan Django Backend (Gunicorn)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/srv/chirin/backend
+EnvironmentFile=/srv/chirin/backend/.env.production
+Environment=PYTHONUNBUFFERED=1
+
+ExecStart=/srv/chirin/backend/.venv/bin/gunicorn backend.wsgi:application \
+  --bind 127.0.0.1:8000 \
+  --workers 3 \
+  --timeout 120 \
+  --access-logfile - \
+  --error-logfile -
+
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

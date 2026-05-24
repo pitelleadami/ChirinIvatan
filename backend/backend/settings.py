@@ -13,6 +13,8 @@ If an environment variable is missing, this file uses a safe local default.
 import os
 from pathlib import Path
 
+from django.http import JsonResponse
+
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -44,6 +46,14 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_optional(name: str) -> str | None:
+    value = os.getenv(name)
+    if value is None:
+        return None
+    value = value.strip()
+    return value or None
+
+
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.getenv(
     "DJANGO_SECRET_KEY",
@@ -61,7 +71,12 @@ ALLOWED_HOSTS = _env_list(
 # Allow frontend origins to send CSRF-protected POST requests.
 CSRF_TRUSTED_ORIGINS = _env_list(
     "DJANGO_CSRF_TRUSTED_ORIGINS",
-    ["http://127.0.0.1:5173", "http://localhost:5173"],
+    [
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+        "http://127.0.0.1:5174",
+        "http://localhost:5174",
+    ],
 )
 
 
@@ -83,6 +98,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'backend.settings.CorsHeadersMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -90,6 +106,36 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
+
+
+class CorsHeadersMiddleware:
+    """
+    Minimal CORS support for split-origin production deployments.
+
+    Local development can keep Vite proxying through the same origin, while
+    production can allow the public frontend origin to call api.<domain>.
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        allowed_origins = set(_env_list("DJANGO_CORS_ALLOWED_ORIGINS", []))
+        origin = request.headers.get("Origin")
+
+        if request.method == "OPTIONS" and origin in allowed_origins:
+            response = JsonResponse({})
+        else:
+            response = self.get_response(request)
+
+        if origin in allowed_origins:
+            response["Access-Control-Allow-Origin"] = origin
+            response["Access-Control-Allow-Credentials"] = "true"
+            response["Access-Control-Allow-Headers"] = "Content-Type, X-CSRFToken"
+            response["Access-Control-Allow-Methods"] = "GET, POST, PATCH, OPTIONS"
+            response["Vary"] = "Origin"
+
+        return response
 
 ROOT_URLCONF = 'backend.urls'
 
@@ -173,6 +219,8 @@ MEDIA_ROOT = os.getenv('DJANGO_MEDIA_ROOT', str(BASE_DIR / 'media'))
 SECURE_SSL_REDIRECT = _env_bool('DJANGO_SECURE_SSL_REDIRECT', False)
 SESSION_COOKIE_SECURE = _env_bool('DJANGO_SESSION_COOKIE_SECURE', False)
 CSRF_COOKIE_SECURE = _env_bool('DJANGO_CSRF_COOKIE_SECURE', False)
+CSRF_COOKIE_DOMAIN = _env_optional('DJANGO_CSRF_COOKIE_DOMAIN')
+SESSION_COOKIE_DOMAIN = _env_optional('DJANGO_SESSION_COOKIE_DOMAIN')
 
 SECURE_HSTS_SECONDS = _env_int('DJANGO_SECURE_HSTS_SECONDS', 0)
 SECURE_HSTS_INCLUDE_SUBDOMAINS = _env_bool('DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS', False)

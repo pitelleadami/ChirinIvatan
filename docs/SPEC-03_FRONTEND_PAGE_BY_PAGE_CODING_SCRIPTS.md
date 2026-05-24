@@ -35,6 +35,7 @@ npm run dev
 5. Public Profile
 6. Leaderboards
 7. Role Center
+8. Dictionary Draft Builder
 
 ---
 
@@ -105,6 +106,7 @@ npm run dev
 ### API endpoints
 - `POST /api/folklore/revisions/create`
 - `PATCH /api/folklore/revisions/<revision_uuid>`
+- `POST /api/folklore/revisions/<revision_uuid>` (browser-safe multipart update fallback)
 - `POST /api/folklore/revisions/<revision_uuid>/submit`
 - `GET /api/folklore/revisions/my`
 
@@ -121,7 +123,7 @@ npm run dev
 3. Build `FormData` in helper function.
 4. Implement actions:
    - `createDraft()`
-   - `updateDraft()` (requires revision ID)
+   - `updateDraft()` (requires revision ID; use `POST` fallback when sending `FormData`)
    - `submitDraft()` (requires revision ID)
    - `loadMyRevisions()`
 5. Show backend feedback (`message`/`error`).
@@ -226,6 +228,52 @@ npm run dev
 - my list loads
 - decision works for reviewer/admin accounts
 - invite works for reviewer/admin
+
+---
+
+## Script G: Dictionary Draft Builder
+
+### API endpoints
+- `POST /api/dictionary/revisions/create`
+- `POST /api/dictionary/entries/<entry_uuid>/revisions/start`
+- `PATCH /api/dictionary/revisions/<revision_uuid>`
+- `POST /api/dictionary/revisions/<revision_uuid>` (frontend JSON fallback is fine)
+- `POST /api/dictionary/revisions/<revision_uuid>/submit`
+- `GET /api/dictionary/revisions/my`
+
+### File to edit
+- `frontend/src/pages/DictionaryDraftBuilderPage.jsx`
+
+### Build steps
+1. Add form state for dictionary content:
+   - term, meaning, part_of_speech, pronunciation_text, variant_type
+   - synonyms/antonyms
+   - usage_notes, etymology
+   - example_sentence, example_translation
+   - source_text, audio_source, photo_source
+   - self-knowledge / self-recorded / contributor-owned flags
+   - inflected_forms JSON
+2. Add draft state:
+   - `revisionId`, `entryId`, `myRevisions`, `busy`, `error`, `message`
+3. Implement actions:
+   - `createDraft()`
+   - `startRevisionFromEntry()`
+   - `updateDraft()`
+   - `submitDraft()`
+   - `loadMyRevisions()`
+4. Render:
+   - entry/revision control row
+   - dictionary metadata fields
+   - examples/usage/source sections
+   - revision list with quick-load button
+5. Keep `inflected_forms` input as JSON text for now.
+
+### Manual check
+- create draft returns revision ID
+- start-from-entry preloads approved entry fields into draft form
+- update draft keeps latest text values
+- submit changes status to pending
+- invalid `inflected_forms` JSON returns controlled error
 
 ---
 

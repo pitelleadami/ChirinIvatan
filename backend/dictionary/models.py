@@ -103,6 +103,7 @@ class Entry(models.Model):
     term = models.CharField(max_length=255)
 
     pronunciation_text = models.CharField(max_length=255, blank=True)
+    phonetic = models.CharField(max_length=255, blank=True)
 
     audio_pronunciation = models.FileField(
         upload_to="dictionary/audio/",

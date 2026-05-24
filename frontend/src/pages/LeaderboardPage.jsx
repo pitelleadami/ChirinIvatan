@@ -5,12 +5,34 @@
   Reads from backend aggregate endpoints.
 */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { apiRequest } from '../lib/api'
 
 const METRIC_OPTIONS = ['combined', 'dictionary', 'folklore']
 const PERIOD_OPTIONS = ['all_time', 'monthly']
+const SAMPLE_ARCHIVE_COUNTS = {
+  dictionaryApproved: 2,
+  folkloreApproved: 2,
+}
+
+function toNumber(value) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function withCompetitionRank(rows, valueKey = 'value') {
+  const sorted = [...rows].sort((a, b) => toNumber(b[valueKey]) - toNumber(a[valueKey]))
+  let previousValue = null
+  let previousRank = 0
+  return sorted.map((row, index) => {
+    const currentValue = toNumber(row[valueKey])
+    const rank = currentValue === previousValue ? previousRank : index + 1
+    previousValue = currentValue
+    previousRank = rank
+    return { ...row, rank }
+  })
+}
 
 export default function LeaderboardPage() {
   const [metric, setMetric] = useState('combined')
@@ -25,6 +47,35 @@ export default function LeaderboardPage() {
   const [municipalityRows, setMunicipalityRows] = useState([])
   const [municipalityTotals, setMunicipalityTotals] = useState([])
   const [winnerRows, setWinnerRows] = useState([])
+  const [archiveCounts, setArchiveCounts] = useState(SAMPLE_ARCHIVE_COUNTS)
+  const [loadedSections, setLoadedSections] = useState({
+    global: false,
+    municipality: false,
+    totals: false,
+    winners: false,
+  })
+
+  const rankedGlobalRows = withCompetitionRank(globalRows, 'value')
+  const rankedMunicipalityRows = withCompetitionRank(municipalityRows, 'value').slice(0, 8)
+
+  useEffect(() => {
+    async function loadArchiveCounts() {
+      try {
+        const [dictionaryPayload, folklorePayload] = await Promise.all([
+          apiRequest('/api/dictionary/entries?limit=1'),
+          apiRequest('/api/folklore/entries'),
+        ])
+        setArchiveCounts({
+          dictionaryApproved: dictionaryPayload.counts?.approved ?? 0,
+          folkloreApproved: folklorePayload.counts?.approved ?? 0,
+        })
+      } catch {
+        setArchiveCounts(SAMPLE_ARCHIVE_COUNTS)
+      }
+    }
+
+    loadArchiveCounts()
+  }, [])
 
   async function run(requestFn) {
     setLoading(true)
@@ -42,6 +93,7 @@ export default function LeaderboardPage() {
     await run(async () => {
       const payload = await apiRequest(`/leaderboard/global?metric=${metric}&period=${period}`)
       setGlobalRows(payload.rows || [])
+      setLoadedSections((prev) => ({ ...prev, global: true }))
     })
   }
 
@@ -57,6 +109,7 @@ export default function LeaderboardPage() {
         `/leaderboard/municipality?municipality=${encodeURIComponent(value)}&metric=${metric}&period=${period}`
       )
       setMunicipalityRows(payload.rows || [])
+      setLoadedSections((prev) => ({ ...prev, municipality: true }))
     })
   }
 
@@ -64,6 +117,7 @@ export default function LeaderboardPage() {
     await run(async () => {
       const payload = await apiRequest('/leaderboard/municipalities')
       setMunicipalityTotals(payload.rows || [])
+      setLoadedSections((prev) => ({ ...prev, totals: true }))
     })
   }
 
@@ -72,6 +126,7 @@ export default function LeaderboardPage() {
       const suffix = month.trim() ? `?month=${encodeURIComponent(month.trim())}` : ''
       const payload = await apiRequest(`/leaderboard/municipality-winners${suffix}`)
       setWinnerRows(payload.rows || [])
+      setLoadedSections((prev) => ({ ...prev, winners: true }))
     })
   }
 
@@ -80,6 +135,17 @@ export default function LeaderboardPage() {
       <section className="panel">
         <h2>Leaderboards & Municipality Winners</h2>
         <p className="muted">Choose metric/period, then load global or municipality rankings. You can also load monthly winner history.</p>
+
+        <div className="admin-app-summary" aria-label="Approved archive counts">
+          <article>
+            <p className="stat-label">Existing Approved Terms</p>
+            <p className="stat-value">{archiveCounts.dictionaryApproved}</p>
+          </article>
+          <article>
+            <p className="stat-label">Existing Approved Folklore</p>
+            <p className="stat-value">{archiveCounts.folkloreApproved}</p>
+          </article>
+        </div>
 
         <div className="field-grid">
           <div className="field">
@@ -126,16 +192,16 @@ export default function LeaderboardPage() {
         </div>
 
         <div className="actions">
-          <button disabled={loading} onClick={loadGlobal}>
+          <button disabled={loading} onClick={() => loadGlobal()}>
             Load Global
           </button>
-          <button className="secondary" disabled={loading} onClick={loadMunicipality}>
+          <button className="secondary" disabled={loading} onClick={() => loadMunicipality()}>
             Load Municipality Ranking
           </button>
-          <button className="ghost" disabled={loading} onClick={loadMunicipalityTotals}>
+          <button className="ghost" disabled={loading} onClick={() => loadMunicipalityTotals()}>
             Load Municipality Totals
           </button>
-          <button className="ghost" disabled={loading} onClick={loadWinners}>
+          <button className="ghost" disabled={loading} onClick={() => loadWinners()}>
             Load Monthly Winners
           </button>
         </div>
@@ -145,12 +211,14 @@ export default function LeaderboardPage() {
 
       <section className="panel">
         <h3>Global Ranking</h3>
-        {globalRows.length === 0 && <p className="muted">No rows loaded yet.</p>}
+        {!loadedSections.global && <p className="muted">No rows loaded yet.</p>}
+        {loadedSections.global && globalRows.length === 0 && <p className="muted">No global ranking rows found.</p>}
         {globalRows.length > 0 && (
           <div className="table-wrap">
             <table className="simple-table">
               <thead>
                 <tr>
+                  <th>Rank</th>
                   <th>User</th>
                   <th>Municipality</th>
                   <th>Value</th>
@@ -159,8 +227,9 @@ export default function LeaderboardPage() {
                 </tr>
               </thead>
               <tbody>
-                {globalRows.map((row) => (
+                {rankedGlobalRows.map((row) => (
                   <tr key={`${row.username}-${row.metric}-${row.period}`}>
+                    <td>{row.rank}</td>
                     <td>{row.username}</td>
                     <td>{row.municipality || '-'}</td>
                     <td>{row.value}</td>
@@ -175,13 +244,17 @@ export default function LeaderboardPage() {
       </section>
 
       <section className="panel">
-        <h3>Municipality Ranking</h3>
-        {municipalityRows.length === 0 && <p className="muted">No municipality ranking loaded yet.</p>}
-        {municipalityRows.length > 0 && (
+        <h3>Municipality Ranking (Top 8)</h3>
+        {!loadedSections.municipality && <p className="muted">No municipality ranking loaded yet.</p>}
+        {loadedSections.municipality && rankedMunicipalityRows.length === 0 && (
+          <p className="muted">No ranking rows found for this municipality and metric.</p>
+        )}
+        {rankedMunicipalityRows.length > 0 && (
           <div className="table-wrap">
             <table className="simple-table">
               <thead>
                 <tr>
+                  <th>Rank</th>
                   <th>User</th>
                   <th>Municipality</th>
                   <th>Value</th>
@@ -189,8 +262,9 @@ export default function LeaderboardPage() {
                 </tr>
               </thead>
               <tbody>
-                {municipalityRows.map((row) => (
+                {rankedMunicipalityRows.map((row) => (
                   <tr key={`${row.username}-${row.metric}-${row.period}-municipality`}>
+                    <td>{row.rank}</td>
                     <td>{row.username}</td>
                     <td>{row.municipality || '-'}</td>
                     <td>{row.value}</td>
@@ -205,7 +279,10 @@ export default function LeaderboardPage() {
 
       <section className="panel">
         <h3>Municipality Totals</h3>
-        {municipalityTotals.length === 0 && <p className="muted">No municipality totals loaded yet.</p>}
+        {!loadedSections.totals && <p className="muted">No municipality totals loaded yet.</p>}
+        {loadedSections.totals && municipalityTotals.length === 0 && (
+          <p className="muted">No municipality totals found. Run/recompute gamification after approved contributions exist.</p>
+        )}
         {municipalityTotals.map((row) => (
           <article key={row.municipality} className="queue-card">
             <p className="meta">Municipality: {row.municipality}</p>
@@ -218,7 +295,8 @@ export default function LeaderboardPage() {
 
       <section className="panel">
         <h3>Municipality Monthly Winners</h3>
-        {winnerRows.length === 0 && <p className="muted">No winner records loaded yet.</p>}
+        {!loadedSections.winners && <p className="muted">No winner records loaded yet.</p>}
+        {loadedSections.winners && winnerRows.length === 0 && <p className="muted">No monthly winner records found.</p>}
         {winnerRows.map((row) => (
           <article key={`${row.month_key}-${row.metric}`} className="queue-card">
             <p className="meta">Month: {row.month_key}</p>

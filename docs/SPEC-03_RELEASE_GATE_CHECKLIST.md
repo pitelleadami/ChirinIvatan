@@ -45,6 +45,10 @@ python3 manage.py test users reviews dictionary folklore
 ### Dictionary
 - [ ] `GET /api/dictionary/entries/<uuid>` returns expected sections
 - [ ] variant semantic core inheritance visible
+- [ ] `POST /api/dictionary/revisions/create` works
+- [ ] `POST /api/dictionary/entries/<uuid>/revisions/start` preloads approved entry snapshot
+- [ ] dictionary draft update works on revision endpoint
+- [ ] dictionary draft submit transitions to `pending`
 
 ### Folklore
 - [ ] `GET /api/folklore/entries` returns public-visible records only
@@ -73,6 +77,7 @@ python3 manage.py test users reviews dictionary folklore
 - [ ] Reviewer Dashboard can load and submit approve/reject/flag
 - [ ] Folklore Viewer loads list/detail and shows masking behavior
 - [ ] Dictionary Viewer loads by UUID
+- [ ] Dictionary Draft Builder supports create/start-edit/update/submit
 - [ ] Folklore Draft Builder supports upload + create/update/submit
 - [ ] Public Profile and Leaderboards load correctly
 - [ ] Role Center flows work
@@ -80,7 +85,7 @@ python3 manage.py test users reviews dictionary folklore
 ---
 
 ## F) Security/Session Gate
-- [ ] CSRF works from frontend (`localhost:5173`)
+- [ ] CSRF works from frontend (`localhost:5173` or `localhost:5174`)
 - [ ] unauthenticated requests return controlled 401 JSON where expected
 - [ ] permission-gated actions return controlled 403 JSON where expected
 

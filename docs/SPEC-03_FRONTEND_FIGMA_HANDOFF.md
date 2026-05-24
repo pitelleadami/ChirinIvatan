@@ -420,7 +420,7 @@ Expected frontend URL:
 
 Important for this project:
 - `frontend/vite.config.js` already proxies `/api`, `/admin`, and `/media` to backend.
-- `backend/backend/settings.py` already has trusted CSRF origins for port 5173.
+- `backend/backend/settings.py` already has trusted CSRF origins for local Vite ports 5173 and 5174.
 
 ---
 
@@ -467,9 +467,11 @@ Use this order:
 5. Public Profile
 6. Leaderboards
 7. Role Center
+8. Dictionary Draft Builder
 
 Reason:
 - Reviewer Dashboard validates your toughest backend integration first.
+- Dictionary Draft Builder can be added after the original checklist because it depends on contributor revision APIs that were added later.
 
 ---
 
@@ -500,6 +502,29 @@ Load detail:
 
 ---
 
+#### Dictionary Draft Builder (`Contributor Dictionary Submission/Revision`)
+Create draft:
+- `POST /api/dictionary/revisions/create`
+
+Start revision from approved entry:
+- `POST /api/dictionary/entries/<entry_uuid>/revisions/start`
+
+Update draft:
+- `PATCH /api/dictionary/revisions/<revision_uuid>`
+- Browser-safe JSON fallback used in frontend: `POST /api/dictionary/revisions/<revision_uuid>`
+
+Submit draft:
+- `POST /api/dictionary/revisions/<revision_uuid>/submit`
+
+Load my revisions:
+- `GET /api/dictionary/revisions/my`
+
+Notes:
+- Current contributor flow supports text/metadata revision fields.
+- Dictionary contributor media upload can be added in a later pass because dictionary revisions do not yet have dedicated upload fields like folklore revisions do.
+
+---
+
 #### Folklore Viewer (`04 Folklore Viewer`)
 Public list:
 - `GET /api/folklore/entries`
@@ -515,6 +540,7 @@ Create draft:
 
 Update draft:
 - `PATCH /api/folklore/revisions/<revision_uuid>`
+- Browser-safe multipart fallback: `POST /api/folklore/revisions/<revision_uuid>`
 
 Submit draft:
 - `POST /api/folklore/revisions/<revision_uuid>/submit`
@@ -522,7 +548,7 @@ Submit draft:
 Load my revisions:
 - `GET /api/folklore/revisions/my`
 
-For photo/audio upload, use `FormData` (multipart).
+For photo/audio upload, use `FormData` (multipart). In the frontend, prefer the `POST` fallback for update when sending `FormData`.
 
 ---
 
@@ -585,8 +611,8 @@ Use `apiRequest` for consistency.
 ### Step 16.9: CSRF and authentication (important)
 If you see `403 CSRF failed`:
 1. Confirm backend is running on `127.0.0.1:8000`
-2. Confirm frontend is running on `localhost:5173`
-3. Confirm `CSRF_TRUSTED_ORIGINS` contains both localhost and 127.0.0.1 in `backend/backend/settings.py`
+2. Confirm frontend is running on `localhost:5173` or `localhost:5174`
+3. Confirm `CSRF_TRUSTED_ORIGINS` contains both localhost and 127.0.0.1 for the current Vite port in `backend/backend/settings.py`
 4. Log in first (session cookie required)
 5. Retry action from frontend page
 

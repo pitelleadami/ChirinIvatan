@@ -109,17 +109,22 @@ What is still missing:
 - Final polished contributor UX
 - More guided helper text for beginners (optional)
 
-### Page: Contributor Dictionary Submission/Revision (important gap)
+### Page: Contributor Dictionary Submission/Revision
 
 What contributor can see today:
-- No dedicated contributor-friendly dictionary editor page yet
+- Dictionary draft form fields
+- Existing draft revision IDs
+- Own dictionary revision list
 
 What contributor can do today:
-- Dictionary creation/revision is mostly via admin/testing flows
+- Create new dictionary draft submissions
+- Start a revision from an approved dictionary entry
+- Update draft revisions
+- Submit draft revisions for review
 
 What is still missing:
-- A real contributor page for dictionary draft/create/edit/submit
-- Full beginner-friendly dictionary form experience
+- Final contributor UX polish
+- Media upload flow for dictionary audio/photo inside contributor page
 
 ### Page: Role Application (contributor/reviewer application)
 
@@ -186,9 +191,8 @@ Status:
 
 1. Public Profile Page
 2. Leaderboard Page
-3. Contributor Dictionary Submission/Revision Page
-4. Role Application Page (for applicants)
-5. Role Screening/Invitation Page (for reviewer/admin)
+3. Role Application Page (for applicants)
+4. Role Screening/Invitation Page (for reviewer/admin)
 
 ## Quick Reality Check
 

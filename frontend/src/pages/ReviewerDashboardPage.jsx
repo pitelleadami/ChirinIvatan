@@ -7,10 +7,20 @@
   - display per-row result/error feedback
 */
 
-import { useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import QueueSection from '../components/QueueSection'
 import { apiRequest } from '../lib/api'
+
+const IMPLEMENTATION_STEPS = [
+  { label: 'Reviewer Dashboard', status: 'current' },
+  { label: 'Folklore Viewer', status: 'next' },
+  { label: 'Dictionary Viewer', status: 'queued' },
+  { label: 'Folklore Draft Builder', status: 'queued' },
+  { label: 'Public Profile', status: 'queued' },
+  { label: 'Leaderboards', status: 'queued' },
+  { label: 'Role Center', status: 'queued' },
+]
 
 export default function ReviewerDashboardPage() {
   // One state object from backend drives all queues in this page.
@@ -30,23 +40,22 @@ export default function ReviewerDashboardPage() {
   const folkloreRereviewRows = dashboard?.folklore?.pending_rereview || []
   const folklorePublishedRows = dashboard?.folklore?.published_entries || []
 
-  const hasRows = useMemo(
-    () =>
-      dictionaryRows.length ||
-      dictionaryRereviewRows.length ||
-      dictionaryPublishedRows.length ||
-      folkloreRows.length ||
-      folkloreRereviewRows.length ||
-      folklorePublishedRows.length,
-    [
-      dictionaryRows,
-      dictionaryRereviewRows,
-      dictionaryPublishedRows,
-      folkloreRows,
-      folkloreRereviewRows,
-      folklorePublishedRows,
-    ]
-  )
+  const queueSummary = [
+    { label: 'Dictionary Pending', value: dictionaryRows.length },
+    { label: 'Dictionary Re-review', value: dictionaryRereviewRows.length },
+    { label: 'Dictionary Published', value: dictionaryPublishedRows.length },
+    { label: 'Folklore Pending', value: folkloreRows.length },
+    { label: 'Folklore Re-review', value: folkloreRereviewRows.length },
+    { label: 'Folklore Published', value: folklorePublishedRows.length },
+  ]
+
+  const hasRows =
+    dictionaryRows.length ||
+    dictionaryRereviewRows.length ||
+    dictionaryPublishedRows.length ||
+    folkloreRows.length ||
+    folkloreRereviewRows.length ||
+    folklorePublishedRows.length
 
   async function loadDashboard() {
     setLoading(true)
@@ -62,6 +71,10 @@ export default function ReviewerDashboardPage() {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    loadDashboard()
+  }, [])
 
   function setNotes(revisionId, value) {
     setNotesByRevisionId((prev) => ({
@@ -131,12 +144,30 @@ export default function ReviewerDashboardPage() {
         <div className="toolbar">
           <div>
             <h2>Reviewer Dashboard</h2>
-            <p className="muted">Load reviewer queues and submit review decisions from one place.</p>
+            <p className="muted">Review queues load automatically. Use refresh after taking actions or changing test data.</p>
           </div>
-          <button disabled={loading} onClick={loadDashboard}>
-            {loading ? 'Loading...' : 'Load Dashboard'}
+          <button disabled={loading} onClick={() => loadDashboard()}>
+            {loading ? 'Loading...' : 'Refresh Dashboard'}
           </button>
         </div>
+      </section>
+
+      <section className="panel panel-soft">
+        <div className="section-heading">
+          <div>
+            <h3>Step 16.6 Progress</h3>
+            <p className="muted">Work through one page at a time. This page validates the toughest backend integration first.</p>
+          </div>
+        </div>
+        <ol className="progress-list" aria-label="Frontend implementation order">
+          {IMPLEMENTATION_STEPS.map((step, index) => (
+            <li key={step.label} className={`progress-item ${step.status}`}>
+              <span className="progress-number">{index + 1}</span>
+              <span>{step.label}</span>
+              <span className="progress-status">{step.status}</span>
+            </li>
+          ))}
+        </ol>
       </section>
 
       {error && <div className="alert error">{error}</div>}
@@ -144,85 +175,104 @@ export default function ReviewerDashboardPage() {
 
       {!dashboard && !loading && (
         <section className="panel">
-          <p className="muted">Not loaded yet. Click `Load Dashboard`.</p>
+          <p className="muted">Dashboard could not load yet. Check your reviewer/admin access, then refresh.</p>
         </section>
       )}
 
       {dashboard && (
-        <div className="grid">
-          <QueueSection
-            title="Dictionary Pending Submissions"
-            rows={dictionaryRows}
-            kind="dictionary"
-            mode="pending"
-            actionBusyId={actionBusyId}
-            getNotes={getNotes}
-            setNotes={setNotes}
-            submitDecision={submitDecision}
-            rowErrorByRevisionId={rowErrorByRevisionId}
-            rowResultByRevisionId={rowResultByRevisionId}
-          />
-          <QueueSection
-            title="Dictionary Re-review Queue"
-            rows={dictionaryRereviewRows}
-            kind="dictionary"
-            mode="rereview"
-            actionBusyId={actionBusyId}
-            getNotes={getNotes}
-            setNotes={setNotes}
-            submitDecision={submitDecision}
-            rowErrorByRevisionId={rowErrorByRevisionId}
-            rowResultByRevisionId={rowResultByRevisionId}
-          />
-          <QueueSection
-            title="Dictionary Published Entries (Flag Eligible)"
-            rows={dictionaryPublishedRows}
-            kind="dictionary"
-            mode="published"
-            actionBusyId={actionBusyId}
-            getNotes={getNotes}
-            setNotes={setNotes}
-            submitDecision={submitDecision}
-            rowErrorByRevisionId={rowErrorByRevisionId}
-            rowResultByRevisionId={rowResultByRevisionId}
-          />
-          <QueueSection
-            title="Folklore Pending Submissions"
-            rows={folkloreRows}
-            kind="folklore"
-            mode="pending"
-            actionBusyId={actionBusyId}
-            getNotes={getNotes}
-            setNotes={setNotes}
-            submitDecision={submitDecision}
-            rowErrorByRevisionId={rowErrorByRevisionId}
-            rowResultByRevisionId={rowResultByRevisionId}
-          />
-          <QueueSection
-            title="Folklore Re-review Queue"
-            rows={folkloreRereviewRows}
-            kind="folklore"
-            mode="rereview"
-            actionBusyId={actionBusyId}
-            getNotes={getNotes}
-            setNotes={setNotes}
-            submitDecision={submitDecision}
-            rowErrorByRevisionId={rowErrorByRevisionId}
-            rowResultByRevisionId={rowResultByRevisionId}
-          />
-          <QueueSection
-            title="Folklore Published Entries (Flag Eligible)"
-            rows={folklorePublishedRows}
-            kind="folklore"
-            mode="published"
-            actionBusyId={actionBusyId}
-            getNotes={getNotes}
-            setNotes={setNotes}
-            submitDecision={submitDecision}
-            rowErrorByRevisionId={rowErrorByRevisionId}
-            rowResultByRevisionId={rowResultByRevisionId}
-          />
-        </div>
+        <>
+          <section className="panel">
+            <div className="section-heading">
+              <div>
+                <h3>Queue Snapshot</h3>
+                <p className="muted">Use these counts to confirm every dashboard bucket loaded before taking review actions.</p>
+              </div>
+            </div>
+            <div className="stats-grid">
+              {queueSummary.map((item) => (
+                <article key={item.label} className="stat-card">
+                  <p className="stat-label">{item.label}</p>
+                  <p className="stat-value">{item.value}</p>
+                </article>
+              ))}
+            </div>
+          </section>
+
+          <div className="grid">
+            <QueueSection
+              title="Dictionary Pending Submissions"
+              rows={dictionaryRows}
+              kind="dictionary"
+              mode="pending"
+              actionBusyId={actionBusyId}
+              getNotes={getNotes}
+              setNotes={setNotes}
+              submitDecision={submitDecision}
+              rowErrorByRevisionId={rowErrorByRevisionId}
+              rowResultByRevisionId={rowResultByRevisionId}
+            />
+            <QueueSection
+              title="Dictionary Re-review Queue"
+              rows={dictionaryRereviewRows}
+              kind="dictionary"
+              mode="rereview"
+              actionBusyId={actionBusyId}
+              getNotes={getNotes}
+              setNotes={setNotes}
+              submitDecision={submitDecision}
+              rowErrorByRevisionId={rowErrorByRevisionId}
+              rowResultByRevisionId={rowResultByRevisionId}
+            />
+            <QueueSection
+              title="Dictionary Published Entries (Flag Eligible)"
+              rows={dictionaryPublishedRows}
+              kind="dictionary"
+              mode="published"
+              actionBusyId={actionBusyId}
+              getNotes={getNotes}
+              setNotes={setNotes}
+              submitDecision={submitDecision}
+              rowErrorByRevisionId={rowErrorByRevisionId}
+              rowResultByRevisionId={rowResultByRevisionId}
+            />
+            <QueueSection
+              title="Folklore Pending Submissions"
+              rows={folkloreRows}
+              kind="folklore"
+              mode="pending"
+              actionBusyId={actionBusyId}
+              getNotes={getNotes}
+              setNotes={setNotes}
+              submitDecision={submitDecision}
+              rowErrorByRevisionId={rowErrorByRevisionId}
+              rowResultByRevisionId={rowResultByRevisionId}
+            />
+            <QueueSection
+              title="Folklore Re-review Queue"
+              rows={folkloreRereviewRows}
+              kind="folklore"
+              mode="rereview"
+              actionBusyId={actionBusyId}
+              getNotes={getNotes}
+              setNotes={setNotes}
+              submitDecision={submitDecision}
+              rowErrorByRevisionId={rowErrorByRevisionId}
+              rowResultByRevisionId={rowResultByRevisionId}
+            />
+            <QueueSection
+              title="Folklore Published Entries (Flag Eligible)"
+              rows={folklorePublishedRows}
+              kind="folklore"
+              mode="published"
+              actionBusyId={actionBusyId}
+              getNotes={getNotes}
+              setNotes={setNotes}
+              submitDecision={submitDecision}
+              rowErrorByRevisionId={rowErrorByRevisionId}
+              rowResultByRevisionId={rowResultByRevisionId}
+            />
+          </div>
+        </>
       )}
 
       {dashboard && !hasRows && (
