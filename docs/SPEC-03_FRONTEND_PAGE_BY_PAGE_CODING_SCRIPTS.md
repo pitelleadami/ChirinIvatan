@@ -1,10 +1,12 @@
 # SPEC-03 Frontend Page-by-Page Coding Scripts (Beginner, No Guesswork)
 
 Use this after:
+- `docs/SPEC-03_REBUILD_SPEC.md`
+- `docs/SPEC-03_PLAIN_ENGLISH_PAGE_MAP.md`
 - `docs/SPEC-03_FRONTEND_FIGMA_HANDOFF.md`
 - `docs/SPEC-03_FRONTEND_FIRST_PAGE_CODING_SCRIPT.md`
 
-This document gives exact build order and practical coding steps for all remaining pages.
+This document gives practical coding steps. For current screen contents, permissions, and route behavior, the rebuild spec and screen map are authoritative.
 
 ---
 

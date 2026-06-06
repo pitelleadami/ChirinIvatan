@@ -1,7 +1,7 @@
 # SPEC-03 Gamification Feature Spec (Draft v2.2)
 
 Status: Draft for revision (backend implementation exists)
-Last updated: 2026-02-27
+Last updated: 2026-06-06
 
 ---
 
@@ -179,13 +179,22 @@ Recommended after migration or threshold changes.
 
 ---
 
-## 12) Frontend Remaining (Not Backend Blockers)
+## 12) Frontend Implementation Contract
 
-1. profile UI for dual-track levels and badge progress
-2. leaderboard UI tabs for metric/period
-3. municipality winners page/card
-4. recognition event timeline component
-5. org chart stacked titles
+Implemented/current requirements:
+
+1. Public profile shows contribution summaries, earned badges, next badge progress, and full badge catalog in a popup/modal.
+2. Next badge progress must include dictionary, folklore, and quality categories when in progress.
+3. Hall of Stewards provides recognition, period, and municipality filters.
+4. Hall of Stewards includes a refresh button and compact mobile filters.
+5. Mobile individual rankings hide the Recognition column.
+6. Yaru page/profile surfaces show community role/accountability information where available.
+
+Optional future enhancements:
+
+1. richer milestone charts
+2. share-card image generation
+3. additional event timeline visualizations
 
 ---
 

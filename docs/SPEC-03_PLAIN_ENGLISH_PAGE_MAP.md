@@ -1,210 +1,589 @@
-# SPEC-03 Plain English Website Page Map
+# SPEC-03 Plain English Screen Map
 
-This document is written in plain English.
+Status: current screen contract
+Last updated: 2026-06-06
+Detailed rebuild source: `docs/SPEC-03_REBUILD_SPEC.md`
 
-Goal: help you check what already exists, what each role can do, and what is still missing.
+This document lists every user-facing screen, who can use it, and what must be inside it.
 
-## How To Use This Document
+---
 
-1. Read by role order: Visitor, Contributor, Reviewer.
-2. For each page, check 3 things:
-- What the user can see
-- What the user can do
-- What is still missing
-3. Mark missing items so they become your frontend to-do list.
+## 1. Global Navigation and Shell
 
-## Role 1: Visitor (not logged in)
+Appears across the app.
 
-### Page: Home
+Must include:
 
-What visitor can see:
-- Project introduction
-- Basic project purpose
-- Navigation to the main pages
+- Chirin Ivatan logo/brand link to Home.
+- Visitor navigation:
+  - About the Project
+  - The Digital Yaru
+  - Dictionary
+  - Folklore
+  - Hall of Stewards
+  - FAQs
+  - Log In
+- Authenticated Workspace menu:
+  - My Profile
+  - Steward's Desk
+  - Reviews for reviewer/admin/consultant
+  - Applications for reviewer/admin
+  - Add New Dictionary Entry
+  - Add New Folklore Entry
+  - FAQs
+  - Django Admin Console for admins
+  - Log Out
+- Mobile menu.
+- Footer on normal interior pages.
+- Maintenance screen override when admin pauses public site access.
 
-What visitor can do:
-- Open other public pages
-- Open admin login link
+---
 
-What is still missing:
-- Final polished public landing design
-- Final storytelling sections (if you want a richer public homepage)
+## 2. Visitor Screens
 
-### Page: Dictionary Viewer
+### 2.1 Home
 
-What visitor can see:
-- Dictionary term details
-- Meaning and semantic section
-- Variant section
-- Connected variants list
-- Contributor and attribution details (with masking rules applied)
+Route: `/`
 
-What visitor can do:
-- Enter a term entry ID and load details
-- Open directly if a link already has the entry ID
+Visitor can see:
 
-What is still missing:
-- Final public-friendly dictionary page design
-- Easier browse/search experience (instead of technical ID loading)
+- project brand and introduction
+- public purpose/value statement
+- dictionary and folklore exploration buttons
+- Join the Digital Yaru button
+- live dictionary/folklore counts
+- latest/featured archive previews
+- Hall of Stewards preview
+- support statements and partner details if admin populated them
 
-### Page: Folklore Viewer
+Existing contributors/reviewers/admins must not see the join button.
 
-What visitor can see:
-- Public folklore list
-- Folklore entry details
-- Source/media visibility masking behavior
+### 2.2 About the Project
 
-What visitor can do:
-- Refresh public list
-- Open a specific folklore item
+Route: `/about`
 
-What is still missing:
-- Final polished archive browsing UI
-- Better filter and search controls
+Must show:
 
-### Page: Public User Profile (data exists, full page still needed)
+- admin-managed heading
+- intro paragraphs
+- main project description
+- rationale
+- future directions
+- final quote
+- statements of support if populated
+- partner details if populated
 
-What visitor can see today:
-- Profile information data is available from backend
-- Contribution summary data is available
-- Accountability label data is available
+### 2.3 The Digital Yaru
 
-What visitor can do today:
-- Can access profile data if frontend page consumes it
+Route: `/yaru`
 
-What is still missing:
-- Dedicated frontend profile page
-- Profile layout and visuals
+Must show:
 
-### Page: Leaderboards (data exists, full page still needed)
+- admin-managed Yaru heading and intro
+- explanation of community roles
+- Yaru member/profile chart
+- profile links
+- call to apply for visitors/non-members
 
-What visitor can see today:
-- Global leaderboard data exists
-- Municipality leaderboard data exists
+### 2.4 Dictionary Viewer
 
-What visitor can do today:
-- Can access leaderboard data if frontend page consumes it
+Route: `/dictionary-view`
 
-What is still missing:
-- Dedicated frontend leaderboard page
-- Sorting/filter controls in UI
+Visitor can:
 
-## Role 2: Contributor (logged in contributor)
+- browse/search approved dictionary entries
+- open a dictionary detail
+- listen to approved audio if present
+- inspect photos if present
+- see connected variants
 
-### Page: Folklore Draft Builder
+Must show:
 
-What contributor can see:
-- Folklore form fields
-- Draft status and own revisions list
-- Validation and feedback messages
+- term
+- meaning
+- part of speech
+- variant type
+- pronunciation/phonetic text
+- examples
+- usage notes
+- etymology
+- synonyms/antonyms
+- inflected forms
+- semantic core from mother term
+- variant-specific fields from selected variant
+- contributor/approval attribution
+- masked source fields where required
+- public revision history
 
-What contributor can do:
-- Create draft
-- Update draft
-- Submit draft for review
-- Upload audio and photo
-- Add media URL (example: YouTube link)
+### 2.5 Folklore Viewer
 
-What is still missing:
-- Final polished contributor UX
-- More guided helper text for beginners (optional)
+Route: `/folklore-view`
 
-### Page: Contributor Dictionary Submission/Revision
+Visitor can:
 
-What contributor can see today:
-- Dictionary draft form fields
-- Existing draft revision IDs
-- Own dictionary revision list
+- browse approved folklore entries
+- filter by category/subcategory
+- open a folklore detail
+- view/listen to public media
 
-What contributor can do today:
-- Create new dictionary draft submissions
-- Start a revision from an approved dictionary entry
-- Update draft revisions
-- Submit draft revisions for review
+Must show:
 
-What is still missing:
-- Final contributor UX polish
-- Media upload flow for dictionary audio/photo inside contributor page
+- title
+- category and subcategory
+- municipality source
+- content
+- source unless self-knowledge
+- media source unless self-produced
+- photo/audio/media URL when present
+- contributor
+- license
+- public revision history
 
-### Page: Role Application (contributor/reviewer application)
+### 2.6 Hall of Stewards
 
-What contributor can see today:
-- Backend supports applications and decisions
+Route: `/leaderboards`
 
-What contributor can do today:
-- Apply as contributor
-- Apply as reviewer
-- Check own application records (when UI is connected)
+Visitor can:
 
-What is still missing:
-- Dedicated frontend application page
-- Friendly status timeline for submitted applications
+- view individual rankings
+- view municipality rankings
+- filter by recognition, period, and municipality
+- refresh list
+- open public profiles from ranking rows
 
-## Role 3: Reviewer (logged in reviewer)
+Must show:
 
-### Page: Reviewer Dashboard
+- "Filters" label
+- Recognition filter: Combined, Dictionary, Folklore
+- Period filter: Current Month, All Time
+- Municipality filter: All, Basco, Mahatao, Ivana, Uyugan, Sabtang, Itbayat
+- Refresh button
+- archive counts
+- individual ranking table
+- municipality ranking panel
 
-What reviewer can see:
-- Dictionary pending submissions
-- Dictionary re-review queue
-- Folklore pending submissions
-- Folklore re-review queue
+Mobile:
 
-What reviewer can do:
-- Approve pending and re-review items
-- Reject (with notes)
-- Browse live Dictionary/Folklore entries and flag a published item for re-review from the public entry detail page (with notes)
-- Reviewers/admins do not see their own submissions in review queues because self-review is not allowed
+- filters are compact
+- Recognition column is hidden in ranking table
 
-What is still missing:
-- Nothing required for the current reviewer queue contract
+### 2.7 FAQs and Manual
 
-### Page: Role Screening / Invitations (backend-ready, UI still needed)
+Routes:
 
-What reviewer can do in rules:
-- Approve contributor applications
-- Approve reviewer applications based on quorum rules
-- Send direct invite as contributor or reviewer
+- `/faqs`
+- `/manual`
 
-Reviewer application quorum now:
-- 1 reviewer + 1 admin
-OR
-- 2 reviewers
+Both render the FAQ page.
 
-What is still missing:
-- Frontend page for reviewer/admin to process applications
-- Frontend page/form for sending invitations
+Must show:
 
-## Accountability Visibility Rule (Plain English)
+- FAQ hero/title
+- role-aware FAQ sections
+- table of contents
+- accordion question/answer rows
+- optional bullets and images
+- dictionary field guides for authorized users
 
-In public profile, visitors should be able to see onboarding accountability text such as:
-- Invited as Contributor by [Name]
-- Approved as Reviewer by [Name] and [Name]
+Must not show repeated "FAQ Section" labels inside every section.
 
-Status:
-- Backend support exists
-- Frontend profile page still needed to display it clearly
+### 2.8 Role Center
 
-## High-Priority Missing Frontend Pages (Build Next)
+Route: `/roles`
 
-1. Public Profile Page
-2. Leaderboard Page
-3. Role Application Page (for applicants)
-4. Role Screening/Invitation Page (for reviewer/admin)
+Visitor can:
 
-## Quick Reality Check
+- read contributor/reviewer role cards
+- apply as contributor
+- check public application status
+- claim approved access
+- accept role invitation
 
-If you ask: “Are we close?”
+Must show:
 
-Answer:
-- Backend is now strong, test-backed, and migration-clean (core governance + onboarding + gamification v2).
-- Database state is healthy (no pending migrations, no schema drift detected).
-- Most remaining delivery work is frontend pages, UI polish, and graphics/branding integration.
-- You are close to a fully usable product once frontend screens are completed.
+- contributor card
+- reviewer card
+- application/status panel
+- email/status checker where applicable
+- account setup flow for approved applicants
+- popup/feedback after application submission
 
-## Backend Health Snapshot (2026-02-27)
+### 2.9 Maintenance Screen
 
-- `python3 manage.py makemigrations --check --dry-run` -> no changes detected
-- `python3 manage.py migrate --plan` -> no pending migration operations
-- `python3 manage.py check` -> no system issues
-- `python3 manage.py test users reviews dictionary folklore` -> passing
+Virtual screen shown when admin pauses the site.
+
+Visitor sees:
+
+- maintenance heading
+- admin-entered maintenance message
+- Admin Login button
+
+Non-admin authenticated user sees:
+
+- same message
+- Log Out button
+
+Admins bypass this screen.
+
+---
+
+## 3. Contributor Screens
+
+### 3.1 Login
+
+Route: `/login`
+
+Must include:
+
+- username
+- password
+- Log in button
+- Back to Home button
+- generic public error for backend/network failures
+
+Redirect rules:
+
+- incomplete profile -> Profile Edit
+- reviewer non-admin -> Reviewer Dashboard
+- other authenticated user -> Steward's Desk
+
+### 3.2 Profile Edit
+
+Route: `/profile-edit`
+
+Contributor can edit:
+
+- first name
+- last name
+- municipality
+- post-nominals
+- cultural affiliation details
+- other affiliation details
+- occupation/role summaries
+- bio
+- profile photo
+
+Must not include:
+
+- leaderboard hiding control
+
+### 3.3 Public Profile
+
+Route: `/profile-view?username=<username>`
+
+Owner can:
+
+- view own public profile
+- edit profile
+- apply as reviewer if contributor but not reviewer/admin
+
+Profile must show:
+
+- avatar/photo
+- display name and username
+- municipality
+- affiliation/occupation
+- post-nominals
+- bio
+- role/accountability labels
+- contribution summary
+- live contributions if visible
+- achievements
+- next badge progress for dictionary, folklore, and quality
+- full badge catalog in a popup/modal
+- recognition events
+- cultural stewardship section
+
+Admin-only on profile:
+
+- public visibility controls
+- hide/show from leaderboard
+
+### 3.4 Dictionary Draft Builder
+
+Route: `/dictionary-draft`
+
+Contributor can:
+
+- create dictionary draft
+- edit own draft
+- start revision from approved entry
+- submit for review
+- delete draft
+
+Must include:
+
+- term
+- meaning
+- part of speech
+- variant type
+- pronunciation text
+- phonetic text
+- audio upload/source/self-recorded
+- photo upload/source/contributor-owned
+- source/self-knowledge
+- example sentence and translation
+- usage notes
+- etymology
+- synonyms and antonyms
+- inflected forms
+- additional variant rows
+- field guide links
+- own draft/revision list
+
+### 3.5 Folklore Draft Builder
+
+Route: `/folklore-draft`
+
+Contributor can:
+
+- create folklore draft
+- edit own draft
+- revise approved folklore entry
+- submit for review
+- delete draft
+
+Must include:
+
+- title
+- content
+- category
+- subcategory
+- municipality source
+- source/self-knowledge
+- media URL
+- photo upload
+- audio upload
+- media source/self-produced
+- copyright/license notice
+- validation messages
+- own draft/revision list
+
+### 3.6 Steward's Desk - Contributions
+
+Route: `/admin-applications?tab=contributions`
+
+Contributor can see:
+
+- own dictionary contribution drafts/revisions
+- own folklore contribution drafts/revisions
+- create buttons
+- edit draft buttons
+- public entry links
+
+---
+
+## 4. Reviewer and Consultant Screens
+
+### 4.1 Reviewer Dashboard
+
+Route: `/dashboard`
+
+Reviewer/consultant/admin can see:
+
+- dictionary pending submissions
+- dictionary under re-review
+- folklore pending submissions
+- folklore under re-review
+- recent own reviews
+- items awaiting quorum after own approval
+
+Can do:
+
+- approve
+- reject with notes
+- flag eligible public items with notes
+
+Rules:
+
+- own submissions do not appear for self-review
+- reject and flag require notes
+
+### 4.2 Public Detail Review Actions
+
+Routes:
+
+- `/dictionary-view`
+- `/folklore-view`
+
+Reviewer/admin can:
+
+- flag approved public entry for re-review
+
+Must require:
+
+- notes explaining why re-review is needed
+
+---
+
+## 5. Admin Screens
+
+### 5.1 Steward's Desk
+
+Route: `/admin-applications`
+
+Admin must have access to all tabs:
+
+- Overview/activity
+- Reviews
+- Applications
+- Invitations
+- People
+- Contributions
+- Site Content
+
+### 5.2 Applications Tab
+
+Must show:
+
+- role applications
+- applicant identity
+- target role
+- status
+- reviewer reason
+- decision history
+- quorum status
+
+Admin/reviewer can:
+
+- approve
+- reject with notes
+
+Reviewer application quorum:
+
+- two reviewers, or
+- one reviewer plus one admin
+
+### 5.3 Invitations Tab
+
+Must support:
+
+- invite existing user into role
+- send email invitation
+- list invitations
+- show pending/accepted/revoked state
+
+Admin-only:
+
+- consultant invitations
+- admin invitations
+
+### 5.4 People Tab
+
+Must support:
+
+- user search/list
+- managed consultant profile creation
+- view user activity
+- edit public visibility flags
+- hide/show from Yaru chart
+- hide/show live contributions
+- hide/show leaderboard participation
+
+Leaderboard hiding is admin-only.
+
+### 5.5 Site Content Tab
+
+Must support:
+
+- maintenance mode toggle
+- maintenance message editor
+- About page editor
+- Yaru page editor
+- support statement rows
+- partner detail rows
+- FAQ section editor
+- FAQ role visibility
+- FAQ question/answer editor
+- FAQ bullets
+- FAQ image URL
+- FAQ image upload
+- Save Site Content button
+
+### 5.6 Django Admin Console
+
+Route:
+
+- `/admin/` on backend domain
+
+Use for:
+
+- emergency inspection
+- model-level debugging
+- admin-level data correction
+
+Must not replace public/admin React workflows for normal use.
+
+---
+
+## 6. Operational Screens and States
+
+### 6.1 Error and Alert Behavior
+
+Public users:
+
+- must not see localhost/Django operational hints.
+- login infrastructure failure should say a generic "try again later" message.
+
+Admins:
+
+- may see technical details in admin/dev contexts.
+
+### 6.2 Empty States
+
+Every list/table must have a friendly empty state:
+
+- no rankings yet
+- no applications
+- no contributions
+- no FAQ rows
+- no review queue items
+
+### 6.3 Popup/Modal Rules
+
+Use popups/modals for:
+
+- full badge catalog
+- authenticated application submitted confirmation
+- destructive confirmation where needed
+
+Do not expand full badge catalog into the main profile page.
+
+---
+
+## 7. Quick Role Matrix
+
+Visitor:
+
+- browse public content
+- apply/join
+- check status
+
+Contributor:
+
+- visitor access
+- drafts/revisions
+- own contributions
+- profile editing
+- reviewer application
+
+Reviewer:
+
+- contributor access
+- review queues
+- application decisions
+- flag re-review
+
+Consultant:
+
+- reviewer-level review access
+- consultant public role/accountability
+
+Admin:
+
+- all access
+- people management
+- site content
+- maintenance mode
+- admin overrides
+- leaderboard visibility
