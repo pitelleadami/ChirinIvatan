@@ -11,9 +11,11 @@ Quick troubleshooting:
 """
 
 import json
+import re
 
 from django.core.exceptions import ValidationError
 from django.core.files.storage import default_storage
+from django.db.models import Q
 from django.http import Http404, JsonResponse
 from django.views.decorators.http import require_GET, require_http_methods
 
@@ -52,6 +54,26 @@ BOOLEAN_REVISION_FIELDS = {
     "term_source_is_self_knowledge",
     "photo_source_is_contributor_owned",
 }
+
+VISIBLE_PUBLIC_STATUSES = [
+    EntryStatus.APPROVED,
+    EntryStatus.APPROVED_UNDER_REVIEW,
+]
+
+
+def _live_contributor_q(field_name):
+    return Q(**{f"{field_name}__profile__isnull": True}) | Q(
+        **{f"{field_name}__profile__show_live_contributions": True}
+    )
+
+
+def _public_username(user):
+    if not user:
+        return None
+    profile = getattr(user, "profile", None)
+    if profile and profile.show_live_contributions is False:
+        return None
+    return user.username
 
 
 def public_dictionary(request):
@@ -288,15 +310,23 @@ def _serialize_revision(revision):
 
 
 def _serialize_public_entry_row(entry):
+    semantic_entry = _semantic_source_entry(entry)
     return {
         "entry_id": str(entry.id),
         "term": entry.term,
-        "meaning": entry.meaning,
-        "part_of_speech": entry.part_of_speech,
+        "meaning": semantic_entry.meaning,
+        "part_of_speech": semantic_entry.part_of_speech,
         "status": entry.status,
         "created_at": entry.created_at.isoformat(),
         "approved_at": entry.last_approved_at.isoformat() if entry.last_approved_at else None,
     }
+
+
+def _english_lookup_key(value):
+    words = re.findall(r"[A-Za-z]+(?:'[A-Za-z]+)?", str(value or "").lower())
+    if not (1 <= len(words) <= 2):
+        return ""
+    return " ".join(words)
 
 
 @require_GET
@@ -312,7 +342,11 @@ def dictionary_entries_list_view(request):
         return JsonResponse({"detail": "limit must be an integer."}, status=400)
 
     limit = max(1, min(limit, 500))
-    queryset = Entry.objects.filter(status__in=[EntryStatus.APPROVED, EntryStatus.APPROVED_UNDER_REVIEW])
+    queryset = Entry.objects.select_related("variant_group__mother_entry").filter(
+        status__in=VISIBLE_PUBLIC_STATUSES
+    ).filter(
+        _live_contributor_q("initial_contributor")
+    )
 
     if search_term:
         queryset = queryset.filter(term__icontains=search_term)
@@ -338,6 +372,52 @@ def dictionary_entries_list_view(request):
             },
         }
     )
+
+
+@require_GET
+def dictionary_english_terms_view(request):
+    limit_raw = request.GET.get("limit", "100")
+    search_term = _english_lookup_key(request.GET.get("q", ""))
+
+    try:
+        limit = int(limit_raw)
+    except ValueError:
+        return JsonResponse({"detail": "limit must be an integer."}, status=400)
+
+    limit = max(1, min(limit, 200))
+    queryset = (
+        Entry.objects.select_related("variant_group__mother_entry")
+        .filter(status__in=VISIBLE_PUBLIC_STATUSES)
+        .filter(_live_contributor_q("initial_contributor"))
+        .order_by("term")
+    )
+
+    lookup_rows = {}
+    for entry in queryset:
+        semantic_entry = _semantic_source_entry(entry)
+        english_term = _english_lookup_key(semantic_entry.meaning)
+        if not english_term:
+            continue
+        if search_term and search_term not in english_term:
+            continue
+
+        row = lookup_rows.setdefault(
+            english_term,
+            {
+                "english_term": english_term,
+                "translations": [],
+            },
+        )
+        row["translations"].append(
+            {
+                "entry_id": str(entry.id),
+                "term": entry.term,
+                "part_of_speech": semantic_entry.part_of_speech,
+            }
+        )
+
+    rows = sorted(lookup_rows.values(), key=lambda item: item["english_term"])[:limit]
+    return JsonResponse({"rows": rows, "count": len(rows)})
 
 
 @require_GET
@@ -461,6 +541,30 @@ def submit_dictionary_revision_view(request, revision_id):
     return JsonResponse(_serialize_revision_row(revision, request=request))
 
 
+@require_http_methods(["DELETE"])
+def delete_dictionary_revision_view(request, revision_id):
+    auth_error = _require_authenticated(request)
+    if auth_error:
+        return auth_error
+
+    try:
+        revision = EntryRevision.objects.get(id=revision_id)
+    except EntryRevision.DoesNotExist:
+        return JsonResponse({"detail": "Dictionary revision not found."}, status=404)
+
+    if revision.contributor_id != request.user.id:
+        return JsonResponse({"detail": "You can delete only your own revision."}, status=403)
+
+    if revision.status != EntryRevision.Status.DRAFT:
+        return JsonResponse(
+            {"detail": "Only editable DRAFT submissions can be deleted."},
+            status=400,
+        )
+
+    revision.delete()
+    return JsonResponse({"ok": True})
+
+
 def _media_url(request, file_field):
     # Build absolute URL because frontend may run on different origin/port.
     if not file_field:
@@ -493,6 +597,7 @@ def _serialize_connected_variants(entry: Entry):
     # Public list shows approved related terms in the same group.
     related = (
         entry.variant_group.entries.filter(status=EntryStatus.APPROVED)
+        .filter(_live_contributor_q("initial_contributor"))
         .exclude(id=entry.id)
         .order_by("term")
     )
@@ -517,15 +622,16 @@ def _serialize_contributors(entry: Entry):
             status=EntryRevision.Status.APPROVED,
             is_base_snapshot=False,
         )
+        .filter(_live_contributor_q("contributor"))
         .values_list("contributor__username", flat=True)
         .distinct()
     )
 
     return {
-        "original_contributor": entry.initial_contributor.username,
+        "original_contributor": _public_username(entry.initial_contributor),
         "unique_revision_contributors": sorted(approved_revision_contributors),
         "last_revised_by": (
-            entry.last_revised_by.username if entry.last_revised_by else None
+            _public_username(entry.last_revised_by) if entry.last_revised_by else None
         ),
         "approved_by": sorted(
             list(entry.last_approved_by.values_list("username", flat=True))
@@ -542,12 +648,16 @@ def _serialize_attribution(entry: Entry):
     - Audio contributor hidden if it is the same contributor context as term.
     """
 
-    term_contributor = entry.initial_contributor.username
+    semantic_entry = _semantic_source_entry(entry)
+
+    term_contributor = _public_username(entry.initial_contributor)
     audio_contributor = (
-        entry.audio_contributor.username if entry.audio_contributor else None
+        _public_username(entry.audio_contributor) if entry.audio_contributor else None
     )
     photo_contributor = (
-        entry.photo_contributor.username if entry.photo_contributor else None
+        _public_username(semantic_entry.photo_contributor)
+        if semantic_entry.photo_contributor
+        else None
     )
 
     if audio_contributor and entry.audio_contributor_id == entry.initial_contributor_id:
@@ -556,7 +666,11 @@ def _serialize_attribution(entry: Entry):
     return {
         "term": {
             "initially_contributed_by": term_contributor,
-            "source_text": "" if entry.term_source_is_self_knowledge else entry.source_text,
+            "source_text": (
+                ""
+                if semantic_entry.term_source_is_self_knowledge
+                else semantic_entry.source_text
+            ),
         },
         "audio": {
             "contributed_by": audio_contributor,
@@ -565,18 +679,32 @@ def _serialize_attribution(entry: Entry):
         "photo": {
             "contributed_by": photo_contributor,
             "source": (
-                "" if entry.photo_source_is_contributor_owned else entry.photo_source
+                ""
+                if semantic_entry.photo_source_is_contributor_owned
+                else semantic_entry.photo_source
             ),
         },
-        "always_visible": {
+            "always_visible": {
             "last_revised_by": (
-                entry.last_revised_by.username if entry.last_revised_by else None
+                _public_username(entry.last_revised_by) if entry.last_revised_by else None
             ),
             "reviewed_and_approved_by": sorted(
                 list(entry.last_approved_by.values_list("username", flat=True))
             ),
         },
     }
+
+
+def _latest_approved_revision(entry: Entry):
+    return (
+        EntryRevision.objects.filter(
+            entry=entry,
+            status=EntryRevision.Status.APPROVED,
+        )
+        .select_related("contributor")
+        .order_by("-approved_at", "-created_at")
+        .first()
+    )
 
 
 @require_GET
@@ -601,9 +729,10 @@ def dictionary_entry_detail_view(request, entry_id):
                 "variant_group__mother_entry",
             )
             .prefetch_related("last_approved_by")
+            .filter(_live_contributor_q("initial_contributor"))
             .get(
                 id=entry_id,
-                status__in=[EntryStatus.APPROVED, EntryStatus.APPROVED_UNDER_REVIEW],
+                status__in=VISIBLE_PUBLIC_STATUSES,
             )
         )
     except Entry.DoesNotExist as exc:
@@ -615,6 +744,7 @@ def dictionary_entry_detail_view(request, entry_id):
     audience = "staff" if _is_reviewer_or_admin(request.user) else "public"
     history = get_visible_revision_history(entry=entry, audience=audience)
     semantic_entry = _semantic_source_entry(entry)
+    latest_approved_revision = _latest_approved_revision(entry)
 
     return JsonResponse(
         {
@@ -661,6 +791,22 @@ def dictionary_entry_detail_view(request, entry_id):
             "connected_variants": _serialize_connected_variants(entry),
             "contributors": _serialize_contributors(entry),
             "attribution": _serialize_attribution(entry),
+            "review_action": {
+                "can_flag_for_rereview": bool(
+                    latest_approved_revision
+                    and entry.status == EntryStatus.APPROVED
+                    and _is_reviewer_or_admin(request.user)
+                    and latest_approved_revision.contributor_id != request.user.id
+                ),
+                "latest_approved_revision_id": (
+                    str(latest_approved_revision.id) if latest_approved_revision else None
+                ),
+                "latest_approved_revision_contributor": (
+                    latest_approved_revision.contributor.username
+                    if latest_approved_revision
+                    else None
+                ),
+            },
             # Keep a compact entry object for backward compatibility with
             # earlier clients already reading this key.
             "entry": {

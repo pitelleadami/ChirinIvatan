@@ -1,15 +1,15 @@
-@import url('https://fonts.googleapis.com/css2?family=Baskervville+SC&family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,700;0,9..144,800;1,9..144,400;1,9..144,700;1,9..144,800&family=Manrope:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Averia+Serif+Libre:wght@300;400;700&family=Inter:wght@400;500;600;700;800&family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600;1,700&display=swap');
 
 :root {
   /* Color tokens (from Figma 00 Foundations) */
-  --bg-app: rgba(113, 188, 32, 0.05);
-  --bg-topbar: #e9efc3;
-  --bg-panel-soft: #f8f9f6;
-  --bg-panel: #f8f9f6;
+  --bg-app: #f7faf3;
+  --bg-topbar: #e6efc6;
+  --bg-panel-soft: #f9fbf5;
+  --bg-panel: #fbfcf8;
   --bg-panel-strong: #ffffff;
   --text-primary: #122312;
-  --text-muted: #5f685b;
-  --border-default: #d4dbc9;
+  --text-muted: #596553;
+  --border-default: #d2dcc8;
   --action-primary: #1f5f28;
   --action-primary-hover: #184b20;
   --action-secondary: #2f3f34;
@@ -21,8 +21,8 @@
   --white: #ffffff;
 
   /* Typography tokens */
-  --font-heading: 'Fraunces', 'Iowan Old Style', 'Times New Roman', serif;
-  --font-body: 'Manrope', 'Avenir Next', 'Segoe UI', sans-serif;
+  --font-heading: 'Lora', 'Iowan Old Style', 'Times New Roman', serif;
+  --font-body: 'Inter', 'Avenir Next', 'Segoe UI', sans-serif;
   --type-h1-size: 52px;
   --type-h1-line: 60px;
   --type-h2-size: 34px;
@@ -74,11 +74,36 @@
   box-sizing: border-box;
 }
 
+html {
+  width: 100%;
+  overflow-x: hidden;
+}
+
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
   background: var(--bg-app);
+  overflow-x: hidden;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+img,
+svg,
+video,
+canvas,
+iframe {
+  max-width: 100%;
+}
+
+button,
+input,
+select,
+textarea {
+  max-width: 100%;
 }
 
 a {
@@ -96,7 +121,7 @@ h3 {
   margin: 0 0 var(--space-8);
   font-family: var(--font-heading);
   font-weight: 700;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
 }
 
 p {

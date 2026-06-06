@@ -36,8 +36,8 @@ DictionaryEntry represents a validated Ivatan–English term pair.
 Fields include Ivatan term, English meaning, optional example usage,
 optional Ivatan variant tag (Isamurong, Ivasay, Itbayaten, Isabtang,
 or General Ivatan), mandatory source declaration, self-knowledge flag,
-contributor reference, status (draft, pending, approved, rejected,
-archived), and timestamps.
+contributor reference, status (draft, pending, approved,
+approved_under_review, rejected, archived), and timestamps.
 
 Approved dictionary entries may be improved by other contributors through a revision submission process. Revisions are reviewed independently and, if approved, update the published entry while preserving attribution and audit history. Full revision logs are visible to reviewers and administrators.
 
@@ -62,8 +62,8 @@ legends, laji, poems, proverbs, and idioms.
 Fields include title, required text content, category, optional Ivatan
 variant tag, mandatory source declaration, self-knowledge flag,
 optional media reference (audio or embedded video), contributor
-reference, status (draft, pending, approved, rejected, archived),
-and timestamps.
+reference, status (draft, pending, approved, approved_under_review,
+rejected, archived), and timestamps.
 
 Text content is always required; media supplements but does not
 replace textual knowledge.
@@ -74,8 +74,8 @@ audio pronunciations, and folklore entries.
 
 Fields include reviewer reference (reviewer or administrator),
 content type (dictionary_entry, folklore_entry, audio_pronunciation), object identifier,
-decision (approved, rejected, revision requested), reviewer comments,
-and review timestamp.
+decision (approved, rejected, flagged for re-review), reviewer comments,
+review round, and review timestamp.
 
 Review records are append-only and serve as an immutable audit log.
 

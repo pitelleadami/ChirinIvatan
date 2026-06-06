@@ -12,7 +12,7 @@ Main responsibilities:
 from django.db import transaction
 from django.utils import timezone
 
-from folklore.models import FolkloreEntry, FolkloreRevision
+from folklore.models import FolkloreEntry, FolkloreRevision, normalize_folklore_taxonomy
 from folklore.state_machine import validate_transition
 from users.contributions import award_folklore_entry
 
@@ -20,6 +20,7 @@ FOLKLORE_SNAPSHOT_FIELDS = (
     "title",
     "content",
     "category",
+    "subcategory",
     "municipality_source",
     "source",
     "self_knowledge",
@@ -129,10 +130,14 @@ def publish_revision(*, revision: FolkloreRevision) -> FolkloreEntry:
     - first publish (creates FolkloreEntry)
     - update publish (modifies existing FolkloreEntry)
     """
-    data = revision.proposed_data or {}
+    data = normalize_folklore_taxonomy(dict(revision.proposed_data or {}))
+    if data != (revision.proposed_data or {}):
+        revision.proposed_data = data
+        revision.save(update_fields=["proposed_data"])
     title = (data.get("title") or "").strip()
     content = (data.get("content") or "").strip()
     category = (data.get("category") or "").strip()
+    subcategory = (data.get("subcategory") or "").strip()
     source = (data.get("source") or "").strip()
     self_knowledge = bool(data.get("self_knowledge", False))
     media_url = (data.get("media_url") or "").strip()
@@ -141,6 +146,8 @@ def publish_revision(*, revision: FolkloreRevision) -> FolkloreEntry:
 
     if not title or not content or not category:
         raise ValueError("Folklore revision must include title/content/category.")
+    if not subcategory:
+        raise ValueError("Folklore revision must include subcategory.")
     if not self_knowledge and not source:
         raise ValueError("Source is required unless marked as self-knowledge.")
     has_media = bool(media_url or revision.photo_upload or revision.audio_upload)

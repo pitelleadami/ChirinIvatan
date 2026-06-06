@@ -11,6 +11,7 @@
 
 import { useEffect, useState } from 'react'
 
+import ConfirmDialog from '../components/ConfirmDialog'
 import ContributionCelebration from '../components/ContributionCelebration'
 import { apiRequest } from '../lib/api'
 import { useContributionCelebration } from '../lib/contributionCelebration'
@@ -23,7 +24,7 @@ const INITIAL_FORM = {
   part_of_speech: '',
   pronunciation_text: '',
   phonetic: '',
-  variant_type: 'General Ivatan',
+  variant_type: 'Ivatan (Common Usage)',
   variants: [],
   usage_notes: '',
   etymology: '',
@@ -43,10 +44,9 @@ const INITIAL_FORM = {
 }
 
 const VARIANT_TYPE_OPTIONS = [
-  'General Ivatan',
-  'Isamurong',
-  'Ivasay',
-  'Isabtang',
+  'Ivatan (Common Usage)',
+  'Isamurungen',
+  'Ivasayen',
   'Itbayaten',
 ]
 
@@ -112,6 +112,31 @@ function resolveSourceConfig(config, type) {
 function isConfigComplete(config, values) {
   if (!config) return false
   return config.fields.every((field) => String(values?.[field.key] || '').trim())
+}
+
+function todayInputValue() {
+  const today = new Date()
+  today.setMinutes(today.getMinutes() - today.getTimezoneOffset())
+  return today.toISOString().slice(0, 10)
+}
+
+function isFutureDateValue(value) {
+  const normalized = String(value || '').trim()
+  return normalized && normalized > todayInputValue()
+}
+
+function sourceFieldErrors(config, values, idPrefix) {
+  const nextErrors = {}
+  ;(config?.fields || []).forEach((field) => {
+    const value = String(values?.[field.key] || '').trim()
+    const errorKey = `${idPrefix}.${field.key}`
+    if (!value) {
+      nextErrors[errorKey] = `${field.label} is required.`
+    } else if (field.type === 'date' && isFutureDateValue(value)) {
+      nextErrors[errorKey] = `${field.label} must be today or a past date.`
+    }
+  })
+  return nextErrors
 }
 
 function buildSourceLine(label, config, values, fallback = '') {
@@ -313,7 +338,7 @@ function rowsToObject(rows) {
 function makeVariant() {
   return {
     term: '',
-    variant_type: 'Isamurong',
+    variant_type: 'Isamurungen',
     pronunciation_text: '',
     audio_source: '',
     audio_source_is_self_recorded: null,
@@ -334,7 +359,7 @@ function normalizeVariantForForm(variant) {
   return {
     ...makeVariant(),
     ...variant,
-    variant_type: isKnownType ? variantType : 'General Ivatan',
+    variant_type: isKnownType ? variantType : 'Ivatan (Common Usage)',
     audio_source_is_self_recorded: audioSourceIsSelfRecorded,
     audio_source_type: String(variant?.audio_source_type || ''),
     audio_source_details:
@@ -373,7 +398,11 @@ function variantForPayload(variant) {
 
 function revisionToForm(revision) {
   const source = revision.proposed_data || revision
-  const mainVariantType = VARIANT_TYPE_OPTIONS.includes(source.variant_type) ? source.variant_type : 'General Ivatan'
+  const mainVariantType = VARIANT_TYPE_OPTIONS.includes(source.variant_type) ? source.variant_type : 'Ivatan (Common Usage)'
+  const nullableBool = (value) => {
+    if (value === null || value === undefined || value === '') return null
+    return value === true || String(value).trim().toLowerCase() === 'true'
+  }
   return {
     ...INITIAL_FORM,
     term: source.term || '',
@@ -388,11 +417,11 @@ function revisionToForm(revision) {
     example_sentence: source.example_sentence || '',
     example_translation: source.example_translation || '',
     source_text: source.source_text || '',
-    term_source_is_self_knowledge: Boolean(source.term_source_is_self_knowledge),
+    term_source_is_self_knowledge: nullableBool(source.term_source_is_self_knowledge),
     audio_source: source.audio_source || '',
-    audio_source_is_self_recorded: Boolean(source.audio_source_is_self_recorded),
+    audio_source_is_self_recorded: nullableBool(source.audio_source_is_self_recorded),
     photo_source: source.photo_source || '',
-    photo_source_is_contributor_owned: Boolean(source.photo_source_is_contributor_owned),
+    photo_source_is_contributor_owned: nullableBool(source.photo_source_is_contributor_owned),
     english_synonym: source.english_synonym || '',
     ivatan_synonym: source.ivatan_synonym || '',
     english_antonym: source.english_antonym || '',
@@ -406,6 +435,10 @@ function splitList(value) {
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean)
+}
+
+function mergeRelatedWords(...values) {
+  return values.flatMap((value) => splitList(value))
 }
 
 function hasContent(value) {
@@ -424,27 +457,60 @@ function RequiredMark() {
   )
 }
 
+function EditGlyph() {
+  return (
+    <svg className="edit-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M4 15.8V20h4.2L19.7 8.5l-4.2-4.2L4 15.8Z" />
+      <path d="m14.2 5.6 4.2 4.2" />
+      <path d="M13 20H4" />
+    </svg>
+  )
+}
+
+function EditButton({ label, onClick, text = '' }) {
+  return (
+    <button
+      type="button"
+      className={text ? 'inline-link-button edit-inline-action' : 'edit-icon-button'}
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+    >
+      <EditGlyph />
+      {text && <span>{text}</span>}
+    </button>
+  )
+}
+
 function GuideLink({ anchor, children = 'Learn More' }) {
   return (
-    <a className="field-guide-link" href={`${ROUTES.manual}#${anchor}`}>
+    <a className="field-guide-link" href={`${ROUTES.faqs}#${anchor}`}>
       {children}
     </a>
   )
 }
 
-function FieldHeader({ htmlFor, label, guideAnchor, guideText = 'Learn More' }) {
+function FieldHeader({ htmlFor, label, guideAnchor, guideText = 'Learn More', required = false }) {
   return (
     <div className="field-heading">
-      <label htmlFor={htmlFor}>{label}</label>
+      <label htmlFor={htmlFor}>
+        {label} {required && <RequiredMark />}
+      </label>
       {guideAnchor ? <GuideLink anchor={guideAnchor}>{guideText}</GuideLink> : null}
     </div>
   )
 }
 
-function YesNoField({ legend, name, value, onChange }) {
+function YesNoField({ legend, name, value, onChange, required = false, error = '' }) {
   return (
-    <fieldset className="binary-choice">
-      <legend>{legend}</legend>
+    <fieldset
+      className={error ? 'binary-choice binary-choice-error' : 'binary-choice'}
+      aria-invalid={Boolean(error)}
+      aria-describedby={error ? `${name}-error` : undefined}
+    >
+      <legend>
+        {legend} {required && <RequiredMark />}
+      </legend>
       <div className="binary-choice-options">
         <label>
           <input type="radio" name={name} checked={value === true} onChange={() => onChange(true)} />
@@ -455,6 +521,11 @@ function YesNoField({ legend, name, value, onChange }) {
           No
         </label>
       </div>
+      {error && (
+        <p className="inline-error" id={`${name}-error`}>
+          {error}
+        </p>
+      )}
     </fieldset>
   )
 }
@@ -474,8 +545,8 @@ export default function DictionaryDraftBuilderPage() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
-  const [myRevisions, setMyRevisions] = useState([])
   const [form, setForm] = useState(INITIAL_FORM)
+  const [prefilledForm, setPrefilledForm] = useState(null)
   const [audioFile, setAudioFile] = useState(null)
   const [photoFile, setPhotoFile] = useState(null)
   const [hasExistingAudioMedia, setHasExistingAudioMedia] = useState(false)
@@ -486,10 +557,13 @@ export default function DictionaryDraftBuilderPage() {
   const [variantAudioFiles, setVariantAudioFiles] = useState({})
   const [variantAudioPreviews, setVariantAudioPreviews] = useState({})
   const [inflectionRows, setInflectionRows] = useState([])
+  const [prefilledInflectionRows, setPrefilledInflectionRows] = useState([])
   const [showVariants, setShowVariants] = useState(false)
+  const [showRelatedWords, setShowRelatedWords] = useState(false)
   const [showUsageNotes, setShowUsageNotes] = useState(false)
   const [showEtymology, setShowEtymology] = useState(false)
   const [showInflectedForms, setShowInflectedForms] = useState(false)
+  const [optionalPanelOrder, setOptionalPanelOrder] = useState([])
   const [fieldErrors, setFieldErrors] = useState({})
   const [unlockedFields, setUnlockedFields] = useState({})
   const [termSourceType, setTermSourceType] = useState('')
@@ -498,17 +572,45 @@ export default function DictionaryDraftBuilderPage() {
   const [audioSourceValues, setAudioSourceValues] = useState({})
   const [photoSourceType, setPhotoSourceType] = useState('')
   const [photoSourceValues, setPhotoSourceValues] = useState({})
-  const { celebration, celebrateContribution, closeCelebration } = useContributionCelebration()
+  const [confirmDeleteDraft, setConfirmDeleteDraft] = useState(false)
+  const { celebration, celebrateContribution, celebrateDraftSaved, closeCelebration } = useContributionCelebration()
   const isRevisionMode = Boolean(entryId)
   const isSavedDraft = Boolean(revisionId)
   const normalizedRevisionStatus = String(currentRevisionStatus || '').toLowerCase()
   const isEditableDraft = !isSavedDraft || ['draft', 'rejected'].includes(normalizedRevisionStatus)
+  const isRejectedSubmissionMode = isSavedDraft && normalizedRevisionStatus === 'rejected'
+  const isSnapshotEditMode = isRevisionMode || isRejectedSubmissionMode
 
   useEffect(() => {
-    const entryFromQuery = new URLSearchParams(window.location.search).get('entry_id')
+    const query = new URLSearchParams(window.location.search)
+    const entryFromQuery = query.get('entry_id')
     if (entryFromQuery) {
       setEntryId(entryFromQuery)
     }
+  }, [])
+
+  useEffect(() => {
+    const query = new URLSearchParams(window.location.search)
+    const revisionFromQuery = query.get('revision_id')
+    if (!revisionFromQuery) return
+
+    run(async () => {
+      const payload = await apiRequest('/api/dictionary/revisions/my')
+      const revision = (payload.rows || []).find((row) => row.revision_id === revisionFromQuery)
+      if (!revision) {
+        setError('Dictionary draft not found in your contributions.')
+        return
+      }
+      if (revision.status !== 'draft') {
+        setError('Only draft dictionary revisions can be edited.')
+        return
+      }
+      setRevisionId(revision.revision_id || '')
+      setCurrentRevisionStatus(revision.status || 'draft')
+      setCurrentRevisionCreatedAt(revision.created_at || '')
+      setEntryId(revision.entry_id || '')
+      loadRevisionIntoForm(revision)
+    })
   }, [])
 
   useEffect(() => {
@@ -523,8 +625,6 @@ export default function DictionaryDraftBuilderPage() {
       setCurrentRevisionCreatedAt(payload.created_at || '')
       setEntryId(payload.entry_id || entryId)
       loadRevisionIntoForm(payload)
-      setMessage('Loaded the published entry into a revision draft.')
-      await fetchMyRevisions()
     })
   }, [entryId, revisionId, autoRevisionStarted])
 
@@ -581,14 +681,18 @@ export default function DictionaryDraftBuilderPage() {
     }
   }, [form.term, isRevisionMode, isSavedDraft])
 
-  function setField(field, value) {
-    setForm((prev) => ({ ...prev, [field]: value }))
+  function clearFieldError(field) {
     setFieldErrors((current) => {
       if (!current[field]) return current
       const next = { ...current }
       delete next[field]
       return next
     })
+  }
+
+  function setField(field, value) {
+    setForm((prev) => ({ ...prev, [field]: value }))
+    clearFieldError(field)
   }
 
   function setVariantField(index, field, value) {
@@ -602,11 +706,13 @@ export default function DictionaryDraftBuilderPage() {
 
   function addVariant() {
     setShowVariants(true)
+    touchOptionalPanel('variants')
     setForm((prev) => ({ ...prev, variants: [...prev.variants, makeVariant()] }))
   }
 
   function openVariantsWithInitialRow() {
     setShowVariants(true)
+    touchOptionalPanel('variants')
     setForm((prev) => {
       if (prev.variants.length > 0) return prev
       return { ...prev, variants: [makeVariant()] }
@@ -651,12 +757,14 @@ export default function DictionaryDraftBuilderPage() {
   function addInflectionRow() {
     const options = inflectionOptionsFor(form.part_of_speech)
     setShowInflectedForms(true)
+    touchOptionalPanel('inflected')
     setInflectionRows((current) => [...current, { label: options[0], customLabel: '', value: '' }])
   }
 
   function openInflectedFormsWithInitialRow() {
     const options = inflectionOptionsFor(form.part_of_speech)
     setShowInflectedForms(true)
+    touchOptionalPanel('inflected')
     setInflectionRows((current) =>
       current.length > 0 ? current : [{ label: options[0], customLabel: '', value: '' }],
     )
@@ -671,18 +779,18 @@ export default function DictionaryDraftBuilderPage() {
     const derivedTermSource =
       form.term_source_is_self_knowledge === true
         ? ''
-        : buildSourceLine('Source', selectedTermSourceConfig, termSourceValues)
+        : buildSourceLine('Source', selectedTermSourceConfig, termSourceValues, form.source_text)
     const derivedAudioSource =
       hasAudioMedia && form.audio_source_is_self_recorded === true
         ? `Audio Source: ${SOURCE_OWNER_LABEL}`
         : hasAudioMedia
-          ? buildSourceLine('Audio Source', selectedAudioSourceConfig, audioSourceValues)
+          ? buildSourceLine('Audio Source', selectedAudioSourceConfig, audioSourceValues, form.audio_source)
           : ''
     const derivedPhotoSource =
       hasPhotoMedia && form.photo_source_is_contributor_owned === true
         ? `Photo Source: ${SOURCE_OWNER_LABEL}`
         : hasPhotoMedia
-          ? buildSourceLine('Photo Source', selectedPhotoSourceConfig, photoSourceValues)
+          ? buildSourceLine('Photo Source', selectedPhotoSourceConfig, photoSourceValues, form.photo_source)
           : ''
     const variants = form.variants
       .map((variant, index) => ({
@@ -764,8 +872,8 @@ export default function DictionaryDraftBuilderPage() {
 
     try {
       const prepared = await prepareImageUpload(file, {
-        minWidth: 800,
-        minHeight: 500,
+        minWidth: 200,
+        minHeight: 200,
         maxWidth: 1600,
         maxHeight: 1200,
       })
@@ -805,11 +913,27 @@ export default function DictionaryDraftBuilderPage() {
       nextForm.part_of_speech,
     )
     setForm(nextForm)
+    setPrefilledForm(nextForm)
     setInflectionRows(nextInflectionRows)
+    setPrefilledInflectionRows(nextInflectionRows)
     setShowVariants(nextForm.variants.length > 0)
+    setShowRelatedWords(Boolean(
+      nextForm.english_synonym || nextForm.ivatan_synonym || nextForm.english_antonym || nextForm.ivatan_antonym,
+    ))
     setShowUsageNotes(Boolean(nextForm.usage_notes))
     setShowEtymology(Boolean(nextForm.etymology))
     setShowInflectedForms(nextInflectionRows.length > 0)
+    setOptionalPanelOrder([
+      ...(nextForm.variants.length > 0 ? ['variants'] : []),
+      ...(nextInflectionRows.length > 0 ? ['inflected'] : []),
+      ...(
+        nextForm.english_synonym || nextForm.ivatan_synonym || nextForm.english_antonym || nextForm.ivatan_antonym
+          ? ['related']
+          : []
+      ),
+      ...(nextForm.usage_notes ? ['usage'] : []),
+      ...(nextForm.etymology ? ['etymology'] : []),
+    ])
     setHasExistingAudioMedia(Boolean(revision.proposed_data?.audio_pronunciation || revision.audio_pronunciation))
     setHasExistingPhotoMedia(Boolean(revision.proposed_data?.photo || revision.photo))
     setAudioPreview(revision.audio_pronunciation_url || '')
@@ -840,22 +964,38 @@ export default function DictionaryDraftBuilderPage() {
 
   function validateAttribution() {
     if (form.term_source_is_self_knowledge === null) {
+      setFieldErrors((current) => ({
+        ...current,
+        term_source_is_self_knowledge: 'Headword source is required.',
+      }))
       setError('Please answer whether this headword is based on your own knowledge.')
       return false
     }
 
     if (!form.term_source_is_self_knowledge) {
-      if (!selectedTermSourceConfig) {
+      if (!selectedTermSourceConfig && !String(form.source_text || '').trim()) {
+        setFieldErrors((current) => ({
+          ...current,
+          term_source_type: 'Choose a headword source type.',
+        }))
         setError('Please choose a headword source type.')
         return false
       }
-      if (!isConfigComplete(selectedTermSourceConfig, termSourceValues)) {
-        setError('Please complete all required fields for the selected headword source type.')
+      if (selectedTermSourceConfig) {
+        const nextSourceErrors = sourceFieldErrors(selectedTermSourceConfig, termSourceValues, 'dictionary-term-source')
+        if (Object.keys(nextSourceErrors).length > 0) {
+        setFieldErrors((current) => ({ ...current, ...nextSourceErrors }))
+        setError('Please complete all required source fields. Dates must be today or in the past.')
         return false
+        }
       }
     }
 
-    if (!form.term_source_is_self_knowledge && !String(buildSourceLine('Source', selectedTermSourceConfig, termSourceValues) || '').trim()) {
+    if (!form.term_source_is_self_knowledge && !String(buildSourceLine('Source', selectedTermSourceConfig, termSourceValues, form.source_text) || '').trim()) {
+      setFieldErrors((current) => ({
+        ...current,
+        term_source_type: 'Headword source is required.',
+      }))
       setError('Headword source is required unless based on your own knowledge.')
       return false
     }
@@ -874,33 +1014,33 @@ export default function DictionaryDraftBuilderPage() {
     }
 
     if (hasAudioMedia && !form.audio_source_is_self_recorded) {
-      if (!selectedAudioSourceConfig) {
+      if (!selectedAudioSourceConfig && !String(form.audio_source || '').trim()) {
         setError('Please choose an audio source type.')
         return false
       }
-      if (!isConfigComplete(selectedAudioSourceConfig, audioSourceValues)) {
+      if (selectedAudioSourceConfig && !isConfigComplete(selectedAudioSourceConfig, audioSourceValues)) {
         setError('Please complete all required fields for the selected audio source type.')
         return false
       }
     }
 
-    if (hasAudioMedia && !form.audio_source_is_self_recorded && !String(buildSourceLine('Audio Source', selectedAudioSourceConfig, audioSourceValues) || '').trim()) {
+    if (hasAudioMedia && !form.audio_source_is_self_recorded && !String(buildSourceLine('Audio Source', selectedAudioSourceConfig, audioSourceValues, form.audio_source) || '').trim()) {
       setError('Audio source is required unless personally owned or produced by you.')
       return false
     }
 
     if (hasPhotoMedia && !form.photo_source_is_contributor_owned) {
-      if (!selectedPhotoSourceConfig) {
+      if (!selectedPhotoSourceConfig && !String(form.photo_source || '').trim()) {
         setError('Please choose a photo source type.')
         return false
       }
-      if (!isConfigComplete(selectedPhotoSourceConfig, photoSourceValues)) {
+      if (selectedPhotoSourceConfig && !isConfigComplete(selectedPhotoSourceConfig, photoSourceValues)) {
         setError('Please complete all required fields for the selected photo source type.')
         return false
       }
     }
 
-    if (hasPhotoMedia && !form.photo_source_is_contributor_owned && !String(buildSourceLine('Photo Source', selectedPhotoSourceConfig, photoSourceValues) || '').trim()) {
+    if (hasPhotoMedia && !form.photo_source_is_contributor_owned && !String(buildSourceLine('Photo Source', selectedPhotoSourceConfig, photoSourceValues, form.photo_source) || '').trim()) {
       setError('Photo source is required unless personally owned or produced by you.')
       return false
     }
@@ -934,13 +1074,6 @@ export default function DictionaryDraftBuilderPage() {
     return true
   }
 
-  async function fetchMyRevisions() {
-    const payload = await apiRequest('/api/dictionary/revisions/my')
-    const rows = payload.rows || []
-    setMyRevisions(rows)
-    return rows
-  }
-
   async function run(action) {
     setBusy(true)
     setError('')
@@ -958,30 +1091,54 @@ export default function DictionaryDraftBuilderPage() {
     }
   }
 
-  async function loadMyRevisions() {
-    await run(async () => {
-      const rows = await fetchMyRevisions()
-      setMessage(rows.length ? 'Loaded your dictionary revisions.' : 'No dictionary revisions found for this user.')
-    })
-  }
+  async function persistDraft() {
+    if (isSavedDraft && !isEditableDraft) {
+      throw new Error(`This revision is ${currentRevisionStatus || 'not editable'}. Only editable drafts can be changed.`)
+    }
 
-  async function createDraft() {
-    if (!validateRequiredFields()) return
-    if (!validateAttribution()) return
-    await run(async () => {
-      const payload = await apiRequest('/api/dictionary/revisions/create', {
+    const payload = isSavedDraft
+      ? await apiRequest(`/api/dictionary/revisions/${revisionId.trim()}`, {
         method: 'POST',
         body: buildFormData(),
       })
-      setRevisionId(payload.revision_id || '')
-      setCurrentRevisionStatus(payload.status || 'draft')
-      setCurrentRevisionCreatedAt(payload.created_at || '')
-      setHasExistingAudioMedia(Boolean(payload.audio_pronunciation || audioFile))
-      setHasExistingPhotoMedia(Boolean(payload.photo || photoFile))
-      if (payload.audio_pronunciation_url) setAudioPreview(payload.audio_pronunciation_url)
-      if (payload.photo_url) setPhotoPreview(payload.photo_url)
-      setMessage(`Dictionary draft created: ${payload.revision_id}`)
-      await fetchMyRevisions()
+      : await apiRequest('/api/dictionary/revisions/create', {
+        method: 'POST',
+        body: buildFormData(),
+      })
+
+    setRevisionId(payload.revision_id || '')
+    setCurrentRevisionStatus(payload.status || 'draft')
+    setCurrentRevisionCreatedAt(payload.created_at || '')
+    setHasExistingAudioMedia(Boolean(payload.audio_pronunciation || audioFile))
+    setHasExistingPhotoMedia(Boolean(payload.photo || photoFile))
+    if (payload.audio_pronunciation_url) setAudioPreview(payload.audio_pronunciation_url)
+    if (payload.photo_url) setPhotoPreview(payload.photo_url)
+    return payload
+  }
+
+  async function saveDraft() {
+    if (!validateRequiredFields()) return
+    if (!validateAttribution()) return
+    await run(async () => {
+      const payload = await persistDraft()
+      setMessage(`Dictionary draft saved: ${payload.revision_id}`)
+      celebrateDraftSaved('dictionary')
+    })
+  }
+
+  async function deleteDraft() {
+    const trimmedId = revisionId.trim()
+    if (!trimmedId) {
+      clearDraftContext()
+      setConfirmDeleteDraft(false)
+      return
+    }
+
+    await run(async () => {
+      await apiRequest(`/api/dictionary/revisions/${trimmedId}/delete`, { method: 'DELETE' })
+      clearDraftContext()
+      setConfirmDeleteDraft(false)
+      setMessage('Draft deleted.')
     })
   }
 
@@ -1026,62 +1183,24 @@ export default function DictionaryDraftBuilderPage() {
       setEntryId(payload.entry_id || nextEntryId)
       setAutoRevisionStarted(true)
       loadRevisionIntoForm(payload)
-      setMessage('Loaded the published entry into a revision draft.')
-      await fetchMyRevisions()
     })
   }
 
-  async function updateDraft() {
-    const trimmedRevisionId = revisionId.trim()
-    if (!trimmedRevisionId) {
-      setError('Enter revision ID first.')
-      return
-    }
-    if (!isEditableDraft) {
-      setError(`This revision is ${currentRevisionStatus || 'not editable'}. Only DRAFT revisions are editable.`)
-      return
-    }
+  async function submitEntry() {
     if (!validateRequiredFields()) return
     if (!validateAttribution()) return
 
     await run(async () => {
-      const payload = await apiRequest(`/api/dictionary/revisions/${trimmedRevisionId}`, {
-        method: 'POST',
-        body: buildFormData(),
-      })
-      setHasExistingAudioMedia(Boolean(payload.audio_pronunciation || audioFile))
-      setHasExistingPhotoMedia(Boolean(payload.photo || photoFile))
-      setCurrentRevisionStatus(payload.status || currentRevisionStatus || '')
-      setCurrentRevisionCreatedAt(payload.created_at || currentRevisionCreatedAt || '')
-      if (payload.audio_pronunciation_url) setAudioPreview(payload.audio_pronunciation_url)
-      if (payload.photo_url) setPhotoPreview(payload.photo_url)
-      setMessage(`Dictionary draft updated: ${payload.revision_id}`)
-      await fetchMyRevisions()
-    })
-  }
-
-  async function submitDraft() {
-    const trimmedRevisionId = revisionId.trim()
-    if (!trimmedRevisionId) {
-      setError('Enter revision ID first.')
-      return
-    }
-    if (!isEditableDraft) {
-      setError(`This revision is ${currentRevisionStatus || 'not editable'}. Only DRAFT revisions can be submitted.`)
-      return
-    }
-    if (!validateRequiredFields()) return
-    if (!validateAttribution()) return
-
-    await run(async () => {
-      const payload = await apiRequest(`/api/dictionary/revisions/${trimmedRevisionId}/submit`, {
+      const draftPayload = await persistDraft()
+      const payload = await apiRequest(`/api/dictionary/revisions/${draftPayload.revision_id}/submit`, {
         method: 'POST',
       })
       setCurrentRevisionStatus(payload.status || 'pending')
       setCurrentRevisionCreatedAt(payload.created_at || currentRevisionCreatedAt || '')
-      setMessage(`Dictionary draft submitted. Status: ${payload.status}`)
-      celebrateContribution('dictionary')
-      await fetchMyRevisions()
+      setMessage(`Dictionary entry submitted for review. Status: ${payload.status}`)
+      const revisionsPayload = await apiRequest('/api/dictionary/revisions/my')
+      const submittedCount = (revisionsPayload.rows || []).filter((row) => row.status !== 'draft').length
+      celebrateContribution('dictionary', submittedCount)
     })
   }
 
@@ -1092,7 +1211,9 @@ export default function DictionaryDraftBuilderPage() {
     setEntryId('')
     setAutoRevisionStarted(false)
     setForm(INITIAL_FORM)
+    setPrefilledForm(null)
     setInflectionRows([])
+    setPrefilledInflectionRows([])
     setAudioFile(null)
     setPhotoFile(null)
     setAudioPreview('')
@@ -1105,14 +1226,21 @@ export default function DictionaryDraftBuilderPage() {
     setMatchingHeadwordRows([])
     setDismissedHeadword('')
     setShowVariants(false)
+    setShowRelatedWords(false)
     setShowUsageNotes(false)
     setShowEtymology(false)
     setShowInflectedForms(false)
+    setOptionalPanelOrder([])
     setFieldErrors({})
     setUnlockedFields({})
     setError('')
     setMessage('Form cleared.')
     window.history.replaceState({}, '', ROUTES.dictionaryDraft)
+  }
+
+  function continueAfterSubmission() {
+    closeCelebration()
+    navigate(`${ROUTES.adminApplications}?tab=contributions`)
   }
 
   const normalizedHeadword = form.term.trim().toLowerCase()
@@ -1124,104 +1252,28 @@ export default function DictionaryDraftBuilderPage() {
   const previewTermSource =
     form.term_source_is_self_knowledge === true
       ? ''
-      : buildSourceLine('Source', selectedTermSourceConfig, termSourceValues)
+      : buildSourceLine('Source', selectedTermSourceConfig, termSourceValues, form.source_text)
   const previewAudioSource =
     hasAudioMedia && form.audio_source_is_self_recorded === true
       ? `Audio Source: ${SOURCE_OWNER_LABEL}`
       : hasAudioMedia
-        ? buildSourceLine('Audio Source', selectedAudioSourceConfig, audioSourceValues)
+        ? buildSourceLine('Audio Source', selectedAudioSourceConfig, audioSourceValues, form.audio_source)
         : ''
   const previewPhotoSource =
     hasPhotoMedia && form.photo_source_is_contributor_owned === true
       ? `Photo Source: ${SOURCE_OWNER_LABEL}`
       : hasPhotoMedia
-        ? buildSourceLine('Photo Source', selectedPhotoSourceConfig, photoSourceValues)
+        ? buildSourceLine('Photo Source', selectedPhotoSourceConfig, photoSourceValues, form.photo_source)
         : ''
-  const revisionGroups = {
-    draft: myRevisions.filter((item) => String(item.status || '').toLowerCase() === 'draft'),
-    pending: myRevisions.filter((item) => String(item.status || '').toLowerCase() === 'pending'),
-    approved: myRevisions.filter((item) => String(item.status || '').toLowerCase() === 'approved'),
-    rejected: myRevisions.filter((item) => String(item.status || '').toLowerCase() === 'rejected'),
-    other: myRevisions.filter((item) => !['draft', 'pending', 'approved', 'rejected'].includes(String(item.status || '').toLowerCase())),
-  }
-
-  function helperTextForStatus(status, createdAt) {
-    const normalized = String(status || '').toLowerCase()
-    if (normalized === 'draft') return 'This draft has not been submitted and is still editable.'
-    if (normalized === 'pending') {
-      const dateText = createdAt ? new Date(createdAt).toLocaleDateString() : 'an earlier date'
-      return `This submission was sent on ${dateText}. Editing is locked while under review.`
-    }
-    if (normalized === 'approved') return 'This submission is approved. Start a new revision to make changes.'
-    if (normalized === 'rejected') return 'This submission was rejected. Revise this submission and apply reviewer feedback.'
-    return 'This submission has a custom status. Open it to review details.'
-  }
-
-  function openRevisionCard(revision) {
-    setRevisionId(revision.revision_id)
-    setCurrentRevisionStatus(revision.status || '')
-    setCurrentRevisionCreatedAt(revision.created_at || '')
-    setEntryId(revision.entry_id || '')
-    setAutoRevisionStarted(Boolean(revision.entry_id))
-    loadRevisionIntoForm(revision)
-    setMessage(`Loaded revision ${revision.revision_id} into the form.`)
-  }
-
-  function renderRevisionGroup(title, rows) {
-    if (!rows.length) return null
-    return (
-      <>
-        <h4>{title}</h4>
-        <div className="card-list">
-          {rows.map((revision) => {
-            const normalized = String(revision.status || '').toLowerCase()
-            const primaryLabel =
-              normalized === 'draft'
-                ? 'Continue Editing'
-                : normalized === 'rejected'
-                  ? 'Revise This Submission'
-                  : normalized === 'pending'
-                    ? 'View Submitted Copy'
-                    : normalized === 'approved'
-                      ? 'Start New Revision'
-                      : 'Open Submission'
-            return (
-              <article key={revision.revision_id} className="queue-card">
-                <div className="queue-header">
-                  <strong>{revision.term || '(no headword)'}</strong>
-                  <span className="badge">{revision.status}</span>
-                </div>
-                <p className="meta">{helperTextForStatus(revision.status, revision.created_at)}</p>
-                <p className="meta">Revision: {revision.revision_id}</p>
-                <p className="meta">Entry: {revision.entry_id || 'new submission'}</p>
-                <p className="meta">Meaning: {revision.meaning || '-'}</p>
-                <p className="meta">Part of Speech: {revision.part_of_speech || '-'}</p>
-                <div className="actions">
-                  <button
-                    className="ghost"
-                    disabled={normalized === 'approved' && !revision.entry_id}
-                    onClick={() => {
-                      if (normalized === 'approved') {
-                        if (revision.entry_id) {
-                          revisePublishedEntry(revision.entry_id)
-                        } else {
-                          setError('Approved original submissions without an entry link cannot auto-start a revision yet.')
-                        }
-                        return
-                      }
-                      openRevisionCard(revision)
-                    }}
-                  >
-                    {primaryLabel}
-                  </button>
-                </div>
-              </article>
-            )
-          })}
-        </div>
-      </>
-    )
-  }
+  const snapshotForm = prefilledForm || form
+  const snapshotInflectedFormsPreviewRows = (prefilledForm ? prefilledInflectionRows : inflectionRows).filter((row) => row.label && row.value)
+  const snapshotInflectedFormsValue = rowsToObject(prefilledForm ? prefilledInflectionRows : inflectionRows)
+  const snapshotRelatedWords = mergeRelatedWords(
+    snapshotForm.english_synonym,
+    snapshotForm.ivatan_synonym,
+    snapshotForm.english_antonym,
+    snapshotForm.ivatan_antonym,
+  )
   const showMatchingHeadwordPanel =
     normalizedHeadword &&
     matchingHeadwordRows.length > 0 &&
@@ -1229,12 +1281,29 @@ export default function DictionaryDraftBuilderPage() {
     !isRevisionMode &&
     !isSavedDraft
 
+  function snapshotValueFor(fieldName, fallbackValue) {
+    if (!prefilledForm) return fallbackValue
+    if (fieldName === 'inflected_forms') return rowsToObject(prefilledInflectionRows)
+    if (fieldName.includes('.')) return undefined
+    return prefilledForm[fieldName]
+  }
+
   function isFieldLocked(fieldName, currentValue) {
-    return isRevisionMode && hasContent(currentValue) && !unlockedFields[fieldName]
+    const snapshotValue = snapshotValueFor(fieldName, currentValue)
+    return isSnapshotEditMode && hasContent(snapshotValue) && !unlockedFields[fieldName]
+  }
+
+  function showInEditableSection(fieldName, currentValue) {
+    return !isFieldLocked(fieldName, currentValue)
   }
 
   function unlockField(fieldName) {
     setUnlockedFields((current) => ({ ...current, [fieldName]: true }))
+  }
+
+  function unlockFieldAndShow(fieldName, showSection) {
+    unlockField(fieldName)
+    if (showSection) showSection(true)
   }
 
   function renderLockedField(fieldName, label, value) {
@@ -1242,60 +1311,87 @@ export default function DictionaryDraftBuilderPage() {
       <div className="locked-field-display" role="group" aria-label={`${label} locked field`}>
         <div className="locked-field-header">
           <strong>{label}</strong>
-          <button type="button" className="field-edit-icon" onClick={() => unlockField(fieldName)} aria-label={`Edit ${label}`}>
-            ✎
-          </button>
+          <EditButton label={`Edit ${label}`} onClick={() => unlockField(fieldName)} />
         </div>
         <p>{String(value || '').trim() || '-'}</p>
       </div>
     )
   }
 
-  function updateSourceValues(setter, key, value) {
+  function updateSourceValues(setter, key, value, errorKey = key) {
     setter((current) => ({ ...current, [key]: value }))
+    clearFieldError(errorKey)
+  }
+
+  function touchOptionalPanel(key) {
+    setOptionalPanelOrder((current) => [...current.filter((item) => item !== key), key])
+  }
+
+  function removeOptionalPanel(key) {
+    setOptionalPanelOrder((current) => current.filter((item) => item !== key))
+  }
+
+  function optionalPanelCssOrder(key) {
+    const index = optionalPanelOrder.indexOf(key)
+    return index === -1 ? 10 : 20 + index
   }
 
   function renderSourceFields(config, values, setter, idPrefix) {
     if (!config) return null
     return (
       <div className="field-grid">
-        {config.fields.map((field) => (
-          <div key={`${idPrefix}-${field.key}`} className="field">
-            <label htmlFor={`${idPrefix}-${field.key}`}>
-              {field.label} <RequiredMark />{' '}
-              {isFieldLocked(`${idPrefix}.${field.key}`, values[field.key]) && (
-                <button type="button" className="inline-link-button" onClick={() => unlockField(`${idPrefix}.${field.key}`)}>
-                  ✏️ Edit
-                </button>
+        {config.fields.map((field) => {
+          const errorKey = `${idPrefix}.${field.key}`
+          return (
+            <div key={`${idPrefix}-${field.key}`} className={fieldErrors[errorKey] ? 'field field-error' : 'field'}>
+              <label htmlFor={`${idPrefix}-${field.key}`}>
+                {field.label} <RequiredMark />{' '}
+                {isFieldLocked(errorKey, values[field.key]) && (
+                  <EditButton
+                    label={`Edit ${field.label}`}
+                    text="Edit"
+                    onClick={() => unlockField(errorKey)}
+                  />
+                )}
+              </label>
+              {field.type === 'select' ? (
+                <select
+                  id={`${idPrefix}-${field.key}`}
+                  value={values[field.key] || ''}
+                  required
+                  aria-invalid={Boolean(fieldErrors[errorKey])}
+                  aria-describedby={fieldErrors[errorKey] ? `${idPrefix}-${field.key}-error` : undefined}
+                  disabled={isFieldLocked(errorKey, values[field.key])}
+                  onChange={(event) => updateSourceValues(setter, field.key, event.target.value, errorKey)}
+                >
+                  <option value="">Select {field.label.toLowerCase()}</option>
+                  {(field.options || []).map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  id={`${idPrefix}-${field.key}`}
+                  type={field.type || 'text'}
+                  value={values[field.key] || ''}
+                  required
+                  max={field.type === 'date' ? todayInputValue() : undefined}
+                  aria-invalid={Boolean(fieldErrors[errorKey])}
+                  aria-describedby={fieldErrors[errorKey] ? `${idPrefix}-${field.key}-error` : undefined}
+                  readOnly={isFieldLocked(errorKey, values[field.key])}
+                  onChange={(event) => updateSourceValues(setter, field.key, event.target.value, errorKey)}
+                />
               )}
-            </label>
-            {field.type === 'select' ? (
-              <select
-                id={`${idPrefix}-${field.key}`}
-                value={values[field.key] || ''}
-                required
-                disabled={isFieldLocked(`${idPrefix}.${field.key}`, values[field.key])}
-                onChange={(event) => updateSourceValues(setter, field.key, event.target.value)}
-              >
-                <option value="">Select {field.label.toLowerCase()}</option>
-                {(field.options || []).map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <input
-                id={`${idPrefix}-${field.key}`}
-                type={field.type || 'text'}
-                value={values[field.key] || ''}
-                required
-                readOnly={isFieldLocked(`${idPrefix}.${field.key}`, values[field.key])}
-                onChange={(event) => updateSourceValues(setter, field.key, event.target.value)}
-              />
-            )}
-          </div>
-        ))}
+              {fieldErrors[errorKey] && (
+                <p className="inline-error" id={`${idPrefix}-${field.key}-error`}>
+                  {fieldErrors[errorKey]}
+                </p>
+              )}
+            </div>
+          )
+        })}
       </div>
     )
   }
@@ -1309,6 +1405,54 @@ export default function DictionaryDraftBuilderPage() {
       setError('Could not play audio preview.')
     }
   }
+
+  const inflectedFormsValue = rowsToObject(inflectionRows)
+  const showCoreEditableFields = [
+    ['term', form.term],
+    ['meaning', form.meaning],
+    ['part_of_speech', form.part_of_speech],
+    ['variant_type', form.variant_type],
+    ['pronunciation_text', form.pronunciation_text],
+    ['phonetic', form.phonetic],
+  ].some(([field, value]) => showInEditableSection(field, value))
+  const showRelatedEditableFields = [
+    ['english_synonym', form.english_synonym],
+    ['ivatan_synonym', form.ivatan_synonym],
+    ['english_antonym', form.english_antonym],
+    ['ivatan_antonym', form.ivatan_antonym],
+  ].some(([field, value]) => showInEditableSection(field, value))
+  const showExampleEditableFields = [
+    ['example_sentence', form.example_sentence],
+    ['example_translation', form.example_translation],
+  ].some(([field, value]) => showInEditableSection(field, value))
+  const showAudioUploadField = !isSnapshotEditMode || !hasExistingAudioMedia || unlockedFields.audio_pronunciation
+  const showPhotoUploadField = !isSnapshotEditMode || !hasExistingPhotoMedia || unlockedFields.photo
+  const showSourceField = !isSnapshotEditMode || showInEditableSection('term_source_is_self_knowledge', form.term_source_is_self_knowledge)
+  const showMediaSourceFields = showAudioUploadField || showPhotoUploadField || showSourceField
+  const showPrimaryEditableFields = [
+    ['term', form.term],
+    ['meaning', form.meaning],
+  ].some(([field, value]) => showInEditableSection(field, value))
+  const showIdentityEditableFields = [
+    ['part_of_speech', form.part_of_speech],
+    ['variant_type', form.variant_type],
+    ['pronunciation_text', form.pronunciation_text],
+    ['phonetic', form.phonetic],
+  ].some(([field, value]) => showInEditableSection(field, value))
+  const showVariantsEditor = showVariants && showInEditableSection('variants', form.variants)
+  const showInflectedFormsEditor = showInflectedForms && showInEditableSection('inflected_forms', inflectedFormsValue)
+  const showUsageNotesEditor = showUsageNotes && showInEditableSection('usage_notes', form.usage_notes)
+  const showEtymologyEditor = showEtymology && showInEditableSection('etymology', form.etymology)
+  const showRelatedWordsEditor = showRelatedWords && showRelatedEditableFields
+  const showAnyEditableLanguageField =
+    showCoreEditableFields ||
+    showRelatedWordsEditor ||
+    showExampleEditableFields ||
+    showMediaSourceFields ||
+    showVariantsEditor ||
+    showInflectedFormsEditor ||
+    showUsageNotesEditor ||
+    showEtymologyEditor
 
   return (
     <>
@@ -1380,7 +1524,9 @@ export default function DictionaryDraftBuilderPage() {
 
             {(isRevisionMode || isSavedDraft) && (
               <section className="role-status-card draft-status-card" aria-live="polite">
-                <p className="profile-kicker">{isRevisionMode ? 'Revision Draft' : 'Saved Draft'}</p>
+                <p className="profile-kicker">
+                  {isRevisionMode ? 'Revision Draft' : isRejectedSubmissionMode ? 'Rejected Submission' : 'Saved Draft'}
+                </p>
                 <h3>{form.term || (isRevisionMode ? 'Preparing selected entry...' : 'Draft in progress')}</h3>
                 <p className="muted">
                   {isRevisionMode
@@ -1397,26 +1543,6 @@ export default function DictionaryDraftBuilderPage() {
                             ? 'This submission was rejected. You can revise this same submission and apply reviewer feedback.'
                             : 'This submission is currently locked.'}
                 </p>
-                <div className="detail-list split-list">
-                  {isRevisionMode && (
-                    <div className="detail-row">
-                      <dt>Published entry</dt>
-                      <dd>{entryId}</dd>
-                    </div>
-                  )}
-                  {isSavedDraft && (
-                    <div className="detail-row">
-                      <dt>Draft revision</dt>
-                      <dd>{revisionId}</dd>
-                    </div>
-                  )}
-                {isSavedDraft && (
-                  <div className="detail-row">
-                    <dt>Status</dt>
-                    <dd>{normalizedRevisionStatus || '-'}</dd>
-                  </div>
-                )}
-                </div>
                 {isSavedDraft && !isEditableDraft && normalizedRevisionStatus === 'pending' && (
                   <p className="muted">Wait for review outcome. You can edit this again if it is rejected.</p>
                 )}
@@ -1428,14 +1554,309 @@ export default function DictionaryDraftBuilderPage() {
           </div>
         </div>
 
+        {isSnapshotEditMode && (
+          <section className="revision-prefill-intro" aria-live="polite">
+            <p className="profile-kicker">
+              {isRevisionMode ? 'Prefilled from Approved Entry' : 'Rejected Submission Copy'}
+            </p>
+            <article className="dictionary-entry-detail revision-prefilled-preview">
+              <header className="dictionary-headword">
+                <div className="dictionary-readonly-label-row">
+                  <small>Headword</small>
+                  {isFieldLocked('term', snapshotForm.term) && (
+                    <EditButton label="Edit headword" onClick={() => unlockField('term')} />
+                  )}
+                </div>
+                <div className="dictionary-headword-row">
+                  <h2>{snapshotForm.term || 'Headword'}</h2>
+                  {audioPreview && (
+                    <button
+                      type="button"
+                      className="audio-icon-button audio-icon-inline"
+                      onClick={() => playAudio(audioPreview)}
+                      aria-label="Play pronunciation audio"
+                    >
+                      🔊
+                    </button>
+                  )}
+                </div>
+                <div className="dictionary-pronunciation-line">
+                  {snapshotForm.part_of_speech && (
+                    <div className="labeled-pill">
+                      <small>Part of Speech</small>
+                      <span>
+                        {snapshotForm.part_of_speech}{' '}
+                        {isFieldLocked('part_of_speech', snapshotForm.part_of_speech) && (
+                          <EditButton label="Edit part of speech" onClick={() => unlockField('part_of_speech')} />
+                        )}
+                      </span>
+                    </div>
+                  )}
+                  {snapshotForm.pronunciation_text && (
+                    <div className="labeled-pill">
+                      <small>Pronunciation</small>
+                      <span>
+                        {snapshotForm.pronunciation_text}{' '}
+                        {isFieldLocked('pronunciation_text', snapshotForm.pronunciation_text) && (
+                          <EditButton label="Edit pronunciation" onClick={() => unlockField('pronunciation_text')} />
+                        )}
+                      </span>
+                    </div>
+                  )}
+                  {snapshotForm.phonetic && (
+                    <div className="labeled-pill">
+                      <small>Phonetic</small>
+                      <span>
+                        {snapshotForm.phonetic}{' '}
+                        {isFieldLocked('phonetic', snapshotForm.phonetic) && (
+                          <EditButton label="Edit phonetic notation" onClick={() => unlockField('phonetic')} />
+                        )}
+                      </span>
+                    </div>
+                  )}
+                  {snapshotForm.variant_type && (
+                    <div className="labeled-pill">
+                      <small>Variant</small>
+                      <span>
+                        {snapshotForm.variant_type}{' '}
+                        {isFieldLocked('variant_type', snapshotForm.variant_type) && (
+                          <EditButton label="Edit variant type" onClick={() => unlockField('variant_type')} />
+                        )}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </header>
+
+              {photoPreview && (
+                <div className="revision-prefilled-media">
+                  <img className="dictionary-photo-preview" src={photoPreview} alt="" />
+                  {isSnapshotEditMode && hasExistingPhotoMedia && !unlockedFields.photo && (
+                    <EditButton label="Replace photo" text="Replace photo" onClick={() => unlockField('photo')} />
+                  )}
+                </div>
+              )}
+
+              {audioPreview && isSnapshotEditMode && hasExistingAudioMedia && !unlockedFields.audio_pronunciation && (
+                <p className="meta">
+                  <EditButton
+                    label="Replace audio pronunciation"
+                    text="Replace audio pronunciation"
+                    onClick={() => unlockField('audio_pronunciation')}
+                  />
+                </p>
+              )}
+
+              {snapshotForm.meaning && (
+                <section className="dictionary-definition">
+                  <p className="definition-number">1</p>
+                  <p>
+                    {snapshotForm.meaning}{' '}
+                    {isFieldLocked('meaning', snapshotForm.meaning) && (
+                      <EditButton label="Edit meaning" onClick={() => unlockField('meaning')} />
+                    )}
+                  </p>
+                </section>
+              )}
+
+              {(snapshotForm.example_sentence || snapshotForm.example_translation) && (
+                <section className="dictionary-field-block">
+                  <h4>Sample Sentence</h4>
+                  <div className="example-translation-grid">
+                    <div>
+                      <p className="meta">Ivatan</p>
+                      <p>
+                        {snapshotForm.example_sentence || '-'}{' '}
+                        {isFieldLocked('example_sentence', snapshotForm.example_sentence) && (
+                          <EditButton label="Edit Ivatan example sentence" onClick={() => unlockField('example_sentence')} />
+                        )}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="meta">English</p>
+                      <p>
+                        {snapshotForm.example_translation || '-'}{' '}
+                        {isFieldLocked('example_translation', snapshotForm.example_translation) && (
+                          <EditButton label="Edit English example translation" onClick={() => unlockField('example_translation')} />
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                </section>
+              )}
+
+              {snapshotRelatedWords.length > 0 && (
+                <section className="dictionary-field-block">
+                  <h4>Related Words</h4>
+                  <div className="dictionary-chip-row">
+                    {splitList(snapshotForm.english_synonym).map((item) => (
+                      <span key={`prefill-es-${item}`}>{item}</span>
+                    ))}
+                    {splitList(snapshotForm.ivatan_synonym).map((item) => (
+                      <span key={`prefill-is-${item}`}>{item}</span>
+                    ))}
+                    {splitList(snapshotForm.english_antonym).map((item) => (
+                      <span key={`prefill-ea-${item}`}>{item}</span>
+                    ))}
+                    {splitList(snapshotForm.ivatan_antonym).map((item) => (
+                      <span key={`prefill-ia-${item}`}>{item}</span>
+                    ))}
+                  </div>
+                  <p className="meta">
+                    {isFieldLocked('english_synonym', snapshotForm.english_synonym) && (
+                      <EditButton
+                        label="Edit English synonyms"
+                        text="Edit English Synonyms"
+                        onClick={() => unlockField('english_synonym')}
+                      />
+                    )}{' '}
+                    {isFieldLocked('ivatan_synonym', snapshotForm.ivatan_synonym) && (
+                      <EditButton
+                        label="Edit Ivatan synonyms"
+                        text="Edit Ivatan Synonyms"
+                        onClick={() => unlockField('ivatan_synonym')}
+                      />
+                    )}{' '}
+                    {isFieldLocked('english_antonym', snapshotForm.english_antonym) && (
+                      <EditButton
+                        label="Edit English antonyms"
+                        text="Edit English Antonyms"
+                        onClick={() => unlockField('english_antonym')}
+                      />
+                    )}{' '}
+                    {isFieldLocked('ivatan_antonym', snapshotForm.ivatan_antonym) && (
+                      <EditButton
+                        label="Edit Ivatan antonyms"
+                        text="Edit Ivatan Antonyms"
+                        onClick={() => unlockField('ivatan_antonym')}
+                      />
+                    )}
+                  </p>
+                </section>
+              )}
+
+              {snapshotInflectedFormsPreviewRows.length > 0 && (
+                <section className="dictionary-field-block">
+                  <div className="dictionary-readonly-label-row">
+                    <h4>Inflected Forms</h4>
+                        {isFieldLocked('inflected_forms', snapshotInflectedFormsValue) && (
+                      <EditButton
+                        label="Edit inflected forms"
+                        onClick={() => unlockFieldAndShow('inflected_forms', setShowInflectedForms)}
+                      />
+                    )}
+                  </div>
+                  <div className="dictionary-chip-row">
+                    {snapshotInflectedFormsPreviewRows.map((row) => (
+                      <span key={`prefill-inflection-${row.label}-${row.value}`}>
+                        {row.label}: {row.value}
+                      </span>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {(snapshotForm.usage_notes || snapshotForm.etymology) && (
+                <section className="revision-notes-grid">
+                  {snapshotForm.usage_notes && (
+                    <article className="dictionary-field-block">
+                      <div className="dictionary-readonly-label-row">
+                        <h4>Usage Notes</h4>
+                        {isFieldLocked('usage_notes', snapshotForm.usage_notes) && (
+                          <EditButton
+                            label="Edit usage notes"
+                            onClick={() => unlockFieldAndShow('usage_notes', setShowUsageNotes)}
+                          />
+                        )}
+                      </div>
+                      <p>{snapshotForm.usage_notes}</p>
+                    </article>
+                  )}
+
+                  {snapshotForm.etymology && (
+                    <article className="dictionary-field-block">
+                      <div className="dictionary-readonly-label-row">
+                        <h4>Etymology</h4>
+                        {isFieldLocked('etymology', snapshotForm.etymology) && (
+                          <EditButton
+                            label="Edit etymology"
+                            onClick={() => unlockFieldAndShow('etymology', setShowEtymology)}
+                          />
+                        )}
+                      </div>
+                      <p>{snapshotForm.etymology}</p>
+                    </article>
+                  )}
+                </section>
+              )}
+
+              {snapshotForm.variants.length > 0 && (
+                <section className="dictionary-field-block">
+                  <div className="dictionary-readonly-label-row">
+                    <h4>Additional Variants</h4>
+                        {isFieldLocked('variants', snapshotForm.variants) && (
+                      <EditButton
+                        label="Edit variants"
+                        onClick={() => unlockFieldAndShow('variants', setShowVariants)}
+                      />
+                    )}
+                  </div>
+                  <div className="variant-preview-list">
+                    {snapshotForm.variants.map((variant, index) => (
+                      <article key={`prefilled-variant-${index}`}>
+                        <strong>{variant.term || `Variant ${index + 1}`}</strong>
+                        <p className="meta">
+                          {[variant.variant_type, variant.pronunciation_text].filter(Boolean).join(' | ') || 'Details not set'}
+                        </p>
+                      </article>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {(previewTermSource || previewAudioSource || previewPhotoSource) && (
+                <section className="dictionary-field-block">
+                  <div className="dictionary-readonly-label-row">
+                    <h4>Attribution</h4>
+                    {isFieldLocked('term_source_is_self_knowledge', form.term_source_is_self_knowledge) && (
+                      <EditButton label="Edit source settings" onClick={() => unlockField('term_source_is_self_knowledge')} />
+                    )}
+                  </div>
+                  <div className="detail-list">
+                    {previewTermSource && <p>{previewTermSource.replace(/^Source:\s*/, '')}</p>}
+                    {previewAudioSource && <p>{previewAudioSource.replace(/^Audio Source:\s*/, '')}</p>}
+                    {previewPhotoSource && <p>{previewPhotoSource.replace(/^Photo Source:\s*/, '')}</p>}
+                  </div>
+                </section>
+              )}
+            </article>
+          </section>
+        )}
+
+        <div className={isSnapshotEditMode ? 'revision-edit-zone' : undefined}>
+        {isSnapshotEditMode && (
+          <section className="revision-editable-intro" aria-live="polite">
+            <p className="profile-kicker">Additional Editable Fields</p>
+            <p className="muted">
+              Empty fields and unlocked fields appear here. To revise approved content, click the edit buttons in the snapshot above.
+            </p>
+          </section>
+        )}
+
+        {isSnapshotEditMode && !showAnyEditableLanguageField && (
+          <section className="revision-empty-edit-state">
+            <p>No fields are open for editing yet. Choose a pencil control in the approved entry snapshot above.</p>
+          </section>
+        )}
+
+        {showPrimaryEditableFields && (
         <div className="dictionary-primary-fields">
+          {showInEditableSection('term', form.term) && (
           <div className="field dictionary-term-field">
             <label htmlFor="dictionary-term">
               Headword <RequiredMark />{' '}
               {isFieldLocked('term', form.term) && (
-                <button type="button" className="inline-link-button" onClick={() => unlockField('term')}>
-                  ✏️ Edit
-                </button>
+                <EditButton label="Edit headword" text="Edit" onClick={() => unlockField('term')} />
               )}
             </label>
             {isFieldLocked('term', form.term) ? (
@@ -1495,13 +1916,13 @@ export default function DictionaryDraftBuilderPage() {
               </div>
             )}
           </div>
+          )}
+          {showInEditableSection('meaning', form.meaning) && (
           <div className="field dictionary-meaning-field">
             <label htmlFor="dictionary-meaning">
               Meaning <RequiredMark />{' '}
               {isFieldLocked('meaning', form.meaning) && (
-                <button type="button" className="inline-link-button" onClick={() => unlockField('meaning')}>
-                  ✏️ Edit
-                </button>
+                <EditButton label="Edit meaning" text="Edit" onClick={() => unlockField('meaning')} />
               )}
             </label>
             {isFieldLocked('meaning', form.meaning) ? (
@@ -1509,7 +1930,7 @@ export default function DictionaryDraftBuilderPage() {
             ) : (
               <textarea
                 id="dictionary-meaning"
-                rows={4}
+                rows={1}
                 value={form.meaning}
                 aria-invalid={Boolean(fieldErrors.meaning)}
                 aria-describedby={fieldErrors.meaning ? 'dictionary-meaning-error' : undefined}
@@ -1522,16 +1943,18 @@ export default function DictionaryDraftBuilderPage() {
               </p>
             )}
           </div>
+          )}
         </div>
+        )}
 
+        {showIdentityEditableFields && (
         <div className="field-grid">
+          {showInEditableSection('part_of_speech', form.part_of_speech) && (
           <div className="field">
             <label htmlFor="dictionary-pos">
               Part of Speech{' '}
               {isFieldLocked('part_of_speech', form.part_of_speech) && (
-                <button type="button" className="inline-link-button" onClick={() => unlockField('part_of_speech')}>
-                  ✏️ Edit
-                </button>
+                <EditButton label="Edit part of speech" text="Edit" onClick={() => unlockField('part_of_speech')} />
               )}
             </label>
             {isFieldLocked('part_of_speech', form.part_of_speech) ? (
@@ -1551,24 +1974,32 @@ export default function DictionaryDraftBuilderPage() {
               </select>
             )}
           </div>
+          )}
+          {showInEditableSection('variant_type', form.variant_type) && (
           <div className="field">
             <FieldHeader
               htmlFor="dictionary-variant"
               guideAnchor="guide-variants"
               label="Variant Type"
             />
-            <select
-              id="dictionary-variant"
-              value={form.variant_type}
-              onChange={(event) => setField('variant_type', event.target.value)}
-            >
-              {VARIANT_TYPE_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
+            {isFieldLocked('variant_type', form.variant_type) ? (
+              renderLockedField('variant_type', 'Variant Type', form.variant_type)
+            ) : (
+              <select
+                id="dictionary-variant"
+                value={form.variant_type}
+                onChange={(event) => setField('variant_type', event.target.value)}
+              >
+                {VARIANT_TYPE_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
+          )}
+          {showInEditableSection('pronunciation_text', form.pronunciation_text) && (
           <div className="field">
             <FieldHeader
               htmlFor="dictionary-pronunciation"
@@ -1585,6 +2016,8 @@ export default function DictionaryDraftBuilderPage() {
               />
             )}
           </div>
+          )}
+          {showInEditableSection('phonetic', form.phonetic) && (
           <div className="field">
             <FieldHeader
               htmlFor="dictionary-phonetic"
@@ -1602,75 +2035,62 @@ export default function DictionaryDraftBuilderPage() {
               />
             )}
           </div>
+          )}
         </div>
+        )}
 
+        {showExampleEditableFields && (
         <div className="field-grid">
+          {showInEditableSection('example_sentence', form.example_sentence) && (
           <div className="field">
-            <label htmlFor="dictionary-english-synonym">English Synonyms</label>
-            <input
-              id="dictionary-english-synonym"
-              value={form.english_synonym}
-              readOnly={isFieldLocked('english_synonym', form.english_synonym)}
-              onChange={(event) => setField('english_synonym', event.target.value)}
-              placeholder="Comma-separated synonyms"
-            />
+            <label htmlFor="dictionary-example">
+              Example Sentence in Ivatan{' '}
+              {isFieldLocked('example_sentence', form.example_sentence) && (
+                <EditButton label="Edit Ivatan example sentence" text="Edit" onClick={() => unlockField('example_sentence')} />
+              )}
+            </label>
+            {isFieldLocked('example_sentence', form.example_sentence) ? (
+              renderLockedField('example_sentence', 'Example Sentence in Ivatan', form.example_sentence)
+            ) : (
+              <textarea
+                id="dictionary-example"
+                rows={1}
+                value={form.example_sentence}
+                onChange={(event) => setField('example_sentence', event.target.value)}
+              />
+            )}
           </div>
+          )}
+          {showInEditableSection('example_translation', form.example_translation) && (
           <div className="field">
-            <label htmlFor="dictionary-ivatan-synonym">Ivatan Synonyms</label>
-            <input
-              id="dictionary-ivatan-synonym"
-              value={form.ivatan_synonym}
-              readOnly={isFieldLocked('ivatan_synonym', form.ivatan_synonym)}
-              onChange={(event) => setField('ivatan_synonym', event.target.value)}
-              placeholder="Comma-separated synonyms"
-            />
+            <label htmlFor="dictionary-translation">
+              Example Translation Sentence in English{' '}
+              {isFieldLocked('example_translation', form.example_translation) && (
+                <EditButton
+                  label="Edit English example translation"
+                  text="Edit"
+                  onClick={() => unlockField('example_translation')}
+                />
+              )}
+            </label>
+            {isFieldLocked('example_translation', form.example_translation) ? (
+              renderLockedField('example_translation', 'Example Translation Sentence in English', form.example_translation)
+            ) : (
+              <textarea
+                id="dictionary-translation"
+                rows={1}
+                value={form.example_translation}
+                onChange={(event) => setField('example_translation', event.target.value)}
+              />
+            )}
           </div>
-          <div className="field">
-            <label htmlFor="dictionary-english-antonym">English Antonyms</label>
-            <input
-              id="dictionary-english-antonym"
-              value={form.english_antonym}
-              readOnly={isFieldLocked('english_antonym', form.english_antonym)}
-              onChange={(event) => setField('english_antonym', event.target.value)}
-              placeholder="Comma-separated antonyms"
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="dictionary-ivatan-antonym">Ivatan Antonyms</label>
-            <input
-              id="dictionary-ivatan-antonym"
-              value={form.ivatan_antonym}
-              readOnly={isFieldLocked('ivatan_antonym', form.ivatan_antonym)}
-              onChange={(event) => setField('ivatan_antonym', event.target.value)}
-              placeholder="Comma-separated antonyms"
-            />
-          </div>
+          )}
         </div>
+        )}
 
+        {showMediaSourceFields && (
         <div className="field-grid">
-          <div className="field">
-            <label htmlFor="dictionary-example">Example Sentence in Ivatan</label>
-            <textarea
-              id="dictionary-example"
-              rows={3}
-              value={form.example_sentence}
-              readOnly={isFieldLocked('example_sentence', form.example_sentence)}
-              onChange={(event) => setField('example_sentence', event.target.value)}
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="dictionary-translation">Example Translation Sentence in English</label>
-            <textarea
-              id="dictionary-translation"
-              rows={3}
-              value={form.example_translation}
-              readOnly={isFieldLocked('example_translation', form.example_translation)}
-              onChange={(event) => setField('example_translation', event.target.value)}
-            />
-          </div>
-        </div>
-
-        <div className="field-grid">
+          {showAudioUploadField && (
           <div className="field">
             <label htmlFor="dictionary-audio-upload">Audio Pronunciation Upload</label>
             <input id="dictionary-audio-upload" type="file" accept="audio/*" onChange={handleAudioChange} />
@@ -1710,6 +2130,8 @@ export default function DictionaryDraftBuilderPage() {
               </div>
             )}
           </div>
+          )}
+          {showPhotoUploadField && (
           <div className="field">
             <label htmlFor="dictionary-photo-upload">Photo Upload</label>
             <input id="dictionary-photo-upload" type="file" accept="image/*" onChange={handlePhotoChange} />
@@ -1750,21 +2172,28 @@ export default function DictionaryDraftBuilderPage() {
               </div>
             )}
           </div>
+          )}
         </div>
+        )}
 
-        <div className="field">
-          <FieldHeader htmlFor="dictionary-source" guideAnchor="guide-sources" label="Headword Source" />
+        {showSourceField && (
+        <div className={fieldErrors.term_source_is_self_knowledge ? 'field field-error' : 'field'}>
+          <FieldHeader htmlFor="dictionary-source" guideAnchor="guide-sources" label="Headword Source" required />
           {isFieldLocked('term_source_is_self_knowledge', form.term_source_is_self_knowledge) && (
             <p className="hint">
-              <button type="button" className="inline-link-button" onClick={() => unlockField('term_source_is_self_knowledge')}>
-                ✏️ Edit source settings
-              </button>
+              <EditButton
+                label="Edit source settings"
+                text="Edit source settings"
+                onClick={() => unlockField('term_source_is_self_knowledge')}
+              />
             </p>
           )}
           <YesNoField
             legend="Is this entry based on your own knowledge or lived use of the language?"
             name="term-source-self-knowledge"
             value={form.term_source_is_self_knowledge}
+            required
+            error={fieldErrors.term_source_is_self_knowledge}
             onChange={(nextValue) => {
               if (isFieldLocked('term_source_is_self_knowledge', form.term_source_is_self_knowledge)) return
               setField('term_source_is_self_knowledge', nextValue)
@@ -1778,7 +2207,17 @@ export default function DictionaryDraftBuilderPage() {
               <label htmlFor="dictionary-term-source-type">
                 Source Type <RequiredMark />
               </label>
-              <select id="dictionary-term-source-type" required value={termSourceType} onChange={(event) => setTermSourceType(event.target.value)}>
+              <select
+                id="dictionary-term-source-type"
+                required
+                value={termSourceType}
+                aria-invalid={Boolean(fieldErrors.term_source_type)}
+                aria-describedby={fieldErrors.term_source_type ? 'dictionary-term-source-type-error' : undefined}
+                onChange={(event) => {
+                  setTermSourceType(event.target.value)
+                  clearFieldError('term_source_type')
+                }}
+              >
                 <option value="">Select source type</option>
                 {DICTIONARY_TERM_SOURCE_TYPES.map((item) => (
                   <option key={item.value} value={item.value}>
@@ -1786,11 +2225,17 @@ export default function DictionaryDraftBuilderPage() {
                   </option>
                 ))}
               </select>
+              {fieldErrors.term_source_type && (
+                <p className="inline-error" id="dictionary-term-source-type-error">
+                  {fieldErrors.term_source_type}
+                </p>
+              )}
               {selectedTermSourceConfig && <p className="hint">{selectedTermSourceConfig.guidance}</p>}
               {renderSourceFields(selectedTermSourceConfig, termSourceValues, setTermSourceValues, 'dictionary-term-source')}
             </>
           )}
         </div>
+        )}
 
 
         <section className="draft-subsection draft-compact-stack">
@@ -1800,8 +2245,15 @@ export default function DictionaryDraftBuilderPage() {
             </div>
           </div>
 
-          <div className="draft-toggle-row" aria-label="Optional entry detail sections">
-            {showVariants ? (
+          <div className="draft-toggle-row" style={{ order: 100 }} aria-label="Optional entry detail sections">
+            {showVariants && isFieldLocked('variants', form.variants) ? (
+              <button className="ghost" type="button" onClick={() => {
+                touchOptionalPanel('variants')
+                unlockFieldAndShow('variants', setShowVariants)
+              }}>
+                Edit Variants
+              </button>
+            ) : showVariants ? (
               <button
                 className="ghost"
                 type="button"
@@ -1813,6 +2265,7 @@ export default function DictionaryDraftBuilderPage() {
                   setVariantAudioFiles({})
                   setVariantAudioPreviews({})
                   setShowVariants(false)
+                  removeOptionalPanel('variants')
                 }}
               >
                 Remove Variants
@@ -1822,13 +2275,21 @@ export default function DictionaryDraftBuilderPage() {
                 Add Variants
               </button>
             )}
-            {showInflectedForms ? (
+            {showInflectedForms && isFieldLocked('inflected_forms', inflectedFormsValue) ? (
+              <button className="ghost" type="button" onClick={() => {
+                touchOptionalPanel('inflected')
+                unlockFieldAndShow('inflected_forms', setShowInflectedForms)
+              }}>
+                Edit Inflected Forms
+              </button>
+            ) : showInflectedForms ? (
               <button
                 className="ghost"
                 type="button"
                 onClick={() => {
                   setInflectionRows([])
                   setShowInflectedForms(false)
+                  removeOptionalPanel('inflected')
                 }}
               >
                 Remove Inflected Forms
@@ -1838,42 +2299,98 @@ export default function DictionaryDraftBuilderPage() {
                 Add Inflected Forms
               </button>
             )}
-            {showUsageNotes ? (
+            {showRelatedWords && (
+              ['english_synonym', 'ivatan_synonym', 'english_antonym', 'ivatan_antonym'].some((field) =>
+                isFieldLocked(field, form[field]),
+              )
+            ) ? (
+              <button className="ghost" type="button" onClick={() => {
+                setShowRelatedWords(true)
+                touchOptionalPanel('related')
+              }}>
+                Edit Synonym/Antonym
+              </button>
+            ) : showRelatedWords ? (
+              <button
+                className="ghost"
+                type="button"
+                onClick={() => {
+                  setField('english_synonym', '')
+                  setField('ivatan_synonym', '')
+                  setField('english_antonym', '')
+                  setField('ivatan_antonym', '')
+                  setShowRelatedWords(false)
+                  removeOptionalPanel('related')
+                }}
+              >
+                Remove Synonym/Antonym
+              </button>
+            ) : (
+              <button className="ghost" type="button" onClick={() => {
+                setShowRelatedWords(true)
+                touchOptionalPanel('related')
+              }}>
+                Add Synonym/Antonym
+              </button>
+            )}
+            {showUsageNotes && isFieldLocked('usage_notes', form.usage_notes) ? (
+              <button className="ghost" type="button" onClick={() => {
+                touchOptionalPanel('usage')
+                unlockFieldAndShow('usage_notes', setShowUsageNotes)
+              }}>
+                Edit Usage Notes
+              </button>
+            ) : showUsageNotes ? (
               <button
                 className="ghost"
                 type="button"
                 onClick={() => {
                   setField('usage_notes', '')
                   setShowUsageNotes(false)
+                  removeOptionalPanel('usage')
                 }}
               >
                 Remove Usage Notes
               </button>
             ) : (
-              <button className="ghost" type="button" onClick={() => setShowUsageNotes(true)}>
+              <button className="ghost" type="button" onClick={() => {
+                setShowUsageNotes(true)
+                touchOptionalPanel('usage')
+              }}>
                 Add Usage Notes
               </button>
             )}
-            {showEtymology ? (
+            {showEtymology && isFieldLocked('etymology', form.etymology) ? (
+              <button className="ghost" type="button" onClick={() => {
+                touchOptionalPanel('etymology')
+                unlockFieldAndShow('etymology', setShowEtymology)
+              }}>
+                Edit Etymology
+              </button>
+            ) : showEtymology ? (
               <button
                 className="ghost"
                 type="button"
                 onClick={() => {
                   setField('etymology', '')
                   setShowEtymology(false)
+                  removeOptionalPanel('etymology')
                 }}
               >
                 Remove Etymology
               </button>
             ) : (
-              <button className="ghost" type="button" onClick={() => setShowEtymology(true)}>
+              <button className="ghost" type="button" onClick={() => {
+                setShowEtymology(true)
+                touchOptionalPanel('etymology')
+              }}>
                 Add Etymology
               </button>
             )}
           </div>
 
-          {showUsageNotes && (
-            <section className="draft-mini-section">
+          {showUsageNotesEditor && (
+            <section className="draft-mini-section" style={{ order: optionalPanelCssOrder('usage') }}>
               <div className="section-heading">
                 <div>
                   <h4>Usage Notes</h4>
@@ -1894,8 +2411,8 @@ export default function DictionaryDraftBuilderPage() {
             </section>
           )}
 
-          {showEtymology && (
-            <section className="draft-mini-section">
+          {showEtymologyEditor && (
+            <section className="draft-mini-section" style={{ order: optionalPanelCssOrder('etymology') }}>
               <div className="section-heading">
                 <div>
                   <h4>Etymology</h4>
@@ -1915,8 +2432,101 @@ export default function DictionaryDraftBuilderPage() {
             </section>
           )}
 
-          {showVariants && (
-            <section className="draft-mini-section">
+          {showRelatedWordsEditor && (
+            <section className="draft-mini-section" style={{ order: optionalPanelCssOrder('related') }}>
+              <div className="section-heading">
+                <div>
+                  <h4>Synonyms / Antonyms</h4>
+                  <p className="muted">Add related words only when they are useful and accurate.</p>
+                </div>
+              </div>
+              <div className="field-grid">
+                {showInEditableSection('english_synonym', form.english_synonym) && (
+                  <div className="field">
+                    <label htmlFor="dictionary-english-synonym">
+                      English Synonyms{' '}
+                      {isFieldLocked('english_synonym', form.english_synonym) && (
+                        <EditButton label="Edit English synonyms" text="Edit" onClick={() => unlockField('english_synonym')} />
+                      )}
+                    </label>
+                    {isFieldLocked('english_synonym', form.english_synonym) ? (
+                      renderLockedField('english_synonym', 'English Synonyms', form.english_synonym)
+                    ) : (
+                      <input
+                        id="dictionary-english-synonym"
+                        value={form.english_synonym}
+                        onChange={(event) => setField('english_synonym', event.target.value)}
+                        placeholder="Comma-separated synonyms"
+                      />
+                    )}
+                  </div>
+                )}
+                {showInEditableSection('ivatan_synonym', form.ivatan_synonym) && (
+                  <div className="field">
+                    <label htmlFor="dictionary-ivatan-synonym">
+                      Ivatan Synonyms{' '}
+                      {isFieldLocked('ivatan_synonym', form.ivatan_synonym) && (
+                        <EditButton label="Edit Ivatan synonyms" text="Edit" onClick={() => unlockField('ivatan_synonym')} />
+                      )}
+                    </label>
+                    {isFieldLocked('ivatan_synonym', form.ivatan_synonym) ? (
+                      renderLockedField('ivatan_synonym', 'Ivatan Synonyms', form.ivatan_synonym)
+                    ) : (
+                      <input
+                        id="dictionary-ivatan-synonym"
+                        value={form.ivatan_synonym}
+                        onChange={(event) => setField('ivatan_synonym', event.target.value)}
+                        placeholder="Comma-separated synonyms"
+                      />
+                    )}
+                  </div>
+                )}
+                {showInEditableSection('english_antonym', form.english_antonym) && (
+                  <div className="field">
+                    <label htmlFor="dictionary-english-antonym">
+                      English Antonyms{' '}
+                      {isFieldLocked('english_antonym', form.english_antonym) && (
+                        <EditButton label="Edit English antonyms" text="Edit" onClick={() => unlockField('english_antonym')} />
+                      )}
+                    </label>
+                    {isFieldLocked('english_antonym', form.english_antonym) ? (
+                      renderLockedField('english_antonym', 'English Antonyms', form.english_antonym)
+                    ) : (
+                      <input
+                        id="dictionary-english-antonym"
+                        value={form.english_antonym}
+                        onChange={(event) => setField('english_antonym', event.target.value)}
+                        placeholder="Comma-separated antonyms"
+                      />
+                    )}
+                  </div>
+                )}
+                {showInEditableSection('ivatan_antonym', form.ivatan_antonym) && (
+                  <div className="field">
+                    <label htmlFor="dictionary-ivatan-antonym">
+                      Ivatan Antonyms{' '}
+                      {isFieldLocked('ivatan_antonym', form.ivatan_antonym) && (
+                        <EditButton label="Edit Ivatan antonyms" text="Edit" onClick={() => unlockField('ivatan_antonym')} />
+                      )}
+                    </label>
+                    {isFieldLocked('ivatan_antonym', form.ivatan_antonym) ? (
+                      renderLockedField('ivatan_antonym', 'Ivatan Antonyms', form.ivatan_antonym)
+                    ) : (
+                      <input
+                        id="dictionary-ivatan-antonym"
+                        value={form.ivatan_antonym}
+                        onChange={(event) => setField('ivatan_antonym', event.target.value)}
+                        placeholder="Comma-separated antonyms"
+                      />
+                    )}
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
+
+          {showVariantsEditor && (
+            <section className="draft-mini-section" style={{ order: optionalPanelCssOrder('variants') }}>
               <div className="section-heading">
                 <div>
                   <h4>Additional Variants</h4>
@@ -2069,8 +2679,8 @@ export default function DictionaryDraftBuilderPage() {
             </section>
           )}
 
-          {showInflectedForms && (
-            <section className="draft-mini-section">
+          {showInflectedFormsEditor && (
+            <section className="draft-mini-section" style={{ order: optionalPanelCssOrder('inflected') }}>
               <div className="section-heading">
                 <div>
                   <h4>Inflected Forms</h4>
@@ -2128,15 +2738,13 @@ export default function DictionaryDraftBuilderPage() {
               </div>
             </section>
           )}
+        </section>
+        </div>
 
-          <section className="draft-preview-panel">
-            <div className="section-heading">
-              <div>
-                <p className="profile-kicker">Preview Before Review</p>
-                <h3>Dictionary Entry Preview</h3>
-              </div>
-              <span className="badge">Live preview</span>
-            </div>
+          <section className="draft-preview-panel" style={{ order: 110 }}>
+	            <div className="section-heading draft-preview-heading">
+	              <span className="badge">Draft preview</span>
+	            </div>
 
             <article className="dictionary-entry-detail">
               <header className="dictionary-headword">
@@ -2256,43 +2864,51 @@ export default function DictionaryDraftBuilderPage() {
               </section>
             </article>
           </section>
-        </section>
+
+        {error && <div className="alert error">{error}</div>}
+        {message && <div className="alert ok">{message}</div>}
 
         <div className="actions draft-action-bar" aria-label="Dictionary draft actions">
-          <button disabled={busy || isSavedDraft} onClick={() => createDraft()}>
-            Create New Draft
+          <button disabled={busy || !isEditableDraft} onClick={() => submitEntry()}>
+            {isRevisionMode ? 'Submit Revision' : 'Submit Entry'}
           </button>
-          <button disabled={busy || !isSavedDraft || !isEditableDraft} onClick={() => updateDraft()}>
-            Update Draft
-          </button>
-          <button className="secondary" disabled={busy || !isSavedDraft || !isEditableDraft} onClick={() => submitDraft()}>
-            Submit Draft
-          </button>
-          <button className="ghost" disabled={busy} onClick={() => navigate(ROUTES.dictionaryView)}>
-            Browse Published Entries
-          </button>
-          <button className="ghost" disabled={busy} onClick={() => loadMyRevisions()}>
-            Refresh My Revisions
+          <button className="ghost" disabled={busy || !isEditableDraft} onClick={() => saveDraft()}>
+            Save as Draft
           </button>
           <button className="ghost" disabled={busy} onClick={() => clearDraftContext()}>
             Clear Form
           </button>
+          <button
+            className="ghost danger"
+            disabled={busy || !isEditableDraft}
+            title={revisionId ? 'Delete this saved draft' : 'Clear this unsaved draft form'}
+            onClick={() => setConfirmDeleteDraft(true)}
+          >
+            Delete Draft
+          </button>
         </div>
       </section>
 
-      {error && <div className="alert error">{error}</div>}
-      {message && <div className="alert ok">{message}</div>}
-
-      <section className="panel">
-        <h3>My Dictionary Revisions</h3>
-        {myRevisions.length === 0 && <p className="muted">No dictionary revisions loaded yet.</p>}
-        {renderRevisionGroup('Editable Drafts', revisionGroups.draft)}
-        {renderRevisionGroup('Pending Review', revisionGroups.pending)}
-        {renderRevisionGroup('Rejected Submissions', revisionGroups.rejected)}
-        {renderRevisionGroup('Approved Submissions', revisionGroups.approved)}
-        {renderRevisionGroup('Other Statuses', revisionGroups.other)}
-      </section>
-      <ContributionCelebration celebration={celebration} onClose={closeCelebration} />
+      <ConfirmDialog
+        open={confirmDeleteDraft}
+        title={revisionId ? 'Delete this dictionary draft?' : 'Clear this unsaved dictionary draft?'}
+        message={
+          revisionId
+            ? `You are about to delete "${form.term || 'this dictionary draft'}".`
+            : 'This draft has not been saved yet. Deleting it will clear the current form.'
+        }
+        detail={
+          revisionId
+            ? 'This removes the saved draft only. It will not affect any submitted or approved entry.'
+            : 'No saved database record will be deleted because this form is still unsaved.'
+        }
+        confirmLabel={revisionId ? 'Delete Draft' : 'Clear Form'}
+        cancelLabel="Keep Draft"
+        busy={busy}
+        onCancel={() => setConfirmDeleteDraft(false)}
+        onConfirm={() => deleteDraft()}
+      />
+      <ContributionCelebration celebration={celebration} onClose={continueAfterSubmission} />
     </>
   )
 }

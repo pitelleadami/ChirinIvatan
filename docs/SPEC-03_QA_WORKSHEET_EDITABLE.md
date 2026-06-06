@@ -136,8 +136,8 @@ If all items below pass and no item is blocked, you can reasonably mark backend/
   - Remarks:
   - Evidence:
 
-- [ ] `DI-07` Flag approved revision: entry `approved_under_review`
-  - How to check: On an approved dictionary revision, choose flag with notes; then check entry status.
+- [ ] `DI-07` Flag approved dictionary entry: entry `approved_under_review`
+  - How to check: As reviewer/admin, open the live dictionary detail page for an eligible approved entry, choose flag with notes, then check entry status.
   - Status:
   - Remarks:
   - Evidence:
@@ -297,7 +297,7 @@ If all items below pass and no item is blocked, you can reasonably mark backend/
   - Evidence:
 
 - [ ] `FO-14` Flag approved folklore: entry `approved_under_review`
-  - How to check: Flag approved folklore revision with notes; inspect entry status.
+  - How to check: As reviewer/admin, open the live folklore detail page for an eligible approved entry, choose flag with notes, then check entry status.
   - Status:
   - Remarks:
   - Evidence:
@@ -354,6 +354,12 @@ If all items below pass and no item is blocked, you can reasonably mark backend/
   - Remarks:
   - Evidence:
 
+- [ ] `RV-02A` Reviewer Dashboard hides own submissions
+  - How to check: Log in as reviewer/admin who also contributed a pending or re-review item; confirm their own row is absent from Reviews.
+  - Status:
+  - Remarks:
+  - Evidence:
+
 - [ ] `RV-03` Invalid UUID returns HTTP 400 JSON (not 500)
   - How to check: Call submit review endpoint with invalid `revision_id` text; confirm clean HTTP 400 JSON error.
   - Status:
@@ -380,6 +386,18 @@ If all items below pass and no item is blocked, you can reasonably mark backend/
 
 - [ ] `RV-07` Non-admin override attempt -> HTTP 403
   - How to check: As contributor/reviewer (non-admin), call override endpoint; verify forbidden response.
+  - Status:
+  - Remarks:
+  - Evidence:
+
+- [ ] `RV-08` Re-review flag lives on public entry detail, not Reviews tab
+  - How to check: As reviewer/admin, open a live Dictionary or Folklore detail page; confirm flag button appears for eligible approved entries, requires notes, and moves entry to `approved_under_review`.
+  - Status:
+  - Remarks:
+  - Evidence:
+
+- [ ] `RV-09` Admin person activity log is capped but audit-safe
+  - How to check: As admin, open People, choose Log for a person, confirm recent actions appear and only the latest 500 are returned/displayed if the person has more.
   - Status:
   - Remarks:
   - Evidence:

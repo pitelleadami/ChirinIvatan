@@ -147,19 +147,17 @@ What is still missing:
 What reviewer can see:
 - Dictionary pending submissions
 - Dictionary re-review queue
-- Dictionary published entries that can be flagged
 - Folklore pending submissions
 - Folklore re-review queue
-- Folklore published entries that can be flagged
 
 What reviewer can do:
-- Approve
+- Approve pending and re-review items
 - Reject (with notes)
-- Flag for re-review (with notes)
+- Browse live Dictionary/Folklore entries and flag a published item for re-review from the public entry detail page (with notes)
+- Reviewers/admins do not see their own submissions in review queues because self-review is not allowed
 
 What is still missing:
-- Final polished dashboard design
-- Better visual status filtering controls
+- Nothing required for the current reviewer queue contract
 
 ### Page: Role Screening / Invitations (backend-ready, UI still needed)
 

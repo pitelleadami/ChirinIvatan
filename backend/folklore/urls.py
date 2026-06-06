@@ -9,6 +9,7 @@ from django.urls import path
 
 from folklore.views import (
     create_folklore_entry_view,
+    delete_folklore_revision_view,
     folklore_entries_list_view,
     folklore_entry_detail_view,
     my_folklore_entries_view,
@@ -39,6 +40,11 @@ urlpatterns = [
         "api/folklore/revisions/<uuid:revision_id>/submit",
         submit_folklore_entry_view,
         name="submit_folklore_revision",
+    ),
+    path(
+        "api/folklore/revisions/<uuid:revision_id>/delete",
+        delete_folklore_revision_view,
+        name="delete_folklore_revision",
     ),
     path(
         "api/folklore/entries/my",

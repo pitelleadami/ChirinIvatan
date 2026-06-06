@@ -237,6 +237,7 @@ def submit_folklore_review(
                         "title": entry.title,
                         "content": entry.content,
                         "category": entry.category,
+                        "subcategory": entry.subcategory,
                         "municipality_source": entry.municipality_source,
                         "source": entry.source,
                         "self_knowledge": entry.self_knowledge,

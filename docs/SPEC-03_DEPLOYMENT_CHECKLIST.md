@@ -64,7 +64,7 @@ Recommended implementation note:
 Django:
 - `DJANGO_DEBUG=True`
 - `DJANGO_ALLOWED_HOSTS=127.0.0.1,localhost`
-- `DJANGO_CSRF_TRUSTED_ORIGINS=http://127.0.0.1:5173,http://localhost:5173`
+- `DJANGO_CSRF_TRUSTED_ORIGINS=http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:5174,http://localhost:5174`
 - `DJANGO_DB_ENGINE=django.db.backends.sqlite3`
 - `DJANGO_DB_NAME=backend/db.sqlite3`
 - `DJANGO_SECURE_SSL_REDIRECT=False`
@@ -111,8 +111,8 @@ Frontend (`frontend/.env.staging`):
 
 Django:
 - `DJANGO_DEBUG=False`
-- `DJANGO_ALLOWED_HOSTS=api.yourdomain.com`
-- `DJANGO_CSRF_TRUSTED_ORIGINS=https://yourdomain.com,https://api.yourdomain.com`
+- `DJANGO_ALLOWED_HOSTS=chirinivatan.com,www.chirinivatan.com,api.chirinivatan.com`
+- `DJANGO_CSRF_TRUSTED_ORIGINS=https://chirinivatan.com,https://api.chirinivatan.com`
 - `DJANGO_DB_ENGINE=django.db.backends.postgresql`
 - `DJANGO_DB_NAME=chirin_prod`
 - `DJANGO_DB_USER=chirin_prod_user`
@@ -130,7 +130,7 @@ Frontend (`frontend/.env.production`):
 - same-origin deployment:
   - `VITE_API_BASE=`
 - separate API domain deployment:
-  - `VITE_API_BASE=https://api.yourdomain.com`
+  - `VITE_API_BASE=https://api.chirinivatan.com`
 
 ---
 
@@ -157,6 +157,7 @@ python3 manage.py check
 For production/staging:
 - [ ] enforce HTTPS
 - [ ] proxy app to gunicorn/uvicorn backend
+- [ ] if frontend uses same-origin API calls, proxy `/api/` and `/admin/` from the frontend domain to backend
 - [ ] serve `/static/` from `STATIC_ROOT`
 - [ ] serve `/media/` from `MEDIA_ROOT`
 - [ ] forward `X-Forwarded-Proto https`
@@ -205,10 +206,19 @@ npm run build
 - [ ] authenticated reviewer/admin gets 200 on dashboard
 
 ### Functional
-- [ ] submit one dictionary review action (approve/reject/flag)
-- [ ] submit one folklore review action
+- [ ] submit one dictionary approve/reject action from the Reviews queue
+- [ ] submit one folklore approve/reject action from the Reviews queue
+- [ ] flag one eligible live Dictionary or Folklore entry for re-review from its public detail page
 - [ ] create + submit one folklore draft
 - [ ] open one public profile and one leaderboard endpoint
+- [ ] as admin, open Steward's Desk -> Site Content and save About/Digital Yaru copy
+- [ ] confirm Statements of Support and Partner Details appear on the About page only when populated
+- [ ] save an FAQ section/question with selected role visibility and confirm it appears only for matching roles
+- [ ] upload one FAQ screenshot/graph and confirm it is served from `/media/site/faq/`
+- [ ] as admin, create one managed Consultant profile from Steward's Desk -> People and confirm the public profile shows Consultant
+- [ ] as admin, send one Consultant email invitation and confirm accepted consultant accounts have reviewer-level queue access
+- [ ] confirm profile owners do not see the leaderboard visibility control on their public profile
+- [ ] as admin, use the public-profile leaderboard visibility control and confirm that user is removed/restored in individual leaderboard rows
 
 ### Security
 - [ ] cookies are secure in browser (staging/prod)

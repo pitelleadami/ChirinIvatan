@@ -10,10 +10,17 @@
 
 import { useEffect, useState } from 'react'
 
+import ConfirmDialog from '../components/ConfirmDialog'
 import ContributionCelebration from '../components/ContributionCelebration'
 import { apiRequest } from '../lib/api'
 import { useContributionCelebration } from '../lib/contributionCelebration'
+import {
+  FOLKLORE_TAXONOMY,
+  folkloreSubcategoryOptions,
+  folkloreTaxonomyLabel,
+} from '../lib/folkloreTaxonomy'
 import { prepareImageUpload } from '../lib/imageUpload'
+import { ROUTES, navigate } from '../lib/router'
 
 const MUNICIPALITY_OPTIONS = [
   'Basco',
@@ -25,14 +32,19 @@ const MUNICIPALITY_OPTIONS = [
   'Not Applicable',
 ]
 
-const FOLKLORE_CATEGORY_OPTIONS = [
-  'myth',
-  'legend',
-  'laji',
-  'poem',
-  'proverb',
-  'idiom',
-]
+const INITIAL_FORM = {
+  title: '',
+  content: '',
+  category: 'oral_narratives',
+  subcategory: 'myths',
+  municipality_source: 'Not Applicable',
+  source: '',
+  self_knowledge: null,
+  media_url: '',
+  media_source: '',
+  self_produced_media: null,
+  copyright_usage: '',
+}
 
 const SOURCE_OWNER_LABEL = 'K. Adami'
 
@@ -160,9 +172,29 @@ function resolveSourceConfig(config, type) {
   return config.find((item) => item.value === type) || null
 }
 
-function isConfigComplete(config, values) {
-  if (!config) return false
-  return config.fields.every((field) => String(values?.[field.key] || '').trim())
+function todayInputValue() {
+  const today = new Date()
+  today.setMinutes(today.getMinutes() - today.getTimezoneOffset())
+  return today.toISOString().slice(0, 10)
+}
+
+function isFutureDateValue(value) {
+  const normalized = String(value || '').trim()
+  return normalized && normalized > todayInputValue()
+}
+
+function sourceFieldErrors(config, values, idPrefix) {
+  const nextErrors = {}
+  ;(config?.fields || []).forEach((field) => {
+    const value = String(values?.[field.key] || '').trim()
+    const errorKey = `${idPrefix}.${field.key}`
+    if (!value) {
+      nextErrors[errorKey] = `${field.label} is required.`
+    } else if (field.type === 'date' && isFutureDateValue(value)) {
+      nextErrors[errorKey] = `${field.label} must be today or a past date.`
+    }
+  })
+  return nextErrors
 }
 
 function buildSourceLine(label, config, values, fallback = '') {
@@ -197,10 +229,16 @@ function RequiredMark() {
   )
 }
 
-function YesNoField({ legend, name, value, onChange }) {
+function YesNoField({ legend, name, value, onChange, error = '', required = false }) {
   return (
-    <fieldset className="binary-choice">
-      <legend>{legend}</legend>
+    <fieldset
+      className={error ? 'binary-choice binary-choice-error' : 'binary-choice'}
+      aria-invalid={Boolean(error)}
+      aria-describedby={error ? `${name}-error` : undefined}
+    >
+      <legend>
+        {legend} {required && <RequiredMark />}
+      </legend>
       <div className="binary-choice-options">
         <label>
           <input type="radio" name={name} checked={value === true} onChange={() => onChange(true)} />
@@ -211,6 +249,11 @@ function YesNoField({ legend, name, value, onChange }) {
           No
         </label>
       </div>
+      {error && (
+        <p className="inline-error" id={`${name}-error`}>
+          {error}
+        </p>
+      )}
     </fieldset>
   )
 }
@@ -220,19 +263,7 @@ export default function FolkloreDraftBuilderPage() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
-  const [myRevisions, setMyRevisions] = useState([])
-  const [form, setForm] = useState({
-    title: '',
-    content: '',
-    category: 'myth',
-    municipality_source: 'Not Applicable',
-    source: '',
-    self_knowledge: null,
-    media_url: '',
-    media_source: '',
-    self_produced_media: null,
-    copyright_usage: '',
-  })
+  const [form, setForm] = useState(INITIAL_FORM)
   const [fieldErrors, setFieldErrors] = useState({})
   const [textSourceType, setTextSourceType] = useState('')
   const [textSourceValues, setTextSourceValues] = useState({})
@@ -247,51 +278,198 @@ export default function FolkloreDraftBuilderPage() {
   const [videoSourceValues, setVideoSourceValues] = useState({})
   const [photoFile, setPhotoFile] = useState(null)
   const [photoPreview, setPhotoPreview] = useState('')
+  const [photoPreviewSize, setPhotoPreviewSize] = useState({ width: 0, height: 0 })
   const [photoWarning, setPhotoWarning] = useState('')
   const [audioFile, setAudioFile] = useState(null)
+  const [existingPhotoUrl, setExistingPhotoUrl] = useState('')
+  const [existingAudioUrl, setExistingAudioUrl] = useState('')
+  const [confirmDeleteDraft, setConfirmDeleteDraft] = useState(false)
   const youtubeEmbedUrl = getYouTubeEmbedUrl(form.media_url)
-  const { celebration, celebrateContribution, closeCelebration } = useContributionCelebration()
-  const hasMedia = Boolean(form.media_url.trim() || photoFile || audioFile)
-  const hasAudioMedia = Boolean(audioFile)
-  const hasPhotoMedia = Boolean(photoFile)
+  const { celebration, celebrateContribution, celebrateDraftSaved, closeCelebration } = useContributionCelebration()
+  const hasMedia = Boolean(form.media_url.trim() || photoFile || audioFile || existingPhotoUrl || existingAudioUrl)
+  const hasAudioMedia = Boolean(audioFile || existingAudioUrl)
+  const hasPhotoMedia = Boolean(photoFile || existingPhotoUrl)
   const hasVideoMedia = Boolean(form.media_url.trim())
+  const useCompactPhotoPreview =
+    Boolean(photoPreview) &&
+    !youtubeEmbedUrl &&
+    Math.max(photoPreviewSize.width, photoPreviewSize.height) > 0 &&
+    Math.max(photoPreviewSize.width, photoPreviewSize.height) < 600
 
   const selectedTextSourceConfig = resolveSourceConfig(FOLKLORE_TEXT_SOURCE_TYPES, textSourceType)
   const selectedAudioSourceConfig = resolveSourceConfig(FOLKLORE_AUDIO_SOURCE_TYPES, audioSourceType)
   const selectedPhotoSourceConfig = resolveSourceConfig(FOLKLORE_PHOTO_SOURCE_TYPES, photoSourceType)
   const selectedVideoSourceConfig = resolveSourceConfig(FOLKLORE_VIDEO_SOURCE_TYPES, videoSourceType)
+  const subcategoryOptions = folkloreSubcategoryOptions(form.category)
   const previewTextSource = buildFolkloreTextSourceForSubmit()
   const previewMediaSource = buildFolkloreMediaSourceForSubmit()
 
-  function updateSourceValues(setter, key, value) {
+  useEffect(() => {
+    const revisionFromQuery = new URLSearchParams(window.location.search).get('revision_id')
+    if (!revisionFromQuery) return
+
+    let cancelled = false
+    async function loadDraftFromQuery() {
+      setBusy(true)
+      setError('')
+      setMessage('')
+      try {
+        const rows = await fetchMyRevisions()
+        if (cancelled) return
+        const revision = rows.find((row) => row.revision_id === revisionFromQuery)
+        if (!revision) {
+          setError('Folklore draft not found in your contributions.')
+          return
+        }
+        if (revision.status !== 'draft') {
+          setError('Only draft folklore revisions can be edited.')
+          return
+        }
+        loadRevisionIntoForm(revision)
+      } catch (requestError) {
+        if (!cancelled) setError(requestError.message)
+      } finally {
+        if (!cancelled) setBusy(false)
+      }
+    }
+
+    loadDraftFromQuery()
+    return () => {
+      cancelled = true
+    }
+    // Load the specific saved draft requested by Steward's Desk.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  function clearFieldError(field) {
+    setFieldErrors((current) => {
+      if (!current[field]) return current
+      const next = { ...current }
+      delete next[field]
+      return next
+    })
+  }
+
+  function updateSourceValues(setter, key, value, errorKey = key) {
     setter((current) => ({ ...current, [key]: value }))
+    clearFieldError(errorKey)
+  }
+
+  function asNullableBoolean(value) {
+    if (value === null || value === undefined || value === '') return null
+    if (typeof value === 'boolean') return value
+    return String(value).trim().toLowerCase() === 'true'
   }
 
   function renderSourceFields(config, values, setter, idPrefix) {
     if (!config) return null
     return (
       <div className="field-grid">
-        {config.fields.map((field) => (
-          <div key={`${idPrefix}-${field.key}`} className="field">
-            <label htmlFor={`${idPrefix}-${field.key}`}>
-              {field.label} <RequiredMark />
+        {config.fields.map((field) => {
+          const errorKey = `${idPrefix}.${field.key}`
+          return (
+            <div key={`${idPrefix}-${field.key}`} className={fieldErrors[errorKey] ? 'field field-error' : 'field'}>
+              <label htmlFor={`${idPrefix}-${field.key}`}>
+                {field.label} <RequiredMark />
+              </label>
+              <input
+                id={`${idPrefix}-${field.key}`}
+                type={field.type || 'text'}
+                value={values[field.key] || ''}
+                required
+                max={field.type === 'date' ? todayInputValue() : undefined}
+                aria-invalid={Boolean(fieldErrors[errorKey])}
+                aria-describedby={fieldErrors[errorKey] ? `${idPrefix}-${field.key}-error` : undefined}
+                onChange={(event) => updateSourceValues(setter, field.key, event.target.value, errorKey)}
+              />
+              {fieldErrors[errorKey] && (
+                <p className="inline-error" id={`${idPrefix}-${field.key}-error`}>
+                  {fieldErrors[errorKey]}
+                </p>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
+  function renderMediaSourceControls({
+    title,
+    question,
+    name,
+    value,
+    setOwned,
+    sourceType,
+    setSourceType,
+    sourceValues,
+    setSourceValues,
+    sourceTypes,
+    selectedConfig,
+    idPrefix,
+    ownedLabel,
+  }) {
+    const ownedErrorKey = `${idPrefix}.owned`
+    const typeErrorKey = `${idPrefix}.type`
+    return (
+      <div className={fieldErrors[ownedErrorKey] || fieldErrors[typeErrorKey] ? 'media-source-panel field-error' : 'media-source-panel'}>
+        <p>{title}</p>
+        <YesNoField
+          legend={question}
+          name={name}
+          value={value}
+          error={fieldErrors[ownedErrorKey]}
+          required
+          onChange={(nextValue) => {
+            setOwned(nextValue)
+            clearFieldError(ownedErrorKey)
+            if (nextValue) {
+              setSourceType('')
+              setSourceValues({})
+              clearFieldError(typeErrorKey)
+            }
+          }}
+        />
+        {value === false && (
+          <>
+            <label htmlFor={`${idPrefix}-type`}>
+              Source Type <RequiredMark />
             </label>
-            <input
-              id={`${idPrefix}-${field.key}`}
-              type={field.type || 'text'}
-              value={values[field.key] || ''}
+            <select
+              id={`${idPrefix}-type`}
               required
-              onChange={(event) => updateSourceValues(setter, field.key, event.target.value)}
-            />
-          </div>
-        ))}
+              value={sourceType}
+              aria-invalid={Boolean(fieldErrors[typeErrorKey])}
+              aria-describedby={fieldErrors[typeErrorKey] ? `${idPrefix}-type-error` : undefined}
+              onChange={(event) => {
+                setSourceType(event.target.value)
+                clearFieldError(typeErrorKey)
+              }}
+            >
+              <option value="">Select source type</option>
+              {sourceTypes.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+            {fieldErrors[typeErrorKey] && (
+              <p className="inline-error" id={`${idPrefix}-type-error`}>
+                {fieldErrors[typeErrorKey]}
+              </p>
+            )}
+            {selectedConfig && <p className="hint">{selectedConfig.guidance}</p>}
+            {renderSourceFields(selectedConfig, sourceValues, setSourceValues, idPrefix)}
+          </>
+        )}
+        {value === true && <p className="hint">{ownedLabel}: {SOURCE_OWNER_LABEL}</p>}
       </div>
     )
   }
 
   function buildFolkloreTextSourceForSubmit() {
     if (form.self_knowledge) return ''
-    return buildSourceLine('Source', selectedTextSourceConfig, textSourceValues)
+    return buildSourceLine('Source', selectedTextSourceConfig, textSourceValues, form.source)
   }
 
   function buildFolkloreMediaSourceForSubmit() {
@@ -317,7 +495,7 @@ export default function FolkloreDraftBuilderPage() {
         lines.push(buildSourceLine('Video Source', selectedVideoSourceConfig, videoSourceValues))
       }
     }
-    return lines.filter(Boolean).join('\n')
+    return lines.filter(Boolean).join('\n') || form.media_source
   }
 
   useEffect(() => {
@@ -329,11 +507,23 @@ export default function FolkloreDraftBuilderPage() {
   }, [photoPreview])
 
   function setField(field, value) {
-    setForm((prev) => ({ ...prev, [field]: value }))
+    setForm((prev) => {
+      if (field === 'category') {
+        const nextSubcategory = folkloreSubcategoryOptions(value)[0]?.value || ''
+        return { ...prev, category: value, subcategory: nextSubcategory }
+      }
+      return { ...prev, [field]: value }
+    })
     setFieldErrors((current) => {
-      if (!current[field]) return current
+      if (!current[field] && !(field === 'category' && current.subcategory)) return current
       const next = { ...current }
       delete next[field]
+      if (field === 'category') delete next.subcategory
+      if (field === 'media_url') {
+        delete next['folklore-video-source.owned']
+        delete next['folklore-video-source.type']
+        delete next.media_source
+      }
       return next
     })
   }
@@ -343,13 +533,18 @@ export default function FolkloreDraftBuilderPage() {
     if (photoPreview.startsWith('blob:')) {
       URL.revokeObjectURL(photoPreview)
     }
+    setExistingPhotoUrl('')
     setPhotoWarning('')
+    setPhotoPreviewSize({ width: 0, height: 0 })
     setError('')
+    clearFieldError('folklore-photo-source.owned')
+    clearFieldError('folklore-photo-source.type')
+    clearFieldError('media_source')
 
     try {
       const prepared = await prepareImageUpload(file, {
-        minWidth: 800,
-        minHeight: 450,
+        minWidth: 200,
+        minHeight: 200,
         maxWidth: 1600,
         maxHeight: 900,
       })
@@ -368,8 +563,14 @@ export default function FolkloreDraftBuilderPage() {
     const formData = new FormData()
     const derivedSource = buildFolkloreTextSourceForSubmit()
     const derivedMediaSource = buildFolkloreMediaSourceForSubmit()
-    const derivedSelfProducedMedia =
-      [audioOwnedByContributor, photoOwnedByContributor, videoOwnedByContributor].filter((value) => value !== null).every(Boolean)
+    const ownershipValues = [
+      hasAudioMedia ? audioOwnedByContributor : null,
+      hasPhotoMedia ? photoOwnedByContributor : null,
+      hasVideoMedia ? videoOwnedByContributor : null,
+    ].filter((value) => value !== null)
+    const derivedSelfProducedMedia = ownershipValues.length
+      ? ownershipValues.every(Boolean)
+      : Boolean(form.self_produced_media)
     Object.entries(form).forEach(([key, value]) => {
       if (key === 'source') {
         formData.append(key, String(derivedSource))
@@ -381,6 +582,10 @@ export default function FolkloreDraftBuilderPage() {
       }
       if (key === 'self_produced_media') {
         formData.append(key, String(derivedSelfProducedMedia))
+        return
+      }
+      if (key === 'copyright_usage') {
+        formData.append(key, form.self_knowledge ? String(value) : '')
         return
       }
       formData.append(key, String(value))
@@ -396,9 +601,53 @@ export default function FolkloreDraftBuilderPage() {
 
   async function fetchMyRevisions() {
     const payload = await apiRequest('/api/folklore/revisions/my')
-    const rows = payload.rows || []
-    setMyRevisions(rows)
-    return rows
+    return payload.rows || []
+  }
+
+  function loadRevisionIntoForm(revision) {
+    const data = revision.proposed_data || revision
+    const nextSelfKnowledge = asNullableBoolean(data.self_knowledge)
+    const nextSelfProducedMedia = asNullableBoolean(data.self_produced_media)
+
+    setRevisionId(revision.revision_id || '')
+    setForm({
+      title: data.title || '',
+      content: data.content || '',
+      category: data.category || 'oral_narratives',
+      subcategory: data.subcategory || folkloreSubcategoryOptions(data.category || 'oral_narratives')[0]?.value || '',
+      municipality_source: data.municipality_source || 'Not Applicable',
+      source: data.source || '',
+      self_knowledge: nextSelfKnowledge,
+      media_url: data.media_url || '',
+      media_source: data.media_source || '',
+      self_produced_media: nextSelfProducedMedia,
+      copyright_usage: data.copyright_usage || '',
+    })
+    setTextSourceType('')
+    setTextSourceValues({})
+    setVideoSourceType('')
+    setVideoSourceValues({})
+    setPhotoSourceType('')
+    setPhotoSourceValues({})
+    setAudioSourceType('')
+    setAudioSourceValues({})
+    setVideoOwnedByContributor(data.media_url ? nextSelfProducedMedia : null)
+    setPhotoOwnedByContributor(revision.photo_upload_url ? nextSelfProducedMedia : null)
+    setAudioOwnedByContributor(revision.audio_upload_url ? nextSelfProducedMedia : null)
+    setExistingPhotoUrl(revision.photo_upload_url || '')
+    setExistingAudioUrl(revision.audio_upload_url || '')
+    setPhotoFile(null)
+    setAudioFile(null)
+    if (photoPreview.startsWith('blob:')) {
+      URL.revokeObjectURL(photoPreview)
+    }
+    setPhotoPreview(revision.photo_upload_url || '')
+    setPhotoPreviewSize({ width: 0, height: 0 })
+    setPhotoWarning('')
+    setFieldErrors({})
+    setError('')
+    setMessage('')
+    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   function validateRequiredFields() {
@@ -406,6 +655,7 @@ export default function FolkloreDraftBuilderPage() {
     if (!String(form.title || '').trim()) nextErrors.title = 'Title is required.'
     if (!String(form.content || '').trim()) nextErrors.content = 'Content is required.'
     if (!String(form.category || '').trim()) nextErrors.category = 'Category is required.'
+    if (!String(form.subcategory || '').trim()) nextErrors.subcategory = 'Subcategory is required.'
     if (!String(form.municipality_source || '').trim()) nextErrors.municipality_source = 'Municipality source is required.'
 
     setFieldErrors(nextErrors)
@@ -418,86 +668,182 @@ export default function FolkloreDraftBuilderPage() {
 
   function validateAttribution() {
     if (form.self_knowledge === null) {
+      setFieldErrors((current) => ({
+        ...current,
+        self_knowledge: 'Source answer is required.',
+      }))
       setError('Please answer whether this entry is based on your own knowledge.')
       return false
     }
     if (!form.self_knowledge) {
-      if (!selectedTextSourceConfig) {
+      if (!selectedTextSourceConfig && !String(form.source || '').trim()) {
+        setFieldErrors((current) => ({
+          ...current,
+          text_source_type: 'Choose a source type.',
+        }))
         setError('Please choose a source type for the folklore text source.')
         return false
       }
-      if (!isConfigComplete(selectedTextSourceConfig, textSourceValues)) {
-        setError('Please complete all required fields for the selected folklore text source type.')
+      if (selectedTextSourceConfig) {
+        const nextSourceErrors = sourceFieldErrors(selectedTextSourceConfig, textSourceValues, 'folklore-text-source')
+        if (Object.keys(nextSourceErrors).length > 0) {
+        setFieldErrors((current) => ({ ...current, ...nextSourceErrors }))
+        setError('Please complete all required source fields. Dates must be today or in the past.')
         return false
+        }
       }
     }
     if (hasAudioMedia) {
       if (audioOwnedByContributor === null) {
+        setFieldErrors((current) => ({
+          ...current,
+          'folklore-audio-source.owned': 'Audio source answer is required.',
+        }))
         setError('Please answer whether the audio recording is personally owned or produced by you.')
         return false
       }
       if (audioOwnedByContributor === false) {
-        if (!selectedAudioSourceConfig) {
+        if (!selectedAudioSourceConfig && !String(form.media_source || '').trim()) {
+          setFieldErrors((current) => ({
+            ...current,
+            'folklore-audio-source.type': 'Choose an audio source type.',
+          }))
           setError('Please choose an audio source type.')
           return false
         }
-        if (!isConfigComplete(selectedAudioSourceConfig, audioSourceValues)) {
-          setError('Please complete all required fields for the selected audio source type.')
+        if (selectedAudioSourceConfig) {
+          const nextSourceErrors = sourceFieldErrors(selectedAudioSourceConfig, audioSourceValues, 'folklore-audio-source')
+          if (Object.keys(nextSourceErrors).length > 0) {
+          setFieldErrors((current) => ({ ...current, ...nextSourceErrors }))
+          setError('Please complete all required audio source fields. Dates must be today or in the past.')
           return false
+          }
         }
       }
     }
     if (hasPhotoMedia) {
       if (photoOwnedByContributor === null) {
+        setFieldErrors((current) => ({
+          ...current,
+          'folklore-photo-source.owned': 'Photo source answer is required.',
+        }))
         setError('Please answer whether the photo is personally owned or produced by you.')
         return false
       }
       if (photoOwnedByContributor === false) {
-        if (!selectedPhotoSourceConfig) {
+        if (!selectedPhotoSourceConfig && !String(form.media_source || '').trim()) {
+          setFieldErrors((current) => ({
+            ...current,
+            'folklore-photo-source.type': 'Choose a photo source type.',
+          }))
           setError('Please choose a photo source type.')
           return false
         }
-        if (!isConfigComplete(selectedPhotoSourceConfig, photoSourceValues)) {
-          setError('Please complete all required fields for the selected photo source type.')
+        if (selectedPhotoSourceConfig) {
+          const nextSourceErrors = sourceFieldErrors(selectedPhotoSourceConfig, photoSourceValues, 'folklore-photo-source')
+          if (Object.keys(nextSourceErrors).length > 0) {
+          setFieldErrors((current) => ({ ...current, ...nextSourceErrors }))
+          setError('Please complete all required photo source fields. Dates must be today or in the past.')
           return false
+          }
         }
       }
     }
     if (hasVideoMedia) {
       if (videoOwnedByContributor === null) {
+        setFieldErrors((current) => ({
+          ...current,
+          'folklore-video-source.owned': 'Video source answer is required.',
+        }))
         setError('Please answer whether the video recording is personally owned or produced by you.')
         return false
       }
       if (videoOwnedByContributor === false) {
-        if (!selectedVideoSourceConfig) {
+        if (!selectedVideoSourceConfig && !String(form.media_source || '').trim()) {
+          setFieldErrors((current) => ({
+            ...current,
+            'folklore-video-source.type': 'Choose a video source type.',
+          }))
           setError('Please choose a video source type.')
           return false
         }
-        if (!isConfigComplete(selectedVideoSourceConfig, videoSourceValues)) {
-          setError('Please complete all required fields for the selected video source type.')
+        if (selectedVideoSourceConfig) {
+          const nextSourceErrors = sourceFieldErrors(selectedVideoSourceConfig, videoSourceValues, 'folklore-video-source')
+          if (Object.keys(nextSourceErrors).length > 0) {
+          setFieldErrors((current) => ({ ...current, ...nextSourceErrors }))
+          setError('Please complete all required video source fields. Dates must be today or in the past.')
           return false
+          }
         }
       }
     }
 
     if (!form.self_knowledge && !String(buildFolkloreTextSourceForSubmit() || '').trim()) {
+      setFieldErrors((current) => ({
+        ...current,
+        text_source_type: 'Source is required.',
+      }))
       setError('Source is required unless the entry is based on your own knowledge.')
       return false
     }
     if (hasMedia && !String(buildFolkloreMediaSourceForSubmit() || '').trim()) {
+      setFieldErrors((current) => ({
+        ...current,
+        media_source: 'Media source is required.',
+      }))
       setError('Media source is required when media is attached and not personally owned/produced.')
       return false
     }
     return true
   }
 
-  async function loadMyRevisions() {
+  function clearForm() {
+    if (photoPreview.startsWith('blob:')) {
+      URL.revokeObjectURL(photoPreview)
+    }
+    setRevisionId('')
+    setForm(INITIAL_FORM)
+    setFieldErrors({})
+    setTextSourceType('')
+    setTextSourceValues({})
+    setVideoSourceType('')
+    setVideoSourceValues({})
+    setPhotoSourceType('')
+    setPhotoSourceValues({})
+    setAudioSourceType('')
+    setAudioSourceValues({})
+    setVideoOwnedByContributor(null)
+    setPhotoOwnedByContributor(null)
+    setAudioOwnedByContributor(null)
+    setExistingPhotoUrl('')
+    setExistingAudioUrl('')
+    setPhotoFile(null)
+    setPhotoPreview('')
+    setPhotoPreviewSize({ width: 0, height: 0 })
+    setPhotoWarning('')
+    setAudioFile(null)
+    setError('')
+    setMessage('Form cleared.')
+    window.history.replaceState({}, '', ROUTES.folkloreDraft)
+  }
+
+  async function deleteDraft() {
+    const trimmedId = revisionId.trim()
+    if (!trimmedId) {
+      clearForm()
+      setConfirmDeleteDraft(false)
+      return
+    }
+
     setBusy(true)
     setError('')
     setMessage('')
     try {
-      const rows = await fetchMyRevisions()
-      setMessage(rows.length ? 'Loaded your revisions.' : 'No revisions found for this user.')
+      await apiRequest(`/api/folklore/revisions/${trimmedId}/delete`, { method: 'DELETE' })
+      clearForm()
+      setConfirmDeleteDraft(false)
+      setMessage('Draft deleted.')
+      await fetchMyRevisions()
     } catch (requestError) {
       setError(requestError.message)
     } finally {
@@ -519,6 +865,7 @@ export default function FolkloreDraftBuilderPage() {
       })
       setRevisionId(payload.revision_id || '')
       setMessage(`Draft created: ${payload.revision_id}`)
+      celebrateDraftSaved('folklore')
       await fetchMyRevisions()
     } catch (requestError) {
       setError(requestError.message)
@@ -530,7 +877,7 @@ export default function FolkloreDraftBuilderPage() {
   async function updateDraft() {
     const trimmedId = revisionId.trim()
     if (!trimmedId) {
-      setError('Enter revision ID first.')
+      setError("Create a draft or choose an editable draft from Steward's Desk first.")
       return
     }
 
@@ -546,6 +893,7 @@ export default function FolkloreDraftBuilderPage() {
         body: createFormData(),
       })
       setMessage(`Draft updated: ${payload.revision_id}`)
+      celebrateDraftSaved('folklore')
       await fetchMyRevisions()
     } catch (requestError) {
       setError(requestError.message)
@@ -554,10 +902,18 @@ export default function FolkloreDraftBuilderPage() {
     }
   }
 
+  async function saveDraft() {
+    if (revisionId.trim()) {
+      await updateDraft()
+      return
+    }
+    await createDraft()
+  }
+
   async function submitDraft() {
     const trimmedId = revisionId.trim()
     if (!trimmedId) {
-      setError('Enter revision ID first.')
+      setError("Create a draft or choose an editable draft from Steward's Desk first.")
       return
     }
 
@@ -572,8 +928,9 @@ export default function FolkloreDraftBuilderPage() {
         method: 'POST',
       })
       setMessage(`Draft submitted. Status: ${payload.status}`)
-      celebrateContribution('folklore')
-      await fetchMyRevisions()
+      const rows = await fetchMyRevisions()
+      const submittedCount = rows.filter((row) => row.status !== 'draft').length
+      celebrateContribution('folklore', submittedCount)
     } catch (requestError) {
       setError(requestError.message)
     } finally {
@@ -581,30 +938,18 @@ export default function FolkloreDraftBuilderPage() {
     }
   }
 
+  function continueAfterSubmission() {
+    closeCelebration()
+    navigate(`${ROUTES.adminApplications}?tab=contributions`)
+  }
+
   return (
     <>
-      <section className="panel">
+      <section className="panel folklore-draft-builder-panel">
         <h2>Folklore Draft Builder</h2>
-        <p className="muted">
-          Title, content, category, and municipality source are required. Source is required unless marked as
-          self-knowledge. Media source is required when media is attached unless it is marked self-produced.
-        </p>
-        <div className="draft-workflow-guide" aria-label="Folklore draft workflow">
-          <article>
-            <span>1</span>
-            <p>Write the story, source, and optional media details.</p>
-          </article>
-          <article>
-            <span>2</span>
-            <p>Preview the entry, then create a draft so it receives a revision ID.</p>
-          </article>
-          <article>
-            <span>3</span>
-            <p>Update the draft as needed, then submit it for reviewer validation.</p>
-          </article>
-        </div>
 
-        <div className="field-grid">
+        <div className="folklore-draft-layout">
+          <div className="folklore-draft-form-column">
           <div className="field">
             <label htmlFor="folklore-title">
               Title <RequiredMark />
@@ -622,9 +967,11 @@ export default function FolkloreDraftBuilderPage() {
               </p>
             )}
           </div>
+
+        <div className="field-grid folklore-draft-taxonomy-row">
           <div className="field">
             <label htmlFor="folklore-category">
-              Category <RequiredMark />
+              Main Category <RequiredMark />
             </label>
             <select
               id="folklore-category"
@@ -633,15 +980,38 @@ export default function FolkloreDraftBuilderPage() {
               aria-describedby={fieldErrors.category ? 'folklore-category-error' : undefined}
               onChange={(event) => setField('category', event.target.value)}
             >
-              {FOLKLORE_CATEGORY_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {option}
+              {FOLKLORE_TAXONOMY.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
                 </option>
               ))}
             </select>
             {fieldErrors.category && (
               <p className="inline-error" id="folklore-category-error">
                 {fieldErrors.category}
+              </p>
+            )}
+          </div>
+          <div className="field">
+            <label htmlFor="folklore-subcategory">
+              Subcategory <RequiredMark />
+            </label>
+            <select
+              id="folklore-subcategory"
+              value={form.subcategory}
+              aria-invalid={Boolean(fieldErrors.subcategory)}
+              aria-describedby={fieldErrors.subcategory ? 'folklore-subcategory-error' : undefined}
+              onChange={(event) => setField('subcategory', event.target.value)}
+            >
+              {subcategoryOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            {fieldErrors.subcategory && (
+              <p className="inline-error" id="folklore-subcategory-error">
+                {fieldErrors.subcategory}
               </p>
             )}
           </div>
@@ -668,17 +1038,6 @@ export default function FolkloreDraftBuilderPage() {
               </p>
             )}
           </div>
-          <div className="field">
-            <label htmlFor="folklore-media-url">
-              YouTube or Media URL
-            </label>
-            <input
-              id="folklore-media-url"
-              value={form.media_url}
-              onChange={(event) => setField('media_url', event.target.value)}
-              placeholder="Paste a YouTube link instead of uploading video"
-            />
-          </div>
         </div>
 
         <div className="field">
@@ -700,56 +1059,33 @@ export default function FolkloreDraftBuilderPage() {
           )}
         </div>
 
-        <div className="field">
-          <label htmlFor="folklore-source">Source</label>
-          <YesNoField
-            legend="Is this entry based on your own knowledge?"
-            name="folklore-source-self-knowledge"
-            value={form.self_knowledge}
-            onChange={(nextValue) => {
-              setField('self_knowledge', nextValue)
-              if (nextValue) setField('source', '')
-            }}
-          />
-          {form.self_knowledge === false && (
-            <>
-              <label htmlFor="folklore-source-type">
-                Source Type <RequiredMark />
-              </label>
-              <select id="folklore-source-type" required value={textSourceType} onChange={(event) => setTextSourceType(event.target.value)}>
-                <option value="">Select source type</option>
-                {FOLKLORE_TEXT_SOURCE_TYPES.map((item) => (
-                  <option key={item.value} value={item.value}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
-              {selectedTextSourceConfig && <p className="hint">{selectedTextSourceConfig.guidance}</p>}
-              {renderSourceFields(selectedTextSourceConfig, textSourceValues, setTextSourceValues, 'folklore-text-source')}
-            </>
-          )}
-        </div>
-
-        {!hasMedia && (
+        <div className="field-grid folklore-media-row">
           <div className="field">
-            <label>Media Sources</label>
-            <p className="hint">Add a media URL, photo, or audio to configure media source attribution.</p>
+            <label htmlFor="folklore-media-url">
+              YouTube or Media URL
+            </label>
+            <input
+              id="folklore-media-url"
+              value={form.media_url}
+              onChange={(event) => setField('media_url', event.target.value)}
+              placeholder="Paste a YouTube link instead of uploading video"
+            />
+            {hasVideoMedia && renderMediaSourceControls({
+              title: 'Folklore Video Source',
+              question: 'Is this video recording personally owned or produced by you?',
+              name: 'folklore-video-owned',
+              value: videoOwnedByContributor,
+              setOwned: setVideoOwnedByContributor,
+              sourceType: videoSourceType,
+              setSourceType: setVideoSourceType,
+              sourceValues: videoSourceValues,
+              setSourceValues: setVideoSourceValues,
+              sourceTypes: FOLKLORE_VIDEO_SOURCE_TYPES,
+              selectedConfig: selectedVideoSourceConfig,
+              idPrefix: 'folklore-video-source',
+              ownedLabel: 'Video Source',
+            })}
           </div>
-        )}
-
-        <div className="field">
-          <label htmlFor="folklore-copyright">
-            Copyright/Usage
-          </label>
-          <input
-            id="folklore-copyright"
-            value={form.copyright_usage}
-            onChange={(event) => setField('copyright_usage', event.target.value)}
-            placeholder="Leave blank to default to CC BY-NC 4.0 on approval."
-          />
-        </div>
-
-        <div className="field-grid">
           <div className="field">
             <label htmlFor="folklore-photo">
               Photo Upload
@@ -760,7 +1096,23 @@ export default function FolkloreDraftBuilderPage() {
               accept="image/*"
               onChange={handlePhotoChange}
             />
+            {existingPhotoUrl && !photoFile && <p className="hint">Current photo upload will be kept unless replaced.</p>}
             {photoWarning && <p className="inline-ok">{photoWarning}</p>}
+            {hasPhotoMedia && renderMediaSourceControls({
+              title: 'Folklore Photo Source',
+              question: 'Is this photo personally owned or produced by you?',
+              name: 'folklore-photo-owned',
+              value: photoOwnedByContributor,
+              setOwned: setPhotoOwnedByContributor,
+              sourceType: photoSourceType,
+              setSourceType: setPhotoSourceType,
+              sourceValues: photoSourceValues,
+              setSourceValues: setPhotoSourceValues,
+              sourceTypes: FOLKLORE_PHOTO_SOURCE_TYPES,
+              selectedConfig: selectedPhotoSourceConfig,
+              idPrefix: 'folklore-photo-source',
+              ownedLabel: 'Photo Source',
+            })}
           </div>
           <div className="field">
             <label htmlFor="folklore-audio">
@@ -770,142 +1122,109 @@ export default function FolkloreDraftBuilderPage() {
               id="folklore-audio"
               type="file"
               accept="audio/*"
-              onChange={(event) => setAudioFile(event.target.files?.[0] || null)}
+            onChange={(event) => {
+              setExistingAudioUrl('')
+              setAudioFile(event.target.files?.[0] || null)
+              clearFieldError('folklore-audio-source.owned')
+              clearFieldError('folklore-audio-source.type')
+              clearFieldError('media_source')
+            }}
             />
-          </div>
-          <div className="field">
-            <label htmlFor="folklore-revision-id">
-              Revision ID
-            </label>
-            <input
-              id="folklore-revision-id"
-              value={revisionId}
-              onChange={(event) => setRevisionId(event.target.value)}
-            />
+            {existingAudioUrl && !audioFile && <p className="hint">Current audio upload will be kept unless replaced.</p>}
+            {hasAudioMedia && renderMediaSourceControls({
+              title: 'Folklore Audio Source',
+              question: 'Is this audio recording personally owned or produced by you?',
+              name: 'folklore-audio-owned',
+              value: audioOwnedByContributor,
+              setOwned: setAudioOwnedByContributor,
+              sourceType: audioSourceType,
+              setSourceType: setAudioSourceType,
+              sourceValues: audioSourceValues,
+              setSourceValues: setAudioSourceValues,
+              sourceTypes: FOLKLORE_AUDIO_SOURCE_TYPES,
+              selectedConfig: selectedAudioSourceConfig,
+              idPrefix: 'folklore-audio-source',
+              ownedLabel: 'Audio Source',
+            })}
           </div>
         </div>
 
-        {hasAudioMedia && (
-          <div className="field">
-            <label>Folklore Audio Source</label>
-            <p className="hint">Question: Is this audio recording personally owned or produced by you?</p>
-            <YesNoField
-              legend="Is this audio recording personally owned or produced by you?"
-              name="folklore-audio-owned"
-              value={audioOwnedByContributor}
-              onChange={(nextValue) => {
-                setAudioOwnedByContributor(nextValue)
-                if (nextValue) {
-                  setAudioSourceType('')
-                  setAudioSourceValues({})
-                }
-              }}
-            />
-            {audioOwnedByContributor === false && (
-              <>
-                <label htmlFor="folklore-audio-source-type">
-                  Source Type <RequiredMark />
-                </label>
-                <select id="folklore-audio-source-type" required value={audioSourceType} onChange={(event) => setAudioSourceType(event.target.value)}>
-                  <option value="">Select source type</option>
-                  {FOLKLORE_AUDIO_SOURCE_TYPES.map((item) => (
-                    <option key={item.value} value={item.value}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
-                {selectedAudioSourceConfig && <p className="hint">{selectedAudioSourceConfig.guidance}</p>}
-                {renderSourceFields(selectedAudioSourceConfig, audioSourceValues, setAudioSourceValues, 'folklore-audio-source')}
-              </>
-            )}
-            {audioOwnedByContributor === true && <p className="hint">Audio Source: {SOURCE_OWNER_LABEL}</p>}
-          </div>
-        )}
-
-        {hasPhotoMedia && (
-          <div className="field">
-            <label>Folklore Photo Source</label>
-            <p className="hint">Question: Is this photo personally owned or produced by you?</p>
-            <YesNoField
-              legend="Is this photo personally owned or produced by you?"
-              name="folklore-photo-owned"
-              value={photoOwnedByContributor}
-              onChange={(nextValue) => {
-                setPhotoOwnedByContributor(nextValue)
-                if (nextValue) {
-                  setPhotoSourceType('')
-                  setPhotoSourceValues({})
-                }
-              }}
-            />
-            {photoOwnedByContributor === false && (
-              <>
-                <label htmlFor="folklore-photo-source-type">
-                  Source Type <RequiredMark />
-                </label>
-                <select id="folklore-photo-source-type" required value={photoSourceType} onChange={(event) => setPhotoSourceType(event.target.value)}>
-                  <option value="">Select source type</option>
-                  {FOLKLORE_PHOTO_SOURCE_TYPES.map((item) => (
-                    <option key={item.value} value={item.value}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
-                {selectedPhotoSourceConfig && <p className="hint">{selectedPhotoSourceConfig.guidance}</p>}
-                {renderSourceFields(selectedPhotoSourceConfig, photoSourceValues, setPhotoSourceValues, 'folklore-photo-source')}
-              </>
-            )}
-            {photoOwnedByContributor === true && <p className="hint">Photo Source: {SOURCE_OWNER_LABEL}</p>}
-          </div>
-        )}
-
-        {hasVideoMedia && (
-          <div className="field">
-            <label>Folklore Video Source</label>
-            <p className="hint">Question: Is this video recording personally owned or produced by you?</p>
-            <YesNoField
-              legend="Is this video recording personally owned or produced by you?"
-              name="folklore-video-owned"
-              value={videoOwnedByContributor}
-              onChange={(nextValue) => {
-                setVideoOwnedByContributor(nextValue)
-                if (nextValue) {
-                  setVideoSourceType('')
-                  setVideoSourceValues({})
-                }
-              }}
-            />
-            {videoOwnedByContributor === false && (
-              <>
-                <label htmlFor="folklore-video-source-type">
-                  Source Type <RequiredMark />
-                </label>
-                <select id="folklore-video-source-type" required value={videoSourceType} onChange={(event) => setVideoSourceType(event.target.value)}>
-                  <option value="">Select source type</option>
-                  {FOLKLORE_VIDEO_SOURCE_TYPES.map((item) => (
-                    <option key={item.value} value={item.value}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
-                {selectedVideoSourceConfig && <p className="hint">{selectedVideoSourceConfig.guidance}</p>}
-                {renderSourceFields(selectedVideoSourceConfig, videoSourceValues, setVideoSourceValues, 'folklore-video-source')}
-              </>
-            )}
-            {videoOwnedByContributor === true && <p className="hint">Video Source: {SOURCE_OWNER_LABEL}</p>}
-          </div>
-        )}
-
-        <section className="draft-preview-panel">
-          <div className="section-heading">
-            <div>
-              <p className="profile-kicker">Preview Before Review</p>
-              <h3>Folklore Entry Preview</h3>
+        <div className={fieldErrors.self_knowledge || fieldErrors.text_source_type ? 'field field-error' : 'field'}>
+          <label htmlFor="folklore-source">
+            Source <RequiredMark />
+          </label>
+          <YesNoField
+            legend="Is this entry based on your own knowledge?"
+            name="folklore-source-self-knowledge"
+            value={form.self_knowledge}
+            error={fieldErrors.self_knowledge}
+            required
+            onChange={(nextValue) => {
+              setField('self_knowledge', nextValue)
+              clearFieldError('self_knowledge')
+              if (nextValue) setField('source', '')
+              if (!nextValue) {
+                setField('copyright_usage', '')
+                clearFieldError('text_source_type')
+              }
+            }}
+          />
+          {form.self_knowledge === false && (
+            <>
+              <label htmlFor="folklore-source-type">
+                Source Type <RequiredMark />
+              </label>
+              <select
+                id="folklore-source-type"
+                required
+                value={textSourceType}
+                aria-invalid={Boolean(fieldErrors.text_source_type)}
+                aria-describedby={fieldErrors.text_source_type ? 'folklore-source-type-error' : undefined}
+                onChange={(event) => {
+                  setTextSourceType(event.target.value)
+                  clearFieldError('text_source_type')
+                }}
+              >
+                <option value="">Select source type</option>
+                {FOLKLORE_TEXT_SOURCE_TYPES.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+              {fieldErrors.text_source_type && (
+                <p className="inline-error" id="folklore-source-type-error">
+                  {fieldErrors.text_source_type}
+                </p>
+              )}
+              {selectedTextSourceConfig && <p className="hint">{selectedTextSourceConfig.guidance}</p>}
+              {renderSourceFields(selectedTextSourceConfig, textSourceValues, setTextSourceValues, 'folklore-text-source')}
+            </>
+          )}
+          {form.self_knowledge === true && (
+            <div className="field folklore-source-permission-field">
+              <label htmlFor="folklore-copyright">
+                Usage Permission
+              </label>
+              <input
+                id="folklore-copyright"
+                value={form.copyright_usage}
+                onChange={(event) => setField('copyright_usage', event.target.value)}
+                placeholder="Example: I allow non-commercial educational reuse with attribution."
+              />
+              <p className="hint">Default after approval: CC BY-NC 4.0 for non-commercial educational reuse.</p>
             </div>
-            <span className="badge">Draft preview</span>
-          </div>
+          )}
+        </div>
 
-          <article className="detail-main draft-folklore-preview">
+          </div>
+          <aside className="folklore-draft-preview-column">
+        <section className="draft-preview-panel">
+	          <div className="section-heading draft-preview-heading">
+	            <span className="badge">Draft preview</span>
+	          </div>
+
+          <article className={useCompactPhotoPreview ? 'detail-main draft-folklore-preview draft-folklore-preview-compact-photo' : 'detail-main draft-folklore-preview'}>
             {youtubeEmbedUrl && (
               <div className="youtube-embed-wrap">
                 <iframe
@@ -916,75 +1235,97 @@ export default function FolkloreDraftBuilderPage() {
                 />
               </div>
             )}
-            {photoPreview && <img className="folklore-photo-preview" src={photoPreview} alt="" />}
-            <p className="profile-kicker">{form.category || 'Folklore'} | {form.municipality_source || 'Not Applicable'}</p>
-            <h2>{form.title || '(untitled folklore)'}</h2>
-            <p className="story-text">{form.content || 'Your folklore content will appear here.'}</p>
-            <dl className="detail-list">
-              {previewTextSource && (
-                <div className="detail-row">
-                  <dt>Source</dt>
-                  <dd>{previewTextSource}</dd>
+            <div className="draft-folklore-preview-content">
+              {photoPreview && (
+                <div className="draft-folklore-preview-media">
+                  <img
+                    className="folklore-photo-preview"
+                    src={photoPreview}
+                    alt=""
+                    onLoad={(event) => {
+                      const image = event.currentTarget
+                      setPhotoPreviewSize({ width: image.naturalWidth, height: image.naturalHeight })
+                    }}
+                  />
                 </div>
               )}
-              {previewMediaSource && (
-                <div className="detail-row">
-                  <dt>Media Source</dt>
-                  <dd>{previewMediaSource}</dd>
-                </div>
-              )}
-              {revisionId && (
-                <div className="detail-row">
-                  <dt>Revision ID</dt>
-                  <dd>{revisionId}</dd>
-                </div>
-              )}
-            </dl>
+              <div className="draft-folklore-preview-copy">
+                <p className="profile-kicker">
+                  {folkloreTaxonomyLabel(form.category, form.subcategory) || 'Folklore'} | {form.municipality_source || 'Not Applicable'}
+                </p>
+                <h2>{form.title || '(untitled folklore)'}</h2>
+                <p className="story-text">{form.content || 'Your folklore content will appear here.'}</p>
+                <dl className="detail-list">
+                  {previewTextSource && (
+                    <div className="detail-row">
+                      <dt>Source</dt>
+                      <dd>{previewTextSource}</dd>
+                    </div>
+                  )}
+                  {previewMediaSource && (
+                    <div className="detail-row">
+                      <dt>Media Source</dt>
+                      <dd>{previewMediaSource}</dd>
+                    </div>
+                  )}
+                  {revisionId && (
+                    <div className="detail-row">
+                      <dt>Revision ID</dt>
+                      <dd>{revisionId}</dd>
+                    </div>
+                  )}
+                </dl>
+              </div>
+            </div>
           </article>
         </section>
 
+        {error && <div className="alert error">{error}</div>}
+        {message && <div className="alert ok">{message}</div>}
+
         <div className="actions draft-action-bar" aria-label="Folklore draft actions">
-          <button disabled={busy} onClick={() => createDraft()}>
-            Create Draft
-          </button>
-          <button disabled={busy} onClick={() => updateDraft()}>
-            Update Draft
-          </button>
           <button className="secondary" disabled={busy} onClick={() => submitDraft()}>
             Submit Draft
           </button>
-          <button className="ghost" disabled={busy} onClick={() => loadMyRevisions()}>
-            Refresh My Revisions
+          <button disabled={busy} onClick={() => saveDraft()}>
+            Save Draft
           </button>
+          <button className="ghost" disabled={busy} onClick={() => clearForm()}>
+            Clear Form
+          </button>
+          <button
+            className="ghost danger"
+            disabled={busy}
+            title={revisionId ? 'Delete this saved draft' : 'Clear this unsaved draft form'}
+            onClick={() => setConfirmDeleteDraft(true)}
+          >
+            Delete Draft
+          </button>
+        </div>
+          </aside>
         </div>
       </section>
 
-      {error && <div className="alert error">{error}</div>}
-      {message && <div className="alert ok">{message}</div>}
-
-      <section className="panel">
-        <h3>My Revisions</h3>
-        {myRevisions.length === 0 && <p className="muted">No revisions loaded yet.</p>}
-        {myRevisions.map((revision) => (
-          <article key={revision.revision_id} className="queue-card">
-            <p className="meta">Revision: {revision.revision_id}</p>
-            <p className="meta">Title: {revision.title || '-'}</p>
-            <p className="meta">Category: {revision.category || '-'}</p>
-            <p className="meta">Municipality: {revision.municipality_source || '-'}</p>
-            <p className="meta">Status: {revision.status}</p>
-            <button
-              className="ghost"
-              onClick={() => {
-                setRevisionId(revision.revision_id)
-                setMessage(`Loaded revision ${revision.revision_id} into Revision ID field.`)
-              }}
-            >
-              Use this Revision ID
-            </button>
-          </article>
-        ))}
-      </section>
-      <ContributionCelebration celebration={celebration} onClose={closeCelebration} />
+      <ConfirmDialog
+        open={confirmDeleteDraft}
+        title={revisionId ? 'Delete this folklore draft?' : 'Clear this unsaved folklore draft?'}
+        message={
+          revisionId
+            ? `You are about to delete "${form.title || 'this folklore draft'}".`
+            : 'This draft has not been saved yet. Deleting it will clear the current form.'
+        }
+        detail={
+          revisionId
+            ? 'This removes the saved draft only. It will not affect any submitted or approved entry.'
+            : 'No saved database record will be deleted because this form is still unsaved.'
+        }
+        confirmLabel={revisionId ? 'Delete Draft' : 'Clear Form'}
+        cancelLabel="Keep Draft"
+        busy={busy}
+        onCancel={() => setConfirmDeleteDraft(false)}
+        onConfirm={() => deleteDraft()}
+      />
+      <ContributionCelebration celebration={celebration} onClose={continueAfterSubmission} />
     </>
   )
 }

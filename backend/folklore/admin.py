@@ -32,12 +32,13 @@ class FolkloreEntryAdmin(admin.ModelAdmin):
     list_display = (
         'title',
         'category',
+        'subcategory',
         'municipality_source',
         'status',
         'contributor',
         'created_at',
     )
-    list_filter = ('status', 'category', 'municipality_source')
+    list_filter = ('status', 'category', 'subcategory', 'municipality_source')
     search_fields = ('title', 'content')
     readonly_fields = ('created_at', 'updated_at', 'archived_at', 'contributor')
 

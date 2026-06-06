@@ -68,11 +68,22 @@ def _quorum_met(reviewer_ids, admin_ids):
 
 def _serialize_pending_revision(revision: EntryRevision):
     # Queue serializer for dictionary pending workflow.
-    proposed_term = (revision.proposed_data or {}).get("term", "")
+    proposed_data = revision.proposed_data or {}
+    proposed_term = proposed_data.get("term", "")
     return {
         "revision_id": str(revision.id),
         "entry_id": str(revision.entry_id) if revision.entry_id else None,
         "term": proposed_term,
+        "preview": {
+            "meaning": proposed_data.get("meaning", ""),
+            "part_of_speech": proposed_data.get("part_of_speech", ""),
+            "phonetic": proposed_data.get("phonetic", ""),
+            "pronunciation": proposed_data.get("pronunciation_text", ""),
+            "example_sentence": proposed_data.get("example_sentence", ""),
+            "example_translation": proposed_data.get("example_translation", ""),
+            "usage_notes": proposed_data.get("usage_notes", ""),
+            "source": proposed_data.get("source_text", ""),
+        },
         "contributor_username": revision.contributor.username,
         "created_at": revision.created_at.isoformat(),
         "status": revision.status,
@@ -81,11 +92,22 @@ def _serialize_pending_revision(revision: EntryRevision):
 
 def _serialize_published_revision(revision: EntryRevision):
     # Queue serializer for approved dictionary revisions (flag candidates).
-    proposed_term = (revision.proposed_data or {}).get("term", "")
+    proposed_data = revision.proposed_data or {}
+    proposed_term = proposed_data.get("term", "")
     return {
         "revision_id": str(revision.id),
         "entry_id": str(revision.entry_id) if revision.entry_id else None,
         "term": proposed_term,
+        "preview": {
+            "meaning": proposed_data.get("meaning", ""),
+            "part_of_speech": proposed_data.get("part_of_speech", ""),
+            "phonetic": proposed_data.get("phonetic", ""),
+            "pronunciation": proposed_data.get("pronunciation_text", ""),
+            "example_sentence": proposed_data.get("example_sentence", ""),
+            "example_translation": proposed_data.get("example_translation", ""),
+            "usage_notes": proposed_data.get("usage_notes", ""),
+            "source": proposed_data.get("source_text", ""),
+        },
         "contributor_username": revision.contributor.username,
         "created_at": revision.created_at.isoformat(),
         "approved_at": revision.approved_at.isoformat() if revision.approved_at else None,
@@ -102,6 +124,14 @@ def _serialize_pending_folklore(revision: FolkloreRevision):
         "entry_id": str(revision.entry_id) if revision.entry_id else None,
         "title": proposed_data.get("title", ""),
         "category": proposed_data.get("category", ""),
+        "subcategory": proposed_data.get("subcategory", ""),
+        "preview": {
+            "content": proposed_data.get("content", ""),
+            "municipality_source": proposed_data.get("municipality_source", ""),
+            "source": proposed_data.get("source", ""),
+            "media_source": proposed_data.get("media_source", ""),
+            "copyright_usage": proposed_data.get("copyright_usage", ""),
+        },
         "contributor_username": revision.contributor.username,
         "created_at": revision.created_at.isoformat(),
         "status": revision.status,
@@ -116,6 +146,14 @@ def _serialize_published_folklore(revision: FolkloreRevision):
         "entry_id": str(revision.entry_id) if revision.entry_id else None,
         "title": proposed_data.get("title", ""),
         "category": proposed_data.get("category", ""),
+        "subcategory": proposed_data.get("subcategory", ""),
+        "preview": {
+            "content": proposed_data.get("content", ""),
+            "municipality_source": proposed_data.get("municipality_source", ""),
+            "source": proposed_data.get("source", ""),
+            "media_source": proposed_data.get("media_source", ""),
+            "copyright_usage": proposed_data.get("copyright_usage", ""),
+        },
         "contributor_username": revision.contributor.username,
         "created_at": revision.created_at.isoformat(),
         "approved_at": revision.approved_at.isoformat() if revision.approved_at else None,
@@ -227,26 +265,24 @@ def reviewer_dashboard_view(request):
         return JsonResponse({"detail": "Reviewer or admin access required."}, status=403)
 
     # 1) Pending initial submissions (revision.status = pending)
-    # Reviewer view excludes items they already reviewed.
+    # Queue view excludes items the current reviewer/admin already reviewed in this round.
     pending_initial_qs = EntryRevision.objects.filter(
         status=EntryRevision.Status.PENDING,
     ).select_related("contributor", "entry")
-    if not is_admin(user):
-        pending_initial_qs = pending_initial_qs.exclude(
-            reviews__reviewer=user,
-            reviews__review_round=0,
-        )
+    pending_initial_qs = pending_initial_qs.exclude(
+        reviews__reviewer=user,
+        reviews__review_round=0,
+    )
 
     pending_initial = [_serialize_pending_revision(rev) for rev in pending_initial_qs]
 
     pending_folklore_qs = FolkloreRevision.objects.filter(
         status=FolkloreRevision.Status.PENDING
     ).select_related("contributor", "entry")
-    if not is_admin(user):
-        pending_folklore_qs = pending_folklore_qs.exclude(
-            reviews__reviewer=user,
-            reviews__review_round=0,
-        )
+    pending_folklore_qs = pending_folklore_qs.exclude(
+        reviews__reviewer=user,
+        reviews__review_round=0,
+    )
     pending_folklore = [
         _serialize_pending_folklore(revision) for revision in pending_folklore_qs
     ]
@@ -266,14 +302,11 @@ def reviewer_dashboard_view(request):
         current_round = _active_rereview_round(rev)
         if not current_round:
             continue
-        if (
-            not is_admin(user)
-            and Review.objects.filter(
-                revision=rev,
-                reviewer=user,
-                review_round=current_round,
-            ).exists()
-        ):
+        if Review.objects.filter(
+            revision=rev,
+            reviewer=user,
+            review_round=current_round,
+        ).exists():
             continue
         item = _serialize_pending_revision(rev)
         item["review_round"] = current_round
@@ -293,13 +326,10 @@ def reviewer_dashboard_view(request):
         )
         if not current_round:
             continue
-        if (
-            not is_admin(user)
-            and revision.reviews.filter(
-                reviewer=user,
-                review_round=current_round,
-            ).exists()
-        ):
+        if revision.reviews.filter(
+            reviewer=user,
+            review_round=current_round,
+        ).exists():
             continue
         item = _serialize_pending_folklore(revision)
         item["review_round"] = current_round

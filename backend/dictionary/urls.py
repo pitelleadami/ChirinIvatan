@@ -9,7 +9,9 @@ from django.urls import path
 
 from dictionary.views import (
     create_dictionary_revision_view,
+    delete_dictionary_revision_view,
     dictionary_entries_list_view,
+    dictionary_english_terms_view,
     dictionary_entry_detail_view,
     my_dictionary_revisions_view,
     start_dictionary_entry_revision_view,
@@ -23,6 +25,11 @@ urlpatterns = [
         "api/dictionary/entries",
         dictionary_entries_list_view,
         name="dictionary_entries_list",
+    ),
+    path(
+        "api/dictionary/english-terms",
+        dictionary_english_terms_view,
+        name="dictionary_english_terms",
     ),
     path(
         "api/dictionary/revisions/my",
@@ -43,6 +50,11 @@ urlpatterns = [
         "api/dictionary/revisions/<uuid:revision_id>/submit",
         submit_dictionary_revision_view,
         name="submit_dictionary_revision",
+    ),
+    path(
+        "api/dictionary/revisions/<uuid:revision_id>/delete",
+        delete_dictionary_revision_view,
+        name="delete_dictionary_revision",
     ),
     path(
         "api/dictionary/entries/<uuid:entry_id>/revisions/start",

@@ -1,202 +1,37 @@
-const FAQ_GROUPS = [
-  {
-    title: 'General Questions',
-    items: [
-      {
-        q: 'What is Chirin Ivatan?',
-        a: 'Chirin Ivatan is a community-based digital platform dedicated to preserving and promoting the Ivatan language and folklore through a digital dictionary, folklore archive, and interactive community contributions.',
-      },
-      {
-        q: 'Why was Chirin Ivatan created?',
-        a: 'The project was created to help preserve the Ivatan language and cultural heritage in response to modernization, language loss, and the decreasing transmission of oral traditions to younger generations.',
-      },
-      {
-        q: 'Who can use the platform?',
-        a: 'Anyone can explore the public dictionary and folklore archive. Registered users may contribute entries, while reviewers and administrators help validate and moderate submissions.',
-      },
-      {
-        q: 'Is Chirin Ivatan free to use?',
-        a: 'Yes. Chirin Ivatan is designed as a free and accessible cultural preservation platform for the community and the public.',
-      },
-      {
-        q: 'Can non-Ivatans use the platform?',
-        a: 'Yes. The platform welcomes learners, researchers, educators, and anyone interested in Ivatan language and culture.',
-      },
-    ],
-  },
-  {
-    title: 'Dictionary FAQs',
-    items: [
-      {
-        q: 'What can I find in the dictionary?',
-        bullets: [
-          'Ivatan terms',
-          'English translations',
-          'Definitions',
-          'Example sentences',
-          'Pronunciation guides',
-          'Audio recordings',
-          'Related or variant terms',
-        ],
-      },
-      {
-        q: 'Can I listen to pronunciations?',
-        a: 'Yes. Many dictionary entries include audio pronunciations to help users learn proper pronunciation.',
-      },
-      {
-        q: 'Why do some words have multiple versions or spellings?',
-        a: 'Some Ivatan words may have regional or contextual variants. Chirin Ivatan groups related variants while preserving their distinct usage and pronunciation.',
-      },
-      {
-        q: 'Can I suggest corrections to existing entries?',
-        a: 'Yes. Registered contributors can submit revisions or improvements for review.',
-      },
-    ],
-  },
-  {
-    title: 'Folklore FAQs',
-    items: [
-      {
-        q: 'What types of folklore are included?',
-        bullets: ['Myths', 'Legends', 'Proverbs', 'Idioms', 'Laji', 'Poems', 'Traditional stories', 'Songs'],
-      },
-      {
-        q: 'Can folklore entries include audio or video?',
-        a: 'Yes. Contributors may upload audio, photos, videos, or media links when available and culturally appropriate.',
-      },
-      {
-        q: 'How are folklore submissions reviewed?',
-        a: 'Folklore entries go through a review and moderation process before being published publicly to ensure accuracy, respectfulness, and cultural integrity.',
-      },
-    ],
-  },
-  {
-    title: 'Contributor FAQs',
-    items: [
-      {
-        q: 'How do I become a contributor?',
-        a: 'You can create an account and apply as a contributor, or you may receive an invitation from a reviewer or administrator.',
-      },
-      {
-        q: 'What can contributors do?',
-        bullets: ['Submit dictionary entries', 'Submit folklore entries', 'Upload media', 'Suggest revisions', 'Track submission status'],
-      },
-      {
-        q: 'What happens after I submit content?',
-        intro: 'Your submission enters a review process. It may be:',
-        bullets: [
-          'Approved',
-          'Returned with revision suggestions',
-          'Rejected if it does not meet platform guidelines',
-        ],
-      },
-      {
-        q: 'Can I approve my own submission?',
-        a: 'No. Self-review is not allowed to ensure fairness and quality control.',
-      },
-      {
-        q: 'What do the statuses mean?',
-        bullets: [
-          'Draft - your editable work',
-          'Pending - waiting for review',
-          'Approved - publicly visible',
-          'Approved Under Review - publicly visible but being reassessed',
-          'Rejected - requires correction',
-          'Archived - inactive entry',
-        ],
-      },
-    ],
-  },
-  {
-    title: 'Reviewer & Moderation FAQs',
-    items: [
-      {
-        q: 'Who are the reviewers?',
-        a: 'Reviewers are trusted users, educators, elders, or cultural consultants responsible for validating submissions.',
-      },
-      {
-        q: 'How many approvals are needed?',
-        intro: 'A submission typically requires:',
-        bullets: ['2 reviewer approvals, OR', '1 reviewer approval + 1 administrator approval'],
-      },
-      {
-        q: 'Why was my contribution rejected?',
-        intro: 'Rejections may happen due to:',
-        bullets: ['Incomplete information', 'Incorrect translations', 'Missing sources', 'Inappropriate content', 'Duplicate entries'],
-        outro: 'Review notes are usually provided to help improve the submission.',
-      },
-    ],
-  },
-  {
-    title: 'Account & Privacy FAQs',
-    items: [
-      {
-        q: 'Do I need an account to browse the site?',
-        a: 'No. Public content can be viewed without registering.',
-      },
-      {
-        q: 'Will my name appear publicly?',
-        a: 'Contributor attribution may appear publicly unless certain privacy or source masking rules apply.',
-      },
-      {
-        q: 'What happens to self-recorded or self-sourced content?',
-        a: 'Some source information may be hidden publicly when marked as self-recorded, contributor-owned, or self-knowledge based.',
-      },
-    ],
-  },
-  {
-    title: 'Gamification & Recognition FAQs',
-    items: [
-      {
-        q: 'Does the platform have badges or leaderboards?',
-        intro: 'Yes. Chirin Ivatan includes community recognition systems such as:',
-        bullets: ['Contribution levels', 'Badges', 'Municipality leaderboards', 'Cultural stewardship recognition'],
-      },
-      {
-        q: 'Are contributors competing against each other?',
-        a: 'The gamification system is designed to encourage cultural stewardship and participation, not unhealthy competition.',
-      },
-      {
-        q: 'How do I earn badges?',
-        a: 'Badges may be earned through approved contributions, revisions, and review participation.',
-      },
-    ],
-  },
-  {
-    title: 'Technical & Platform FAQs',
-    items: [
-      {
-        q: 'Can I use Chirin Ivatan on mobile devices?',
-        a: 'Yes. The platform is designed to work on both desktop and mobile devices.',
-      },
-      {
-        q: 'Do I need fast internet to use the platform?',
-        a: 'The platform is optimized to remain usable even on slower internet connections whenever possible.',
-      },
-      {
-        q: 'Is Chirin Ivatan open-source?',
-        a: 'The project plans to provide documentation and open-source accessibility to help other indigenous communities adapt similar systems.',
-      },
-    ],
-  },
-  {
-    title: 'Cultural & Ethical FAQs',
-    items: [
-      {
-        q: 'How does Chirin Ivatan protect cultural integrity?',
-        a: 'All submissions go through moderation and review processes involving community reviewers and cultural stakeholders.',
-      },
-      {
-        q: 'Can sacred or sensitive cultural materials be restricted?',
-        a: 'Yes. Administrators and reviewers may limit or remove sensitive materials when necessary to respect community values and cultural protocols.',
-      },
-      {
-        q: 'How can schools or organizations collaborate with Chirin Ivatan?',
-        a: 'Schools, researchers, nonprofits, and cultural organizations may collaborate through partnerships, contributions, validation efforts, or educational use.',
-      },
-    ],
-  },
-]
+import { useEffect, useState } from 'react'
+
+import { apiRequest } from '../lib/api'
+import { ALL_FAQ_ROLES, DEFAULT_FAQ_SECTIONS, DICTIONARY_FIELD_GUIDES } from '../lib/faqContent'
+import { normalizeSiteContent } from '../lib/siteContent'
+
+const HIDDEN_FAQ_INTROS = new Set([
+  'Use Chirin Ivatan as a public cultural reference. Visitors can read approved dictionary entries, browse folklore, learn about the project, and discover community contributors without needing an account.',
+])
+
+const ROLE_LABELS = {
+  admin: 'Admin',
+  consultant: 'Consultant',
+  contributor: 'Contributor',
+  reviewer: 'Reviewer',
+  visitor: 'Visitor',
+}
+
+function userRole(currentUser) {
+  const groups = currentUser?.groups || []
+  if (currentUser?.is_superuser || groups.includes('Admin')) return 'admin'
+  if (groups.includes('Consultant')) return 'consultant'
+  if (groups.includes('Reviewer')) return 'reviewer'
+  if (groups.includes('Contributor')) return 'contributor'
+  return 'visitor'
+}
+
+function visibleGroupsForRole(role, sections) {
+  const effectiveRole = role === 'consultant' ? 'reviewer' : role
+  return sections.filter((section) => {
+    const roles = Array.isArray(section.roles) && section.roles.length ? section.roles : ALL_FAQ_ROLES
+    return roles.includes(effectiveRole)
+  })
+}
 
 function Answer({ item }) {
   return (
@@ -211,33 +46,149 @@ function Answer({ item }) {
         </ul>
       )}
       {item.outro && <p>{item.outro}</p>}
+      {item.image_url && (
+        <figure className="faq-answer-media">
+          <img src={item.image_url} alt={item.image_alt || ''} loading="lazy" />
+          {item.image_alt && <figcaption>{item.image_alt}</figcaption>}
+        </figure>
+      )}
     </div>
   )
 }
 
-export default function FaqPage() {
+function GuideCard({ guide }) {
+  return (
+    <article id={guide.id} className="faq-guide-card">
+      <h3>{guide.title}</h3>
+      <p>{guide.intro}</p>
+      <h4>What to Include</h4>
+      <ul>
+        {guide.include.map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
+      <h4>What to Avoid</h4>
+      <ul>
+        {guide.avoid.map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
+      <p className="faq-guide-example">{guide.example}</p>
+    </article>
+  )
+}
+
+export default function FaqPage({ currentUser }) {
+  const role = userRole(currentUser)
+  const [faqSections, setFaqSections] = useState(DEFAULT_FAQ_SECTIONS)
+  const [loadingContent, setLoadingContent] = useState(true)
+  const groups = visibleGroupsForRole(role, faqSections)
+  const showContributorGuides =
+    currentUser?.is_authenticated || role === 'contributor' || role === 'reviewer' || role === 'consultant' || role === 'admin'
+
+  useEffect(() => {
+    apiRequest('/api/site-content')
+      .then((payload) => {
+        const content = normalizeSiteContent(payload)
+        setFaqSections(content.faq_sections.length ? content.faq_sections : DEFAULT_FAQ_SECTIONS)
+      })
+      .catch(() => setFaqSections(DEFAULT_FAQ_SECTIONS))
+      .finally(() => setLoadingContent(false))
+  }, [])
+
+  useEffect(() => {
+    function scrollToHashTarget() {
+      const hash = window.location.hash.replace('#', '')
+      if (!hash) return
+
+      window.requestAnimationFrame(() => {
+        const target = document.getElementById(hash)
+        if (target) {
+          target.scrollIntoView({ block: 'start' })
+        }
+      })
+    }
+
+    scrollToHashTarget()
+    window.addEventListener('hashchange', scrollToHashTarget)
+    return () => window.removeEventListener('hashchange', scrollToHashTarget)
+  }, [groups.length, faqSections.length])
+
   return (
     <section className="faq-page">
       <header className="faq-hero">
-        <p className="profile-kicker">Help Center</p>
-        <h1>Frequently Asked Questions</h1>
-        <p className="muted">Quick answers about Chirin Ivatan, contribution workflows, moderation, privacy, and cultural stewardship.</p>
+        <div>
+          <p className="profile-kicker">Help Center</p>
+          <h1>FAQs and Guides</h1>
+          <p className="faq-hero-copy">
+            Find quick answers by role, then open only the details you need.
+          </p>
+        </div>
+        <div className="faq-hero-meta" aria-label="FAQ view summary">
+          <span>{ROLE_LABELS[role]} View</span>
+          {loadingContent && <span>Updating...</span>}
+        </div>
       </header>
 
-      <div className="faq-group-list">
-        {FAQ_GROUPS.map((group) => (
-          <section key={group.title} className="faq-group">
-            <h2>{group.title}</h2>
-            <div className="faq-items">
-              {group.items.map((item) => (
-                <details key={item.q} className="faq-item">
-                  <summary>{item.q}</summary>
-                  <Answer item={item} />
-                </details>
-              ))}
-            </div>
-          </section>
-        ))}
+      <div className="faq-layout">
+        <aside className="faq-sidebar">
+          <p>Sections</p>
+          <nav className="faq-toc" aria-label="FAQ sections">
+            {groups.map((group) => (
+              <a key={group.id} href={`#${group.id}`}>
+                <span>{group.title}</span>
+              </a>
+            ))}
+            {showContributorGuides && (
+              <a href="#dictionary-field-guides">
+                <span>Dictionary Field Guides</span>
+              </a>
+            )}
+          </nav>
+        </aside>
+
+        <div className="faq-main">
+          <div className="faq-group-list">
+            {groups.map((group) => (
+              <section key={group.id} id={group.id} className="faq-group">
+                <div className="faq-group-heading">
+                  <div>
+                    <h2>{group.title}</h2>
+                  </div>
+                </div>
+                {group.intro && !HIDDEN_FAQ_INTROS.has(group.intro) && <p className="faq-group-intro">{group.intro}</p>}
+                <div className="faq-items">
+                  {group.items.map((item) => (
+                    <details key={item.q} className="faq-item">
+                      <summary>{item.q}</summary>
+                      <Answer item={item} />
+                    </details>
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
+
+          {showContributorGuides && (
+            <section id="dictionary-field-guides" className="faq-group faq-guide-section">
+              <div className="faq-group-heading">
+                <div>
+                  <p className="profile-kicker">Contributor Reference</p>
+                  <h2>Dictionary Field Guides</h2>
+                </div>
+              </div>
+              <p className="faq-group-intro">
+                These guides explain the fields that often confuse first-time contributors. Builder Learn More links open this
+                section directly.
+              </p>
+              <div className="faq-guide-grid">
+                {DICTIONARY_FIELD_GUIDES.map((guide) => (
+                  <GuideCard key={guide.id} guide={guide} />
+                ))}
+              </div>
+            </section>
+          )}
+        </div>
       </div>
     </section>
   )

@@ -248,8 +248,8 @@ class ReviewerDashboardApiTests(TestCase):
         self.assertNotIn(str(rev_a.id), pending_ids)
         self.assertIn(str(rev_b.id), pending_ids)
 
-    def test_admin_pending_list_shows_all_pending_even_if_reviewed(self):
-        rev = self._pending_revision(contributor=self.contributor, term="admin-visible")
+    def test_admin_pending_list_excludes_items_already_reviewed_by_them(self):
+        rev = self._pending_revision(contributor=self.contributor, term="admin-reviewed")
         submit_review(
             revision=rev,
             reviewer=self.admin,
@@ -262,7 +262,7 @@ class ReviewerDashboardApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = json.loads(response.content)
         pending_ids = {item["revision_id"] for item in payload["pending_submissions"]}
-        self.assertIn(str(rev.id), pending_ids)
+        self.assertNotIn(str(rev.id), pending_ids)
 
     def test_awaiting_quorum_after_my_approval_lists_pending_item(self):
         rev = self._pending_revision(contributor=self.contributor, term="awaiting")
@@ -711,6 +711,24 @@ class FolkloreReviewFlowTests(TestCase):
             row["revision_id"] for row in payload["pending_folklore_submissions"]
         }
         self.assertIn(str(revision.id), pending_ids)
+
+    def test_dashboard_excludes_pending_folklore_already_reviewed_by_user(self):
+        revision = self._pending_folklore()
+        submit_folklore_review(
+            revision=revision,
+            reviewer=self.admin,
+            decision=FolkloreReview.Decision.APPROVE,
+            notes="Admin already reviewed",
+        )
+
+        self.client.force_login(self.admin)
+        response = self.client.get("/api/reviews/dashboard")
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        pending_ids = {
+            row["revision_id"] for row in payload["pending_folklore_submissions"]
+        }
+        self.assertNotIn(str(revision.id), pending_ids)
 
     def test_submit_endpoint_entry_id_fallback_creates_revision(self):
         entry = FolkloreEntry.objects.create(

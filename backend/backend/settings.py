@@ -79,6 +79,21 @@ CSRF_TRUSTED_ORIGINS = _env_list(
     ],
 )
 
+FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://127.0.0.1:5173").rstrip("/")
+ROLE_INVITATION_EXPIRY_DAYS = _env_int("ROLE_INVITATION_EXPIRY_DAYS", 14)
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "Chirin Ivatan <noreply@chirinivatan.local>")
+EMAIL_BACKEND = os.getenv(
+    "DJANGO_EMAIL_BACKEND",
+    "django.core.mail.backends.console.EmailBackend",
+)
+EMAIL_HOST = os.getenv("DJANGO_EMAIL_HOST", "localhost")
+EMAIL_PORT = _env_int("DJANGO_EMAIL_PORT", 25)
+EMAIL_HOST_USER = os.getenv("DJANGO_EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.getenv("DJANGO_EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = _env_bool("DJANGO_EMAIL_USE_TLS", False)
+EMAIL_USE_SSL = _env_bool("DJANGO_EMAIL_USE_SSL", False)
+EMAIL_TIMEOUT = _env_int("DJANGO_EMAIL_TIMEOUT", 20)
+
 
 # Application definition
 

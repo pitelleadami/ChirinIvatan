@@ -1,13 +1,14 @@
 from django.db import transaction
 from django.db.models import Min, Q
 
+from dictionary.field_groups import MEDIA_FIELDS, SEMANTIC_CORE_FIELDS
 from dictionary.models import Entry, EntryRevision, EntryStatus, VariantGroup
 
 
 # Variant-group service:
 # - Maintains mother term selection and deterministic fallback.
 # - Keeps grouping logic centralized so review/publish code stays simple.
-GENERAL_VARIANT_ALIASES = {"general", "general ivatan"}
+GENERAL_VARIANT_ALIASES = {"general", "general ivatan", "ivatan (common usage)", "ivatan common usage"}
 
 
 def _normalize_variant_type(value: str) -> str:
@@ -74,6 +75,26 @@ def promote_to_mother(*, entry: Entry):
         raise ValueError("Entry is not part of a VariantGroup.")
 
     group = entry.variant_group
+    previous_mother = group.mother_entry
+    if previous_mother and previous_mother.id != entry.id:
+        update_fields = []
+        for field in SEMANTIC_CORE_FIELDS:
+            current = getattr(entry, field)
+            current_value = current.name if field in MEDIA_FIELDS and current else current
+            if current_value:
+                continue
+
+            previous = getattr(previous_mother, field)
+            previous_value = previous.name if field in MEDIA_FIELDS and previous else previous
+            if not previous_value:
+                continue
+
+            setattr(entry, field, previous_value)
+            update_fields.append(field)
+
+        if update_fields:
+            entry.save(update_fields=update_fields)
+
     group.mother_entry = entry
     group.save(update_fields=["mother_entry"])
     _set_group_mother_flags(group=group, mother_entry=entry)

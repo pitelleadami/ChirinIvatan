@@ -23,7 +23,7 @@ export default function ContributionCelebration({ celebration, onClose }) {
         <p id="celebration-message">{celebration.message}</p>
         <div className="celebration-stats" aria-label="Contribution celebration details">
           <span>{celebration.badge}</span>
-          <span>{celebration.count} submitted</span>
+          {celebration.count ? <span>{celebration.count} submitted</span> : null}
         </div>
         <button onClick={onClose}>Continue</button>
       </section>

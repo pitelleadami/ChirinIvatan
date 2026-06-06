@@ -9,12 +9,12 @@
 import { useEffect, useState } from 'react'
 import './App.css'
 
+import brandLogo from './assets/brand/chirin-ivatan-logo.png'
 import HomePage from './pages/HomePage'
 import LoginPage from './pages/LoginPage'
 import AboutProjectPage from './pages/AboutProjectPage'
 import YaruPage from './pages/YaruPage'
 import FaqPage from './pages/FaqPage'
-import UserManualPage from './pages/UserManualPage'
 import ReviewerDashboardPage from './pages/ReviewerDashboardPage'
 import AdminApplicationsPage from './pages/AdminApplicationsPage'
 import DictionaryViewerPage from './pages/DictionaryViewerPage'
@@ -28,16 +28,46 @@ import RoleCenterPage from './pages/RoleCenterPage'
 import { apiRequest } from './lib/api'
 import { ROUTES, navigate, normalizePath } from './lib/router'
 
+const BRAND_HIDDEN_ROUTES = new Set([ROUTES.home, ROUTES.dictionaryView, ROUTES.folkloreView])
+
 export default function App() {
   // Keep route state in sync with browser navigation (back/forward buttons).
   const [pathname, setPathname] = useState(normalizePath(window.location.pathname))
+  const [hideHomeBrandText, setHideHomeBrandText] = useState(
+    () => BRAND_HIDDEN_ROUTES.has(normalizePath(window.location.pathname)),
+  )
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+  const [isToolsMenuOpen, setIsToolsMenuOpen] = useState(false)
   const [currentUser, setCurrentUser] = useState({ is_authenticated: false })
 
   useEffect(() => {
-    const onPopState = () => setPathname(normalizePath(window.location.pathname))
+    const onPopState = () => {
+      setPathname(normalizePath(window.location.pathname))
+      setIsMobileMenuOpen(false)
+      setIsToolsMenuOpen(false)
+    }
     window.addEventListener('popstate', onPopState)
     return () => window.removeEventListener('popstate', onPopState)
   }, [])
+
+  useEffect(() => {
+    function closeToolsOnOutsideInteraction(event) {
+      if (!isToolsMenuOpen) return
+      if (event.target.closest('.top-tools-menu')) return
+      setIsToolsMenuOpen(false)
+    }
+
+    function closeToolsOnEscape(event) {
+      if (event.key === 'Escape') setIsToolsMenuOpen(false)
+    }
+
+    document.addEventListener('click', closeToolsOnOutsideInteraction)
+    document.addEventListener('keydown', closeToolsOnEscape)
+    return () => {
+      document.removeEventListener('click', closeToolsOnOutsideInteraction)
+      document.removeEventListener('keydown', closeToolsOnEscape)
+    }
+  }, [isToolsMenuOpen])
 
   useEffect(() => {
     apiRequest('/api/auth/me')
@@ -46,13 +76,71 @@ export default function App() {
   }, [])
 
   const isHome = pathname === ROUTES.home
+  const isLogin = pathname === ROUTES.login
+  const isDictionaryView = pathname === ROUTES.dictionaryView
+  const isFolkloreView = pathname === ROUTES.folkloreView
   const apiBase = import.meta.env.VITE_API_BASE || ''
   const adminHref = `${apiBase}/admin/`
   const userGroups = currentUser.groups || []
   const isAdminUser = currentUser.is_superuser || userGroups.includes('Admin')
+  const isConsultantUser = userGroups.includes('Consultant')
   const isReviewerUser = userGroups.includes('Reviewer')
-  const canReview = currentUser.is_authenticated && (isAdminUser || isReviewerUser)
-  const canOpenAdmin = currentUser.is_authenticated && (currentUser.is_staff || isAdminUser)
+  const isContributorUser = userGroups.includes('Contributor')
+  const canUseContributorTools = isAdminUser || isReviewerUser || isConsultantUser || isContributorUser
+  const canUseReviewerTools = isAdminUser || isReviewerUser || isConsultantUser
+  const canOpenAdmin = currentUser.is_authenticated && isAdminUser
+
+  useEffect(() => {
+    let frameId = 0
+
+    function scheduleBrandVisibility(value) {
+      cancelAnimationFrame(frameId)
+      frameId = requestAnimationFrame(() => setHideHomeBrandText(value))
+    }
+
+    if (isDictionaryView || isFolkloreView) {
+      scheduleBrandVisibility(true)
+      return () => cancelAnimationFrame(frameId)
+    }
+
+    if (!isHome) {
+      scheduleBrandVisibility(false)
+      return () => cancelAnimationFrame(frameId)
+    }
+
+    const homeScroller = document.querySelector('.home-seamless')
+    if (!homeScroller) {
+      scheduleBrandVisibility(true)
+      return () => cancelAnimationFrame(frameId)
+    }
+
+    function updateBrandVisibility() {
+      const style = window.getComputedStyle(homeScroller)
+      const usesPageScroll =
+        style.overflowY === 'visible' || homeScroller.scrollHeight <= homeScroller.clientHeight + 1
+
+      if (usesPageScroll) {
+        const homeTop = homeScroller.getBoundingClientRect().top + window.scrollY
+        const scrollWithinHome = Math.max(0, window.scrollY - homeTop)
+        scheduleBrandVisibility(scrollWithinHome < window.innerHeight * 0.5)
+        return
+      }
+
+      scheduleBrandVisibility(homeScroller.scrollTop < homeScroller.clientHeight * 0.5)
+    }
+
+    updateBrandVisibility()
+    homeScroller.addEventListener('scroll', updateBrandVisibility, { passive: true })
+    window.addEventListener('scroll', updateBrandVisibility, { passive: true })
+    window.addEventListener('resize', updateBrandVisibility)
+
+    return () => {
+      cancelAnimationFrame(frameId)
+      homeScroller.removeEventListener('scroll', updateBrandVisibility)
+      window.removeEventListener('scroll', updateBrandVisibility)
+      window.removeEventListener('resize', updateBrandVisibility)
+    }
+  }, [isDictionaryView, isFolkloreView, isHome])
 
   function activeClass(route) {
     return pathname === route ? 'top-link-button active' : 'top-link-button'
@@ -62,7 +150,14 @@ export default function App() {
     return pathname === route ? { 'aria-current': 'page' } : {}
   }
 
+  function closeMenusAndNavigate(route) {
+    setIsMobileMenuOpen(false)
+    setIsToolsMenuOpen(false)
+    navigate(route)
+  }
+
   async function handleLogout() {
+    setIsToolsMenuOpen(false)
     try {
       await apiRequest('/api/auth/csrf')
       const payload = await apiRequest('/api/auth/logout', {
@@ -84,16 +179,44 @@ export default function App() {
       </a>
       <header className="topbar">
         <div className="topbar-inner">
-          <button className="brand-wrap brand-home-button" onClick={() => navigate(ROUTES.home)}>
-            <div className="logo-placeholder" aria-hidden="true" />
-            <div>
+          <button
+            className="brand-wrap brand-home-button"
+            onClick={() => {
+              closeMenusAndNavigate(ROUTES.home)
+            }}
+          >
+            <img
+              className={isHome && hideHomeBrandText ? 'site-logo site-logo-hidden' : 'site-logo'}
+              src={brandLogo}
+              alt="Chirin Ivatan logo"
+            />
+            <div className={hideHomeBrandText ? 'brand-text brand-text-hidden' : 'brand-text'}>
               <p className="brand">Chirin Ivatan</p>
-              <p className="brand-sub">Preserving our language through the spirit of the Ivatan Yaru</p>
             </div>
           </button>
-          <nav className="top-links" aria-label="Visitor navigation">
+          <button
+            className={isMobileMenuOpen ? 'mobile-menu-button mobile-menu-button-open' : 'mobile-menu-button'}
+            type="button"
+            aria-label={isMobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
+            aria-controls="top-navigation"
+            aria-expanded={isMobileMenuOpen}
+            onClick={() => setIsMobileMenuOpen((current) => !current)}
+          >
+            <span aria-hidden="true" />
+            <span aria-hidden="true" />
+            <span aria-hidden="true" />
+          </button>
+          <nav
+            id="top-navigation"
+            className={isMobileMenuOpen ? 'top-links top-links-open' : 'top-links'}
+            aria-label="Visitor navigation"
+            onClick={(event) => {
+              if (event.target.closest('summary')) return
+              if (event.target.closest('button, a')) setIsMobileMenuOpen(false)
+            }}
+          >
             <button className={activeClass(ROUTES.about)} {...activeProps(ROUTES.about)} onClick={() => navigate(ROUTES.about)}>
-              About this Project
+              About the Project
             </button>
             <button className={activeClass(ROUTES.yaru)} {...activeProps(ROUTES.yaru)} onClick={() => navigate(ROUTES.yaru)}>
               The Digital Yaru
@@ -117,63 +240,82 @@ export default function App() {
               {...activeProps(ROUTES.leaderboards)}
               onClick={() => navigate(ROUTES.leaderboards)}
             >
-              Leaderboards
+              Hall of Stewards
             </button>
-            <button className={activeClass(ROUTES.faqs)} {...activeProps(ROUTES.faqs)} onClick={() => navigate(ROUTES.faqs)}>
-              FAQs
-            </button>
-            <button
-              className={activeClass(ROUTES.manual)}
-              {...activeProps(ROUTES.manual)}
-              onClick={() => navigate(ROUTES.manual)}
-            >
-              Manual
-            </button>
-            {currentUser.is_authenticated && (
-              <details className="top-tools-menu">
-                <summary>My Tools</summary>
+            {currentUser.is_authenticated ? (
+              <details
+                className="top-tools-menu"
+                open={isToolsMenuOpen}
+                onToggle={(event) => setIsToolsMenuOpen(event.currentTarget.open)}
+              >
+                <summary>Workspace</summary>
                 <div className="top-tools-panel">
-                  <button className="top-link-button" onClick={() => navigate(ROUTES.manual)}>
-                    User Manual
-                  </button>
-                  <button className="top-link-button" onClick={() => navigate(ROUTES.dictionaryDraft)}>
-                    Add Dictionary Entry
-                  </button>
-                  <button className="top-link-button" onClick={() => navigate(ROUTES.folkloreDraft)}>
-                    Add Folklore
-                  </button>
-                  <button className="top-link-button" onClick={() => navigate(ROUTES.roleCenter)}>
-                    Roles
-                  </button>
-                  <button
-                    className="top-link-button"
-                    onClick={() =>
-                      navigate(`${ROUTES.profileView}?username=${encodeURIComponent(currentUser.username)}`)
-                    }
-                  >
-                    My Profile
-                  </button>
-                  {canReview && (
-                    <button className="top-link-button" onClick={() => navigate(ROUTES.dashboard)}>
-                      Review Dashboard
+                  <div className="top-tools-section">
+                    <p>Personal</p>
+                    <button
+                      className="top-link-button"
+                      onClick={() => {
+                        closeMenusAndNavigate(`${ROUTES.profileView}?username=${encodeURIComponent(currentUser.username)}`)
+                      }}
+                    >
+                      My Profile
                     </button>
+                  </div>
+                  {canUseContributorTools && (
+                    <div className="top-tools-section">
+                      <p>{canUseReviewerTools ? 'Review & Contribute' : 'Contribute'}</p>
+                      <button className="top-link-button top-tools-parent-link" onClick={() => closeMenusAndNavigate(ROUTES.adminApplications)}>
+                        Steward's Desk
+                      </button>
+                      <div className="top-tools-subsection" aria-label="Steward's Desk sections">
+                        {canUseReviewerTools && (
+                          <>
+                            <button className="top-link-button" onClick={() => closeMenusAndNavigate(`${ROUTES.adminApplications}?tab=reviews`)}>
+                              Reviews
+                            </button>
+                            <button className="top-link-button" onClick={() => closeMenusAndNavigate(`${ROUTES.adminApplications}?tab=applications`)}>
+                              Applications
+                            </button>
+                          </>
+                        )}
+                        <button className="top-link-button" onClick={() => closeMenusAndNavigate(ROUTES.dictionaryDraft)}>
+                          Add New Dictionary Entry
+                        </button>
+                        <button className="top-link-button" onClick={() => closeMenusAndNavigate(ROUTES.folkloreDraft)}>
+                          Add New Folklore Entry
+                        </button>
+                      </div>
+                    </div>
                   )}
-                  {isAdminUser && (
-                    <button className="top-link-button" onClick={() => navigate(ROUTES.adminApplications)}>
-                      Community Admin
+                  <div className="top-tools-section">
+                    <p>Help</p>
+                    <button className="top-link-button" onClick={() => closeMenusAndNavigate(ROUTES.faqs)}>
+                      FAQs
                     </button>
-                  )}
-                  {canOpenAdmin && (
-                    <a className="top-admin-link" href={adminHref} target="_blank" rel="noreferrer">
-                      Django Admin Console
-                    </a>
-                  )}
+                    {canOpenAdmin && (
+                      <a
+                        className="top-admin-link"
+                        href={adminHref}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={() => setIsToolsMenuOpen(false)}
+                      >
+                        Django Admin Console
+                      </a>
+                    )}
+                  </div>
                 </div>
               </details>
+            ) : (
+              <>
+                <button className={activeClass(ROUTES.faqs)} {...activeProps(ROUTES.faqs)} onClick={() => navigate(ROUTES.faqs)}>
+                  FAQs
+                </button>
+              </>
             )}
             {currentUser.is_authenticated ? (
               <button className="pill-link top-pill-button" onClick={handleLogout}>
-                Log Out {currentUser.username}
+                Log Out
               </button>
             ) : (
               <button className="pill-link top-pill-button" onClick={() => navigate(ROUTES.login)}>
@@ -184,14 +326,22 @@ export default function App() {
         </div>
       </header>
 
-      <main id="main-content" className={isHome ? 'app-shell app-shell-home' : 'app-shell'}>
-        {pathname === ROUTES.home && <HomePage />}
+      <main
+        id="main-content"
+        className={
+          isHome || isLogin
+            ? 'app-shell app-shell-home'
+            : isDictionaryView || isFolkloreView
+              ? 'app-shell app-shell-dictionary'
+              : 'app-shell'
+        }
+      >
+        {pathname === ROUTES.home && <HomePage currentUser={currentUser} />}
         {pathname === ROUTES.login && <LoginPage currentUser={currentUser} onAuthChange={setCurrentUser} />}
         {pathname === ROUTES.about && <AboutProjectPage />}
-        {pathname === ROUTES.yaru && <YaruPage />}
-        {pathname === ROUTES.faqs && <FaqPage />}
-        {pathname === ROUTES.manual && <UserManualPage />}
-        {pathname === ROUTES.dashboard && <ReviewerDashboardPage />}
+        {pathname === ROUTES.yaru && <YaruPage currentUser={currentUser} />}
+        {(pathname === ROUTES.faqs || pathname === ROUTES.manual) && <FaqPage currentUser={currentUser} />}
+        {pathname === ROUTES.dashboard && <ReviewerDashboardPage currentUser={currentUser} />}
         {pathname === ROUTES.adminApplications && <AdminApplicationsPage currentUser={currentUser} />}
         {pathname === ROUTES.dictionaryView && <DictionaryViewerPage currentUser={currentUser} />}
         {pathname === ROUTES.dictionaryDraft && <DictionaryDraftBuilderPage />}
@@ -201,9 +351,23 @@ export default function App() {
         {pathname === ROUTES.profileEdit && (
           <ProfileEditPage currentUser={currentUser} onAuthChange={setCurrentUser} />
         )}
-        {pathname === ROUTES.leaderboards && <LeaderboardPage />}
+        {pathname === ROUTES.leaderboards && <LeaderboardPage currentUser={currentUser} />}
         {pathname === ROUTES.roleCenter && <RoleCenterPage currentUser={currentUser} />}
       </main>
+      {!isHome && !isLogin && (
+        <footer className="site-footer">
+          <div className="site-footer-inner">
+            <span className="site-footer-left">© 2026 Chirin Ivatan.</span>
+            <span className="site-footer-center">
+              <em>Developed for the preservation and continuity of the Ivatan language and heritage.</em>
+            </span>
+            <span className="site-footer-right">Contact: chirinivatan@gmail.com</span>
+            <span className="site-footer-mobile">
+              © 2026 Chirin Ivatan. Preserving Ivatan language and heritage. Contact: chirinivatan@gmail.com
+            </span>
+          </div>
+        </footer>
+      )}
     </div>
   )
 }

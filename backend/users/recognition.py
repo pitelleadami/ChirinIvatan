@@ -20,6 +20,7 @@ from django.utils import timezone
 from dictionary.models import EntryRevision
 from folklore.models import FolkloreRevision
 from reviews.models import FolkloreReview, Review
+from users.leaderboard_filters import leaderboard_participant_q
 from users.models import (
     ContributionEvent,
     GamificationConfig,
@@ -402,9 +403,12 @@ def _update_municipality_stats_for_user(user, stats):
         row.combined_month = 0
         row.last_month_calculated = month_key
 
-    aggregate = UserContributionStats.objects.filter(
-        user__profile__municipality__iexact=municipality
-    ).aggregate(
+    eligible_user_ids = (
+        User.objects.filter(leaderboard_participant_q(), profile__municipality__iexact=municipality)
+        .distinct()
+        .values("id")
+    )
+    aggregate = UserContributionStats.objects.filter(user_id__in=eligible_user_ids).aggregate(
         dictionary_all_time=models.Sum("dictionary_original_total"),
         folklore_all_time=models.Sum("folklore_original_total"),
         combined_all_time=models.Sum("combined_total"),
@@ -551,6 +555,25 @@ def build_gamification_profile_payload(user):
         total_rejections=stats.total_rejections,
     )
 
+    unlock_events = (
+        RecognitionEvent.objects.filter(
+            user=user,
+            event_type=RecognitionEvent.EventType.BADGE_UNLOCK,
+        )
+        .order_by("created_at")
+        .values("reference_id", "created_at")
+    )
+    unlocked_at_by_key = {}
+    for event in unlock_events:
+        unlocked_at_by_key.setdefault(
+            event["reference_id"],
+            event["created_at"].isoformat(),
+        )
+
+    for badge in dictionary_badges + folklore_badges + quality_badges:
+        if badge["unlocked"]:
+            badge["unlocked_at"] = unlocked_at_by_key.get(badge["key"])
+
     headline = f"You preserved {stats.dictionary_original_total} Ivatan words."
     return {
         "language": {
@@ -617,7 +640,12 @@ def leaderboard_rows(*, municipality=None, metric="combined", period="all_time",
     }[(metric, period)]
 
     rules = _ruleset()
-    queryset = User.objects.all().select_related("profile", "contribution_stats")
+    current_month = _current_month_key()
+    queryset = (
+        User.objects.filter(leaderboard_participant_q())
+        .distinct()
+        .select_related("profile", "contribution_stats")
+    )
 
     if municipality:
         queryset = queryset.filter(profile__municipality__iexact=municipality)
@@ -626,11 +654,11 @@ def leaderboard_rows(*, municipality=None, metric="combined", period="all_time",
     for user in queryset:
         stats = getattr(user, "contribution_stats", None)
         if not stats:
-            continue
+            stats = recompute_user_gamification(user)
+        elif period == "monthly" and stats.last_month_calculated != current_month:
+            stats = recompute_user_gamification(user)
 
         value = getattr(stats, field_name, 0)
-        if value <= 0:
-            continue
 
         profile = getattr(user, "profile", None)
         photo_url = ""
@@ -640,6 +668,11 @@ def leaderboard_rows(*, municipality=None, metric="combined", period="all_time",
         rows.append(
             {
                 "username": user.username,
+                "display_name": (
+                    f"{user.get_full_name().strip() or user.username}, {profile.post_nominals}"
+                    if profile and profile.post_nominals
+                    else user.get_full_name().strip() or user.username
+                ),
                 "profile_photo": photo_url,
                 "municipality": profile.municipality if profile else "",
                 "metric": metric,

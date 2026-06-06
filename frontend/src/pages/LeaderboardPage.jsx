@@ -1,19 +1,27 @@
 /*
   LeaderboardPage.jsx
 
-  Dashboard for global/municipality rankings and monthly winner history.
-  Reads from backend aggregate endpoints.
+  Public Hall of Stewards:
+  - live archive counts
+  - contributor rankings
+  - municipality standings
+  - monthly winner history
 */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { apiRequest } from '../lib/api'
+import { getMunicipalityFlag } from '../lib/municipalityFlags'
+import { ROUTES, navigate } from '../lib/router'
+import { copyShareText, openSocialShare, shareWithNative } from '../lib/socialShare'
 
 const METRIC_OPTIONS = ['combined', 'dictionary', 'folklore']
-const PERIOD_OPTIONS = ['all_time', 'monthly']
-const SAMPLE_ARCHIVE_COUNTS = {
-  dictionaryApproved: 2,
-  folkloreApproved: 2,
+const PERIOD_OPTIONS = ['monthly', 'all_time']
+const MUNICIPALITIES = ['All', 'Basco', 'Mahatao', 'Ivana', 'Uyugan', 'Sabtang', 'Itbayat']
+const RANKED_MUNICIPALITIES = MUNICIPALITIES.filter((item) => item !== 'All')
+const EMPTY_ARCHIVE_COUNTS = {
+  dictionaryApproved: 0,
+  folkloreApproved: 0,
 }
 
 function toNumber(value) {
@@ -34,48 +42,114 @@ function withCompetitionRank(rows, valueKey = 'value') {
   })
 }
 
-export default function LeaderboardPage() {
+function metricLabel(value) {
+  if (value === 'dictionary') return 'Dictionary'
+  if (value === 'folklore') return 'Folklore'
+  return 'Combined'
+}
+
+function periodLabel(value) {
+  return value === 'all_time' ? 'All Time' : 'Current Month'
+}
+
+function contributorName(row) {
+  return row.display_name || row.full_name || row.name || row.username || 'Contributor'
+}
+
+function municipalityScore(row, metric, period) {
+  const metricKey = metric === 'combined' ? 'combined' : metric
+  const periodKey = period === 'all_time' ? 'all_time' : 'month'
+  return toNumber(row[`${metricKey}_${periodKey}`])
+}
+
+export default function LeaderboardPage({ currentUser = {} }) {
   const [metric, setMetric] = useState('combined')
-  const [period, setPeriod] = useState('all_time')
-  const [municipality, setMunicipality] = useState('')
-  const [month, setMonth] = useState('')
+  const [period, setPeriod] = useState('monthly')
+  const [municipality, setMunicipality] = useState('All')
 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [shareFeedback, setShareFeedback] = useState('')
 
   const [globalRows, setGlobalRows] = useState([])
   const [municipalityRows, setMunicipalityRows] = useState([])
   const [municipalityTotals, setMunicipalityTotals] = useState([])
-  const [winnerRows, setWinnerRows] = useState([])
-  const [archiveCounts, setArchiveCounts] = useState(SAMPLE_ARCHIVE_COUNTS)
-  const [loadedSections, setLoadedSections] = useState({
-    global: false,
-    municipality: false,
-    totals: false,
-    winners: false,
-  })
+  const [archiveCounts, setArchiveCounts] = useState(EMPTY_ARCHIVE_COUNTS)
 
-  const rankedGlobalRows = withCompetitionRank(globalRows, 'value')
-  const rankedMunicipalityRows = withCompetitionRank(municipalityRows, 'value').slice(0, 8)
+  const todayLabel = new Intl.DateTimeFormat('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(new Date())
 
-  useEffect(() => {
-    async function loadArchiveCounts() {
-      try {
-        const [dictionaryPayload, folklorePayload] = await Promise.all([
-          apiRequest('/api/dictionary/entries?limit=1'),
-          apiRequest('/api/folklore/entries'),
-        ])
-        setArchiveCounts({
-          dictionaryApproved: dictionaryPayload.counts?.approved ?? 0,
-          folkloreApproved: folklorePayload.counts?.approved ?? 0,
-        })
-      } catch {
-        setArchiveCounts(SAMPLE_ARCHIVE_COUNTS)
+  const shownRows = municipality === 'All' ? globalRows : municipalityRows
+  const rankedContributorRows = withCompetitionRank(shownRows, 'value').slice(0, 20)
+  const isAuthenticated = Boolean(currentUser?.is_authenticated)
+  const myUsername = String(currentUser?.username || '').trim()
+  const myMunicipality = String(currentUser?.municipality || '').trim()
+
+  const rankedMunicipalities = useMemo(
+    () => {
+      const totalsByMunicipality = new Map(municipalityTotals.map((row) => [row.municipality, row]))
+      return withCompetitionRank(
+        RANKED_MUNICIPALITIES.map((municipalityName) => {
+          const row = totalsByMunicipality.get(municipalityName) || { municipality: municipalityName }
+          return {
+            municipality: municipalityName,
+            score: municipalityScore(row, metric, period),
+            dictionary: period === 'all_time' ? toNumber(row.dictionary_all_time) : toNumber(row.dictionary_month),
+            folklore: period === 'all_time' ? toNumber(row.folklore_all_time) : toNumber(row.folklore_month),
+          }
+        }),
+        'score',
+      )
+    },
+    [metric, municipalityTotals, period],
+  )
+
+  const winningMunicipality = rankedMunicipalities[0] || {
+    municipality: 'Basco',
+    score: 0,
+    rank: 1,
+  }
+  const winningFlag = getMunicipalityFlag(winningMunicipality.municipality)
+  const myContributorRow = rankedContributorRows.find((row) => row.username === myUsername) || null
+  const myMunicipalityRow = rankedMunicipalities.find((row) => row.municipality === myMunicipality) || null
+
+  async function shareRanking(platform, kind) {
+    const pageUrl = `${window.location.origin}${ROUTES.leaderboards}`
+    const context = `${periodLabel(period)} · ${metricLabel(metric)}`
+    const shareTarget = kind === 'municipality' ? myMunicipalityRow : myContributorRow
+    if (!shareTarget) return
+
+    const text = kind === 'municipality'
+      ? `My municipality (${myMunicipality}) is rank #${shareTarget.rank} on Chirin Ivatan Hall of Stewards (${context}).`
+      : `I am rank #${shareTarget.rank} in the Chirin Ivatan Hall of Stewards (${context}) with ${shareTarget.value} points.`
+
+    if (platform === 'native') {
+      const shared = await shareWithNative({
+        title: 'Hall of Stewards Ranking',
+        text,
+        url: pageUrl,
+      })
+      if (shared) setShareFeedback('Share sheet opened.')
+      if (!shared) {
+        const copied = await copyShareText({ text, url: pageUrl })
+        setShareFeedback(copied ? 'Share text copied.' : 'Native sharing is not available on this browser.')
       }
+      return
     }
 
-    loadArchiveCounts()
-  }, [])
+    if (platform === 'copy') {
+      const copied = await copyShareText({ text, url: pageUrl })
+      setShareFeedback(copied ? 'Share text copied.' : 'Could not copy share text.')
+      return
+    }
+
+    const opened = openSocialShare(platform, { text, url: pageUrl })
+    if (opened) setShareFeedback(platform === 'facebook' ? 'Facebook share window opened.' : 'X share window opened.')
+    if (!opened) setShareFeedback('Could not open social share window.')
+  }
 
   async function run(requestFn) {
     setLoading(true)
@@ -89,223 +163,265 @@ export default function LeaderboardPage() {
     }
   }
 
-  async function loadGlobal() {
-    await run(async () => {
-      const payload = await apiRequest(`/leaderboard/global?metric=${metric}&period=${period}`)
-      setGlobalRows(payload.rows || [])
-      setLoadedSections((prev) => ({ ...prev, global: true }))
-    })
+  async function loadArchiveCounts() {
+    try {
+      const [dictionaryPayload, folklorePayload] = await Promise.all([
+        apiRequest('/api/dictionary/entries?limit=1'),
+        apiRequest('/api/folklore/entries'),
+      ])
+      setArchiveCounts({
+        dictionaryApproved: dictionaryPayload.counts?.approved ?? 0,
+        folkloreApproved: folklorePayload.counts?.approved ?? 0,
+      })
+    } catch {
+      setArchiveCounts(EMPTY_ARCHIVE_COUNTS)
+    }
   }
 
-  async function loadMunicipality() {
-    const value = municipality.trim()
-    if (!value) {
-      setError('Enter municipality first.')
+  async function loadGlobalRanking() {
+    const payload = await apiRequest(`/api/leaderboard/global?metric=${metric}&period=${period}`)
+    setGlobalRows(payload.rows || [])
+  }
+
+  async function loadMunicipalityRanking() {
+    if (municipality === 'All') {
+      setMunicipalityRows([])
       return
     }
-
-    await run(async () => {
-      const payload = await apiRequest(
-        `/leaderboard/municipality?municipality=${encodeURIComponent(value)}&metric=${metric}&period=${period}`
-      )
-      setMunicipalityRows(payload.rows || [])
-      setLoadedSections((prev) => ({ ...prev, municipality: true }))
-    })
+    const payload = await apiRequest(
+      `/api/leaderboard/municipality?municipality=${encodeURIComponent(municipality)}&metric=${metric}&period=${period}`,
+    )
+    setMunicipalityRows(payload.rows || [])
   }
 
   async function loadMunicipalityTotals() {
+    const payload = await apiRequest('/api/leaderboard/municipalities')
+    setMunicipalityTotals(payload.rows || [])
+  }
+
+  async function refreshLeaderboard() {
     await run(async () => {
-      const payload = await apiRequest('/leaderboard/municipalities')
-      setMunicipalityTotals(payload.rows || [])
-      setLoadedSections((prev) => ({ ...prev, totals: true }))
+      await loadArchiveCounts()
+      await loadMunicipalityTotals()
+      await loadGlobalRanking()
+      await loadMunicipalityRanking()
     })
   }
 
-  async function loadWinners() {
-    await run(async () => {
-      const suffix = month.trim() ? `?month=${encodeURIComponent(month.trim())}` : ''
-      const payload = await apiRequest(`/leaderboard/municipality-winners${suffix}`)
-      setWinnerRows(payload.rows || [])
-      setLoadedSections((prev) => ({ ...prev, winners: true }))
+  useEffect(() => {
+    loadArchiveCounts()
+    loadMunicipalityTotals().catch(() => setMunicipalityTotals([]))
+  }, [])
+
+  useEffect(() => {
+    run(async () => {
+      await loadGlobalRanking()
+      await loadMunicipalityRanking()
     })
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [metric, period, municipality])
 
   return (
-    <>
-      <section className="panel">
-        <h2>Leaderboards & Municipality Winners</h2>
-        <p className="muted">Choose metric/period, then load global or municipality rankings. You can also load monthly winner history.</p>
-
-        <div className="admin-app-summary" aria-label="Approved archive counts">
-          <article>
-            <p className="stat-label">Existing Approved Terms</p>
-            <p className="stat-value">{archiveCounts.dictionaryApproved}</p>
-          </article>
-          <article>
-            <p className="stat-label">Existing Approved Folklore</p>
-            <p className="stat-value">{archiveCounts.folkloreApproved}</p>
-          </article>
+    <section className="leaderboard-page">
+      <section className="leaderboard-hero">
+        <div>
+          <h1>Hall of Stewards</h1>
+          <p className="muted leaderboard-hero-subtitle">
+            Recognizing the individuals and communities safeguarding our shared heritage, because every contribution
+            strengthens the future of Ivatan language and folklore.
+          </p>
         </div>
-
-        <div className="field-grid">
-          <div className="field">
-            <label htmlFor="lb-metric">Metric</label>
-            <select id="lb-metric" value={metric} onChange={(event) => setMetric(event.target.value)}>
-              {METRIC_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
+        <article className="archive-count-card archive-count-inline">
+          <div className="archive-count-grid">
+            <div>
+              <p className="stat-value">{archiveCounts.dictionaryApproved}</p>
+              <p className="stat-label">Dictionary Terms</p>
+            </div>
+            <div>
+              <p className="stat-value">{archiveCounts.folkloreApproved}</p>
+              <p className="stat-label">Folklore Entries</p>
+            </div>
           </div>
-
-          <div className="field">
-            <label htmlFor="lb-period">Period</label>
-            <select id="lb-period" value={period} onChange={(event) => setPeriod(event.target.value)}>
-              {PERIOD_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="field">
-            <label htmlFor="lb-municipality">Municipality (for municipality ranking)</label>
-            <input
-              id="lb-municipality"
-              value={municipality}
-              onChange={(event) => setMunicipality(event.target.value)}
-              placeholder="e.g. Basco"
-            />
-          </div>
-
-          <div className="field">
-            <label htmlFor="lb-month">Winner Month (optional, YYYY-MM)</label>
-            <input
-              id="lb-month"
-              value={month}
-              onChange={(event) => setMonth(event.target.value)}
-              placeholder="e.g. 2026-02"
-            />
-          </div>
-        </div>
-
-        <div className="actions">
-          <button disabled={loading} onClick={() => loadGlobal()}>
-            Load Global
-          </button>
-          <button className="secondary" disabled={loading} onClick={() => loadMunicipality()}>
-            Load Municipality Ranking
-          </button>
-          <button className="ghost" disabled={loading} onClick={() => loadMunicipalityTotals()}>
-            Load Municipality Totals
-          </button>
-          <button className="ghost" disabled={loading} onClick={() => loadWinners()}>
-            Load Monthly Winners
-          </button>
-        </div>
+          <h3>Total Live Entries as of {todayLabel}</h3>
+        </article>
       </section>
 
       {error && <section className="alert error">{error}</section>}
+      {shareFeedback && <section className="alert ok">{shareFeedback}</section>}
 
-      <section className="panel">
-        <h3>Global Ranking</h3>
-        {!loadedSections.global && <p className="muted">No rows loaded yet.</p>}
-        {loadedSections.global && globalRows.length === 0 && <p className="muted">No global ranking rows found.</p>}
-        {globalRows.length > 0 && (
-          <div className="table-wrap">
-            <table className="simple-table">
-              <thead>
-                <tr>
-                  <th>Rank</th>
-                  <th>User</th>
-                  <th>Municipality</th>
-                  <th>Value</th>
-                  <th>Contributor Title</th>
-                  <th>Reviewer Title</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rankedGlobalRows.map((row) => (
-                  <tr key={`${row.username}-${row.metric}-${row.period}`}>
-                    <td>{row.rank}</td>
-                    <td>{row.username}</td>
-                    <td>{row.municipality || '-'}</td>
-                    <td>{row.value}</td>
-                    <td>{row.current_contributor_title}</td>
-                    <td>{row.current_reviewer_title}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      <section className="leaderboard-controls" aria-label="Leaderboard filters">
+        <p className="leaderboard-controls-title">Filters</p>
+        <label className="field" htmlFor="lb-metric">
+          <span>Recognition</span>
+          <select id="lb-metric" value={metric} onChange={(event) => setMetric(event.target.value)}>
+            {METRIC_OPTIONS.map((option) => (
+              <option key={option} value={option}>
+                {metricLabel(option)}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="field" htmlFor="lb-period">
+          <span>Period</span>
+          <select id="lb-period" value={period} onChange={(event) => setPeriod(event.target.value)}>
+            {PERIOD_OPTIONS.map((option) => (
+              <option key={option} value={option}>
+                {periodLabel(option)}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="field" htmlFor="lb-municipality">
+          <span>Municipality</span>
+          <select id="lb-municipality" value={municipality} onChange={(event) => setMunicipality(event.target.value)}>
+            {MUNICIPALITIES.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button type="button" className="ghost compact-button leaderboard-refresh-button" disabled={loading} onClick={refreshLeaderboard}>
+          {loading ? 'Refreshing...' : 'Refresh'}
+        </button>
+      </section>
+
+      <section className="leaderboard-results-grid">
+        <article className="panel leaderboard-panel leaderboard-full-panel leaderboard-individual-column">
+          <div className="section-heading">
+            <div>
+              <h3>
+                {municipality === 'All' ? 'Individual Ranking' : `Individual Ranking · ${municipality}`}
+              </h3>
+              {isAuthenticated && myContributorRow && (
+                <div className="share-action-row">
+                  <button type="button" className="ghost compact-button" onClick={() => shareRanking('native', 'individual')}>
+                    Share Rank
+                  </button>
+                  <button type="button" className="ghost compact-button" onClick={() => shareRanking('facebook', 'individual')}>
+                    Facebook
+                  </button>
+                  <button type="button" className="ghost compact-button" onClick={() => shareRanking('x', 'individual')}>
+                    X
+                  </button>
+                  <button type="button" className="ghost compact-button" onClick={() => shareRanking('copy', 'individual')}>
+                    Copy Text
+                  </button>
+                </div>
+              )}
+            </div>
+            {loading && <span className="badge status-pending">Loading</span>}
           </div>
-        )}
-      </section>
 
-      <section className="panel">
-        <h3>Municipality Ranking (Top 8)</h3>
-        {!loadedSections.municipality && <p className="muted">No municipality ranking loaded yet.</p>}
-        {loadedSections.municipality && rankedMunicipalityRows.length === 0 && (
-          <p className="muted">No ranking rows found for this municipality and metric.</p>
-        )}
-        {rankedMunicipalityRows.length > 0 && (
-          <div className="table-wrap">
-            <table className="simple-table">
-              <thead>
-                <tr>
-                  <th>Rank</th>
-                  <th>User</th>
-                  <th>Municipality</th>
-                  <th>Value</th>
-                  <th>Combined Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rankedMunicipalityRows.map((row) => (
-                  <tr key={`${row.username}-${row.metric}-${row.period}-municipality`}>
-                    <td>{row.rank}</td>
-                    <td>{row.username}</td>
-                    <td>{row.municipality || '-'}</td>
-                    <td>{row.value}</td>
-                    <td>{row.combined_total}</td>
+          {rankedContributorRows.length === 0 ? (
+            <p className="muted">No ranking rows found yet.</p>
+          ) : (
+            <div className="table-wrap leaderboard-ranking-scroll">
+              <table className="simple-table">
+                <thead>
+                  <tr>
+                    <th>Rank</th>
+                    <th>Steward</th>
+                    <th>Municipality</th>
+                    <th>Score</th>
+                    <th>Recognition</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+                </thead>
+                <tbody>
+                  {rankedContributorRows.map((row) => (
+                    <tr key={`${row.username}-${row.metric}-${row.period}`}>
+                      <td>{row.rank}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="leaderboard-person leaderboard-person-button"
+                          onClick={() => navigate(`${ROUTES.profileView}?username=${encodeURIComponent(row.username)}`)}
+                        >
+                          {row.profile_photo ? (
+                            <img className="leaderboard-avatar" src={row.profile_photo} alt="" />
+                          ) : (
+                            <span className="leaderboard-avatar" aria-hidden="true">
+                              {contributorName(row).slice(0, 1)}
+                            </span>
+                          )}
+                          <span className="leaderboard-person-text">
+                            <span>{contributorName(row)}</span>
+                            <span className="meta">@{row.username}</span>
+                          </span>
+                        </button>
+                      </td>
+                      <td>{row.municipality || 'Not set'}</td>
+                      <td>{row.value}</td>
+                      <td>{row.current_contributor_title || row.current_reviewer_title || 'Cultural Steward'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </article>
 
-      <section className="panel">
-        <h3>Municipality Totals</h3>
-        {!loadedSections.totals && <p className="muted">No municipality totals loaded yet.</p>}
-        {loadedSections.totals && municipalityTotals.length === 0 && (
-          <p className="muted">No municipality totals found. Run/recompute gamification after approved contributions exist.</p>
-        )}
-        {municipalityTotals.map((row) => (
-          <article key={row.municipality} className="queue-card">
-            <p className="meta">Municipality: {row.municipality}</p>
-            <p className="meta">All Time Combined: {row.combined_all_time}</p>
-            <p className="meta">Monthly Combined: {row.combined_month}</p>
-            <p className="meta">Last Month Key: {row.last_month_calculated || '-'}</p>
-          </article>
-        ))}
-      </section>
+        <aside className="leaderboard-side-stack leaderboard-municipality-column">
+          <article className="leaderboard-standings-card">
+            <h3>Municipality Ranking</h3>
+            {isAuthenticated && myMunicipalityRow && (
+              <div className="share-action-row">
+                <button type="button" className="ghost compact-button" onClick={() => shareRanking('native', 'municipality')}>
+                  Share Municipality
+                </button>
+                <button type="button" className="ghost compact-button" onClick={() => shareRanking('facebook', 'municipality')}>
+                  Facebook
+                </button>
+                <button type="button" className="ghost compact-button" onClick={() => shareRanking('x', 'municipality')}>
+                  X
+                </button>
+                <button type="button" className="ghost compact-button" onClick={() => shareRanking('copy', 'municipality')}>
+                  Copy Text
+                </button>
+              </div>
+            )}
+            <div className="leaderboard-municipality-list">
+              <div className="municipality-leading-row">
+                <div className="municipality-leading-flag-wrap">
+                  {winningFlag ? (
+                    <img className="municipality-flag" src={winningFlag} alt="" />
+                  ) : (
+                    <span className="municipality-flag" aria-hidden="true">
+                      {winningMunicipality.municipality?.slice(0, 1) || 'Y'}
+                    </span>
+                  )}
+                </div>
+                <div className="municipality-leading-text">
+                  <p className="stat-value">{winningMunicipality.municipality}</p>
+                  <p className="meta">
+                    Rank: {winningMunicipality.rank} · Score: {winningMunicipality.score}
+                  </p>
+                </div>
+              </div>
 
-      <section className="panel">
-        <h3>Municipality Monthly Winners</h3>
-        {!loadedSections.winners && <p className="muted">No winner records loaded yet.</p>}
-        {loadedSections.winners && winnerRows.length === 0 && <p className="muted">No monthly winner records found.</p>}
-        {winnerRows.map((row) => (
-          <article key={`${row.month_key}-${row.metric}`} className="queue-card">
-            <p className="meta">Month: {row.month_key}</p>
-            <p className="meta">Metric: {row.metric}</p>
-            <p className="meta">Winner: {row.municipality}</p>
-            <p className="meta">Score: {row.score}</p>
+              {rankedMunicipalities.slice(1).map((row) => {
+                const flag = getMunicipalityFlag(row.municipality)
+                return (
+                  <div key={row.municipality} className="leaderboard-municipality-row">
+                    <span className="municipality-rank-number">{row.rank}</span>
+                    {flag ? (
+                      <img className="municipality-flag municipality-flag-small" src={flag} alt="" />
+                    ) : (
+                      <span className="municipality-flag municipality-flag-small" aria-hidden="true">
+                        {row.municipality?.slice(0, 1) || 'M'}
+                      </span>
+                    )}
+                    <span>{row.municipality}</span>
+                    <strong>{row.score}</strong>
+                  </div>
+                )
+              })}
+            </div>
           </article>
-        ))}
+        </aside>
       </section>
-    </>
+    </section>
   )
 }

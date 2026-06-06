@@ -1,6 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.db import models
 
+from users.leaderboard_filters import leaderboard_participant_q
 from users.models import ContributionEvent
 
 
@@ -119,7 +120,7 @@ def _leaderboard_queryset():
     This helper is still kept for compatibility and tests.
     """
     return (
-        User.objects.all()
+        User.objects.filter(leaderboard_participant_q())
         .annotate(
             dictionary_terms_count=models.Count(
                 "contribution_events",
@@ -150,6 +151,7 @@ def _leaderboard_queryset():
             + models.F("folklore_entries_count")
             + models.F("revisions_count")
         )
+        .distinct()
         .filter(total__gt=0)
     )
 

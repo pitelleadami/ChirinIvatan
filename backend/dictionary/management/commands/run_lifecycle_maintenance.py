@@ -8,10 +8,11 @@ Applies lifecycle automation for dictionary and folklore entries:
 
 from datetime import timedelta
 
+from django.core.files.storage import default_storage
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
-from dictionary.models import Entry, EntryStatus
+from dictionary.models import Entry, EntryRevision, EntryStatus
 from dictionary.state_machine import validate_transition
 from dictionary.variant_services import handle_mother_removed_or_archived
 from folklore.models import FolkloreEntry
@@ -34,6 +35,9 @@ class Command(BaseCommand):
         deleted_dictionary = self._delete_old_archived_dictionary_entries(
             cutoff=delete_cutoff,
         )
+        deleted_rejected_revisions = self._delete_stale_rejected_dictionary_revisions(
+            cutoff=delete_cutoff,
+        )
         archived_folklore = self._archive_rejected_folklore_entries(
             cutoff=archive_cutoff,
         )
@@ -46,6 +50,7 @@ class Command(BaseCommand):
                 "Lifecycle maintenance complete: "
                 f"dictionary_archived={archived_dictionary}, "
                 f"dictionary_deleted={deleted_dictionary}, "
+                f"dictionary_rejected_revisions_deleted={deleted_rejected_revisions}, "
                 f"folklore_archived={archived_folklore}, "
                 f"folklore_deleted={deleted_folklore}"
             )
@@ -97,6 +102,41 @@ class Command(BaseCommand):
             if entry.photo:
                 entry.photo.delete(save=False)
             entry.delete()
+            count += 1
+        return count
+
+    def _delete_stale_rejected_dictionary_revisions(self, *, cutoff):
+        """
+        Auto-delete rejected dictionary submissions that have not been revised
+        and remain rejected for at least 1 year.
+        """
+        count = 0
+        rows = EntryRevision.objects.filter(
+            status=EntryRevision.Status.REJECTED,
+            created_at__lte=cutoff,
+        )
+        for revision in rows:
+            proposed = revision.proposed_data or {}
+            media_paths = []
+            audio_path = str(proposed.get("audio_pronunciation") or "").strip()
+            photo_path = str(proposed.get("photo") or "").strip()
+            if audio_path:
+                media_paths.append(audio_path)
+            if photo_path:
+                media_paths.append(photo_path)
+            for variant in proposed.get("variants") or []:
+                variant_audio = str((variant or {}).get("audio_pronunciation") or "").strip()
+                if variant_audio:
+                    media_paths.append(variant_audio)
+
+            for media_path in media_paths:
+                try:
+                    default_storage.delete(media_path)
+                except Exception:
+                    # Keep lifecycle maintenance resilient even if a file is missing.
+                    continue
+
+            revision.delete()
             count += 1
         return count
 

@@ -63,6 +63,44 @@ class DictionaryServicesTests(TestCase):
             {"present": "rakuh"},
         )
 
+    def test_create_revision_from_variant_uses_mother_semantic_snapshot(self):
+        mother = Entry.objects.create(
+            term="vahay",
+            meaning="house",
+            part_of_speech="noun",
+            english_synonym="home",
+            status=EntryStatus.APPROVED,
+            is_mother=True,
+            initial_contributor=self.contributor,
+            last_revised_by=self.contributor,
+        )
+        group = VariantGroup.objects.create(mother_entry=mother)
+        mother.variant_group = group
+        mother.save(update_fields=["variant_group"])
+        variant = Entry.objects.create(
+            term="bahay",
+            meaning="stale variant-local meaning",
+            pronunciation_text="ba-hay",
+            variant_type="Isamurong",
+            status=EntryStatus.APPROVED,
+            is_mother=False,
+            variant_group=group,
+            initial_contributor=self.contributor,
+            last_revised_by=self.contributor,
+        )
+
+        revision = create_revision_from_entry(
+            entry=variant,
+            contributor=self.other_contributor,
+        )
+
+        self.assertEqual(revision.proposed_data["term"], "bahay")
+        self.assertEqual(revision.proposed_data["pronunciation_text"], "ba-hay")
+        self.assertEqual(revision.proposed_data["variant_type"], "Isamurong")
+        self.assertEqual(revision.proposed_data["meaning"], "house")
+        self.assertEqual(revision.proposed_data["part_of_speech"], "noun")
+        self.assertEqual(revision.proposed_data["english_synonym"], "home")
+
     def test_publish_revision_creates_entry_and_applies_snapshot_fields(self):
         revision = EntryRevision.objects.create(
             contributor=self.contributor,
@@ -118,6 +156,90 @@ class DictionaryServicesTests(TestCase):
         entry = publish_revision(revision=update_revision, approvers=[self.approver])
         self.assertEqual(entry.audio_contributor, self.other_contributor)
         self.assertEqual(entry.photo_contributor, self.other_contributor)
+
+    def test_publish_variant_revision_updates_mother_semantic_and_variant_specific_fields(self):
+        mother = Entry.objects.create(
+            term="vahay",
+            meaning="old shared meaning",
+            part_of_speech="noun",
+            status=EntryStatus.APPROVED,
+            is_mother=True,
+            initial_contributor=self.contributor,
+            last_revised_by=self.contributor,
+        )
+        group = VariantGroup.objects.create(mother_entry=mother)
+        mother.variant_group = group
+        mother.save(update_fields=["variant_group"])
+        variant = Entry.objects.create(
+            term="bahay",
+            pronunciation_text="old pronunciation",
+            status=EntryStatus.APPROVED,
+            is_mother=False,
+            variant_group=group,
+            initial_contributor=self.contributor,
+            last_revised_by=self.contributor,
+        )
+        revision = EntryRevision.objects.create(
+            entry=variant,
+            contributor=self.other_contributor,
+            proposed_data={
+                "term": "bahay",
+                "meaning": "updated shared meaning",
+                "part_of_speech": "noun",
+                "pronunciation_text": "new pronunciation",
+                "variant_type": "Isamurong",
+                "term_source_is_self_knowledge": True,
+            },
+            status=EntryRevision.Status.APPROVED,
+        )
+
+        publish_revision(revision=revision, approvers=[self.approver])
+        mother.refresh_from_db()
+        variant.refresh_from_db()
+
+        self.assertEqual(mother.meaning, "updated shared meaning")
+        self.assertEqual(variant.meaning, "")
+        self.assertEqual(variant.pronunciation_text, "new pronunciation")
+        self.assertEqual(variant.variant_type, "Isamurong")
+
+    def test_publish_revision_creates_additional_variant_entries(self):
+        revision = EntryRevision.objects.create(
+            contributor=self.contributor,
+            proposed_data={
+                "term": "vahay",
+                "meaning": "house",
+                "part_of_speech": "noun",
+                "variant_type": "General Ivatan",
+                "term_source_is_self_knowledge": True,
+                "variants": [
+                    {
+                        "term": "bahay",
+                        "variant_type": "Isamurong",
+                        "pronunciation_text": "ba-hay",
+                        "audio_pronunciation": "dictionary/audio/bahay.mp3",
+                        "audio_source": "Audio Source: Shared pronunciation by Ana",
+                        "audio_source_is_self_recorded": False,
+                    }
+                ],
+            },
+            status=EntryRevision.Status.APPROVED,
+        )
+
+        entry = publish_revision(revision=revision, approvers=[self.approver])
+        group = entry.variant_group
+        variant = group.entries.get(term="bahay")
+
+        self.assertFalse(variant.is_mother)
+        self.assertEqual(variant.meaning, "house")
+        self.assertEqual(variant.pronunciation_text, "ba-hay")
+        self.assertEqual(variant.audio_contributor, self.contributor)
+        self.assertTrue(
+            EntryRevision.objects.filter(
+                entry=variant,
+                status=EntryRevision.Status.APPROVED,
+                is_base_snapshot=True,
+            ).exists()
+        )
 
     def test_publish_revision_rejects_invalid_entry_state_transition(self):
         entry = Entry.objects.create(
@@ -411,6 +533,136 @@ class DictionaryEntryDetailApiTests(TestCase):
         connected_ids = {item["entry_id"] for item in payload["connected_variants"]}
         self.assertIn(str(mother.id), connected_ids)
         self.assertIn(str(sibling.id), connected_ids)
+
+    def test_public_entry_list_uses_mother_semantic_core_for_variants(self):
+        mother = Entry.objects.create(
+            term="mother-term",
+            meaning="mother meaning",
+            part_of_speech="noun",
+            status=EntryStatus.APPROVED,
+            is_mother=True,
+            initial_contributor=self.contributor,
+            last_revised_by=self.contributor,
+        )
+        group = VariantGroup.objects.create(mother_entry=mother)
+        mother.variant_group = group
+        mother.save(update_fields=["variant_group"])
+        variant = Entry.objects.create(
+            term="variant-term",
+            meaning="",
+            part_of_speech="",
+            status=EntryStatus.APPROVED,
+            is_mother=False,
+            variant_group=group,
+            initial_contributor=self.contributor,
+            last_revised_by=self.contributor,
+        )
+
+        response = self.client.get("/api/dictionary/entries?q=variant-term")
+        self.assertEqual(response.status_code, 200)
+        row = response.json()["rows"][0]
+
+        self.assertEqual(row["entry_id"], str(variant.id))
+        self.assertEqual(row["meaning"], "mother meaning")
+        self.assertEqual(row["part_of_speech"], "noun")
+
+    def test_public_entry_list_shows_approved_and_under_review_entries(self):
+        approved = Entry.objects.create(
+            term="approved-term",
+            meaning="shown",
+            status=EntryStatus.APPROVED,
+            initial_contributor=self.contributor,
+            last_revised_by=self.contributor,
+        )
+        under_review = Entry.objects.create(
+            term="under-review-term",
+            meaning="hidden",
+            status=EntryStatus.APPROVED_UNDER_REVIEW,
+            initial_contributor=self.contributor,
+            last_revised_by=self.contributor,
+        )
+
+        response = self.client.get("/api/dictionary/entries")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        rows = payload["rows"]
+
+        self.assertEqual(
+            {row["entry_id"] for row in rows},
+            {str(approved.id), str(under_review.id)},
+        )
+        self.assertEqual(payload["counts"]["approved"], 1)
+        self.assertEqual(payload["counts"]["approved_under_review"], 1)
+        self.assertIn(EntryStatus.APPROVED_UNDER_REVIEW, {row["status"] for row in rows})
+
+    def test_english_lookup_indexes_only_one_or_two_word_meanings(self):
+        Entry.objects.create(
+            term="vahay",
+            meaning="house",
+            part_of_speech="noun",
+            status=EntryStatus.APPROVED,
+            is_mother=True,
+            initial_contributor=self.contributor,
+            last_revised_by=self.contributor,
+        )
+        Entry.objects.create(
+            term="rakuh",
+            meaning="to move",
+            part_of_speech="verb",
+            status=EntryStatus.APPROVED,
+            is_mother=True,
+            initial_contributor=self.contributor,
+            last_revised_by=self.contributor,
+        )
+        Entry.objects.create(
+            term="mayvani",
+            meaning="to move quickly",
+            part_of_speech="verb",
+            status=EntryStatus.APPROVED,
+            is_mother=True,
+            initial_contributor=self.contributor,
+            last_revised_by=self.contributor,
+        )
+
+        response = self.client.get("/api/dictionary/english-terms?q=move")
+        self.assertEqual(response.status_code, 200)
+        rows = response.json()["rows"]
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["english_term"], "to move")
+        self.assertEqual(rows[0]["translations"][0]["term"], "rakuh")
+
+    def test_english_lookup_uses_mother_meaning_for_variants(self):
+        mother = Entry.objects.create(
+            term="vahay",
+            meaning="house",
+            part_of_speech="noun",
+            status=EntryStatus.APPROVED,
+            is_mother=True,
+            initial_contributor=self.contributor,
+            last_revised_by=self.contributor,
+        )
+        group = VariantGroup.objects.create(mother_entry=mother)
+        mother.variant_group = group
+        mother.save(update_fields=["variant_group"])
+        variant = Entry.objects.create(
+            term="bahay",
+            meaning="",
+            status=EntryStatus.APPROVED,
+            is_mother=False,
+            variant_group=group,
+            initial_contributor=self.contributor,
+            last_revised_by=self.contributor,
+        )
+
+        response = self.client.get("/api/dictionary/english-terms?q=house")
+        self.assertEqual(response.status_code, 200)
+        translations = response.json()["rows"][0]["translations"]
+
+        self.assertEqual(
+            {item["term"] for item in translations},
+            {"bahay", "vahay"},
+        )
 
     def test_entry_detail_masks_sources_based_on_visibility_flags(self):
         entry = Entry.objects.create(
@@ -727,6 +979,7 @@ class VariantGovernanceTests(TestCase):
     def test_general_ivatan_revision_promotes_entry_to_mother(self):
         mother = Entry.objects.create(
             term="mother",
+            meaning="shared meaning",
             status=EntryStatus.APPROVED,
             is_mother=True,
             variant_type="isamurong",
@@ -762,6 +1015,7 @@ class VariantGovernanceTests(TestCase):
         self.assertEqual(group.mother_entry_id, variant.id)
         self.assertTrue(variant.is_mother)
         self.assertFalse(mother.is_mother)
+        self.assertEqual(variant.meaning, "shared meaning")
 
     def test_archiving_mother_promotes_earliest_approved_variant(self):
         mother = Entry.objects.create(

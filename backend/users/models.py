@@ -41,9 +41,15 @@ class UserProfile(models.Model):
     )
     # These are all optional and can be safely blank.
     municipality = models.CharField(max_length=255, blank=True, default="")
+    post_nominals = models.CharField(max_length=120, blank=True, default="")
     affiliation = models.CharField(max_length=255, blank=True, default="")
     occupation = models.CharField(max_length=255, blank=True, default="")
+    cultural_affiliations = models.JSONField(default=list, blank=True)
+    other_affiliations = models.JSONField(default=list, blank=True)
     bio = models.TextField(blank=True, default="")
+    include_in_leaderboard = models.BooleanField(default=True)
+    show_on_yaru_chart = models.BooleanField(default=True)
+    show_live_contributions = models.BooleanField(default=True)
     # Optional profile photo path. Frontend should use fallback avatar when empty.
     profile_photo = models.ImageField(
         upload_to="users/profile_photos/",
@@ -53,6 +59,47 @@ class UserProfile(models.Model):
 
     def __str__(self):
         return f"Profile<{self.user_id}>"
+
+
+class SiteContentSettings(models.Model):
+    """
+    Admin-editable public page copy and lightweight relationship content.
+
+    Keep this as a single row named "default". Empty arrays mean the public
+    section should be hidden; the API supplies defaults only before an admin
+    has saved custom content.
+    """
+
+    key = models.CharField(max_length=32, unique=True, default="default")
+    about_heading = models.CharField(max_length=160, blank=True, default="")
+    about_intro_paragraphs = models.JSONField(default=list, blank=True)
+    about_body_paragraphs = models.JSONField(default=list, blank=True)
+    about_rationale_paragraphs = models.JSONField(default=list, blank=True)
+    about_future_paragraphs = models.JSONField(default=list, blank=True)
+    about_final_quote = models.TextField(blank=True, default="")
+
+    yaru_heading = models.CharField(max_length=160, blank=True, default="")
+    yaru_intro_paragraphs = models.JSONField(default=list, blank=True)
+
+    support_statements = models.JSONField(default=list, blank=True)
+    partner_details = models.JSONField(default=list, blank=True)
+    faq_sections = models.JSONField(default=list, blank=True)
+
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="site_content_updates",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Site content settings"
+        verbose_name_plural = "Site content settings"
+
+    def __str__(self):
+        return f"SiteContentSettings<{self.key}>"
 
 
 class ContributionEvent(models.Model):
@@ -151,6 +198,40 @@ class ContributionEvent(models.Model):
         return f"{self.user_id}:{self.contribution_type}"
 
 
+class UserSessionEvent(models.Model):
+    """
+    Minimal login/logout audit trail for admin account activity review.
+
+    This intentionally stores only coarse request metadata. It should answer
+    "when did this account log in/out?" without turning session history into a
+    sensitive tracking ledger.
+    """
+    class Type(models.TextChoices):
+        LOGIN = "login", "Login"
+        LOGOUT = "logout", "Logout"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="session_events",
+    )
+    event_type = models.CharField(max_length=16, choices=Type.choices)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["user", "created_at"]),
+            models.Index(fields=["event_type", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.user_id}:{self.event_type}:{self.created_at}"
+
+
 class RoleApplication(models.Model):
     """
     Pending request from user to become contributor or reviewer.
@@ -174,6 +255,7 @@ class RoleApplication(models.Model):
         related_name="role_applications",
     )
     target_role = models.CharField(max_length=24, choices=TargetRole.choices)
+    reviewer_reason = models.TextField(blank=True, default="")
     status = models.CharField(
         max_length=24,
         choices=Status.choices,
@@ -243,10 +325,13 @@ class RoleOnboardingRecord(models.Model):
     class Role(models.TextChoices):
         CONTRIBUTOR = "contributor", "Contributor"
         REVIEWER = "reviewer", "Reviewer"
+        CONSULTANT = "consultant", "Consultant"
+        ADMIN = "admin", "Admin"
 
     class Method(models.TextChoices):
         INVITED = "invited", "Invited"
         APPROVED_APPLICATION = "approved_application", "Approved Application"
+        ADMIN_CREATED = "admin_created", "Admin Created"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(
@@ -288,6 +373,59 @@ class RoleOnboardingRecord(models.Model):
 
     def __str__(self):
         return f"{self.user_id}:{self.role}:{self.method}"
+
+
+class RoleInvitation(models.Model):
+    """
+    Email invitation that lets an admin-vetted person claim role access.
+
+    This is separate from RoleApplication on purpose:
+    - applications use community approval quorum
+    - invitations are an admin accountability path that bypasses quorum
+    """
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        ACCEPTED = "accepted", "Accepted"
+        REVOKED = "revoked", "Revoked"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    email = models.EmailField()
+    role = models.CharField(max_length=24, choices=RoleOnboardingRecord.Role.choices)
+    invited_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="email_role_invitations_sent",
+    )
+    accepted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="accepted_role_invitations",
+        null=True,
+        blank=True,
+    )
+    status = models.CharField(
+        max_length=24,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+    first_name = models.CharField(max_length=150, blank=True, default="")
+    last_name = models.CharField(max_length=150, blank=True, default="")
+    municipality = models.CharField(max_length=255, blank=True, default="")
+    notes = models.TextField(blank=True, default="")
+    expires_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    accepted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["email", "status"]),
+            models.Index(fields=["token"]),
+        ]
+
+    def __str__(self):
+        return f"{self.email}:{self.role}:{self.status}"
 
 
 class UserContributionStats(models.Model):
