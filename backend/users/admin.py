@@ -50,7 +50,8 @@ class UserProfileAdmin(admin.ModelAdmin):
 class SiteContentSettingsAdmin(admin.ModelAdmin):
     """Edit public page copy and public relationship sections."""
 
-    list_display = ("key", "updated_by", "updated_at")
+    list_display = ("key", "maintenance_enabled", "updated_by", "updated_at")
+    list_filter = ("maintenance_enabled",)
     readonly_fields = ("updated_at",)
 
 

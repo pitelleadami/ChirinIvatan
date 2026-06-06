@@ -27,8 +27,34 @@ import LeaderboardPage from './pages/LeaderboardPage'
 import RoleCenterPage from './pages/RoleCenterPage'
 import { apiRequest } from './lib/api'
 import { ROUTES, navigate, normalizePath } from './lib/router'
+import { DEFAULT_SITE_CONTENT, normalizeSiteContent } from './lib/siteContent'
 
 const BRAND_HIDDEN_ROUTES = new Set([ROUTES.home, ROUTES.dictionaryView, ROUTES.folkloreView])
+
+function MaintenancePage({ message, currentUser, onLogout }) {
+  const isSignedIn = Boolean(currentUser?.is_authenticated)
+  return (
+    <section className="maintenance-page">
+      <div className="maintenance-panel">
+        <p className="profile-kicker">Maintenance</p>
+        <h1>Chirin Ivatan is temporarily paused</h1>
+        <p>{message}</p>
+        <div className="actions">
+          {!isSignedIn && (
+            <button type="button" onClick={() => navigate(ROUTES.login)}>
+              Admin Login
+            </button>
+          )}
+          {isSignedIn && (
+            <button type="button" onClick={onLogout}>
+              Log Out
+            </button>
+          )}
+        </div>
+      </div>
+    </section>
+  )
+}
 
 export default function App() {
   // Keep route state in sync with browser navigation (back/forward buttons).
@@ -39,6 +65,9 @@ export default function App() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const [isToolsMenuOpen, setIsToolsMenuOpen] = useState(false)
   const [currentUser, setCurrentUser] = useState({ is_authenticated: false })
+  const [authChecked, setAuthChecked] = useState(false)
+  const [siteContent, setSiteContent] = useState(DEFAULT_SITE_CONTENT)
+  const [siteContentLoaded, setSiteContentLoaded] = useState(false)
 
   useEffect(() => {
     const onPopState = () => {
@@ -73,6 +102,14 @@ export default function App() {
     apiRequest('/api/auth/me')
       .then(setCurrentUser)
       .catch(() => setCurrentUser({ is_authenticated: false }))
+      .finally(() => setAuthChecked(true))
+  }, [])
+
+  useEffect(() => {
+    apiRequest('/api/site-content')
+      .then((payload) => setSiteContent(normalizeSiteContent(payload)))
+      .catch(() => setSiteContent(DEFAULT_SITE_CONTENT))
+      .finally(() => setSiteContentLoaded(true))
   }, [])
 
   const isHome = pathname === ROUTES.home
@@ -89,6 +126,13 @@ export default function App() {
   const canUseContributorTools = isAdminUser || isReviewerUser || isConsultantUser || isContributorUser
   const canUseReviewerTools = isAdminUser || isReviewerUser || isConsultantUser
   const canOpenAdmin = currentUser.is_authenticated && isAdminUser
+  const isMaintenanceMode = (
+    authChecked
+    && siteContentLoaded
+    && siteContent.maintenance_enabled
+    && !isAdminUser
+    && !isLogin
+  )
 
   useEffect(() => {
     let frameId = 0
@@ -329,32 +373,44 @@ export default function App() {
       <main
         id="main-content"
         className={
-          isHome || isLogin
+          isMaintenanceMode
+            ? 'app-shell'
+            : isHome || isLogin
             ? 'app-shell app-shell-home'
             : isDictionaryView || isFolkloreView
               ? 'app-shell app-shell-dictionary'
               : 'app-shell'
         }
       >
-        {pathname === ROUTES.home && <HomePage currentUser={currentUser} />}
-        {pathname === ROUTES.login && <LoginPage currentUser={currentUser} onAuthChange={setCurrentUser} />}
-        {pathname === ROUTES.about && <AboutProjectPage />}
-        {pathname === ROUTES.yaru && <YaruPage currentUser={currentUser} />}
-        {(pathname === ROUTES.faqs || pathname === ROUTES.manual) && <FaqPage currentUser={currentUser} />}
-        {pathname === ROUTES.dashboard && <ReviewerDashboardPage currentUser={currentUser} />}
-        {pathname === ROUTES.adminApplications && <AdminApplicationsPage currentUser={currentUser} />}
-        {pathname === ROUTES.dictionaryView && <DictionaryViewerPage currentUser={currentUser} />}
-        {pathname === ROUTES.dictionaryDraft && <DictionaryDraftBuilderPage />}
-        {pathname === ROUTES.folkloreView && <FolkloreViewerPage currentUser={currentUser} />}
-        {pathname === ROUTES.folkloreDraft && <FolkloreDraftBuilderPage />}
-        {pathname === ROUTES.profileView && <PublicProfilePage currentUser={currentUser} />}
-        {pathname === ROUTES.profileEdit && (
-          <ProfileEditPage currentUser={currentUser} onAuthChange={setCurrentUser} />
+        {isMaintenanceMode ? (
+          <MaintenancePage
+            message={siteContent.maintenance_message}
+            currentUser={currentUser}
+            onLogout={handleLogout}
+          />
+        ) : (
+          <>
+            {pathname === ROUTES.home && <HomePage currentUser={currentUser} />}
+            {pathname === ROUTES.login && <LoginPage currentUser={currentUser} onAuthChange={setCurrentUser} />}
+            {pathname === ROUTES.about && <AboutProjectPage />}
+            {pathname === ROUTES.yaru && <YaruPage currentUser={currentUser} />}
+            {(pathname === ROUTES.faqs || pathname === ROUTES.manual) && <FaqPage currentUser={currentUser} />}
+            {pathname === ROUTES.dashboard && <ReviewerDashboardPage currentUser={currentUser} />}
+            {pathname === ROUTES.adminApplications && <AdminApplicationsPage currentUser={currentUser} />}
+            {pathname === ROUTES.dictionaryView && <DictionaryViewerPage currentUser={currentUser} />}
+            {pathname === ROUTES.dictionaryDraft && <DictionaryDraftBuilderPage />}
+            {pathname === ROUTES.folkloreView && <FolkloreViewerPage currentUser={currentUser} />}
+            {pathname === ROUTES.folkloreDraft && <FolkloreDraftBuilderPage />}
+            {pathname === ROUTES.profileView && <PublicProfilePage currentUser={currentUser} />}
+            {pathname === ROUTES.profileEdit && (
+              <ProfileEditPage currentUser={currentUser} onAuthChange={setCurrentUser} />
+            )}
+            {pathname === ROUTES.leaderboards && <LeaderboardPage currentUser={currentUser} />}
+            {pathname === ROUTES.roleCenter && <RoleCenterPage currentUser={currentUser} />}
+          </>
         )}
-        {pathname === ROUTES.leaderboards && <LeaderboardPage currentUser={currentUser} />}
-        {pathname === ROUTES.roleCenter && <RoleCenterPage currentUser={currentUser} />}
       </main>
-      {!isHome && !isLogin && (
+      {!isHome && !isLogin && !isMaintenanceMode && (
         <footer className="site-footer">
           <div className="site-footer-inner">
             <span className="site-footer-left">© 2026 Chirin Ivatan.</span>

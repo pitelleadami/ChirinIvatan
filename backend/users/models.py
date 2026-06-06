@@ -84,6 +84,14 @@ class SiteContentSettings(models.Model):
     support_statements = models.JSONField(default=list, blank=True)
     partner_details = models.JSONField(default=list, blank=True)
     faq_sections = models.JSONField(default=list, blank=True)
+    maintenance_enabled = models.BooleanField(default=False)
+    maintenance_message = models.TextField(
+        blank=True,
+        default=(
+            "Chirin Ivatan is temporarily paused for maintenance. "
+            "Please check back soon."
+        ),
+    )
 
     updated_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
