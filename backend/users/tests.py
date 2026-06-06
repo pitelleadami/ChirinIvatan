@@ -482,6 +482,8 @@ class SiteContentApiTests(TestCase):
         self.assertTrue(payload["is_default"])
         self.assertEqual(payload["about_heading"], "About the project")
         self.assertEqual(payload["yaru_heading"], "The Digital Yaru")
+        self.assertFalse(payload["maintenance_enabled"])
+        self.assertIn("temporarily paused", payload["maintenance_message"])
 
     def test_admin_can_update_site_content(self):
         self.client.force_login(self.admin_user)
@@ -497,6 +499,8 @@ class SiteContentApiTests(TestCase):
                     "about_final_quote": "Closing",
                     "yaru_heading": "Digital Yaru",
                     "yaru_intro_paragraphs": ["Yaru intro"],
+                    "maintenance_enabled": True,
+                    "maintenance_message": "We are updating the archive tonight.",
                     "support_statements": [
                         {"quote": "Important work", "name": "Supporter", "role": "Teacher"},
                         {"quote": "", "name": "", "role": ""},
@@ -532,11 +536,32 @@ class SiteContentApiTests(TestCase):
         self.assertFalse(payload["is_default"])
         self.assertEqual(payload["about_heading"], "About Chirin")
         self.assertEqual(payload["about_intro_paragraphs"], ["Intro one"])
+        self.assertTrue(payload["maintenance_enabled"])
+        self.assertEqual(payload["maintenance_message"], "We are updating the archive tonight.")
         self.assertEqual(payload["support_statements"][0]["name"], "Supporter")
         self.assertEqual(payload["faq_sections"][0]["roles"], ["visitor", "admin"])
         self.assertEqual(payload["faq_sections"][0]["items"][0]["bullets"], ["One"])
         self.assertEqual(payload["faq_sections"][0]["items"][0]["image_alt"], "Sample graph")
         self.assertEqual(SiteContentSettings.objects.get(key="default").updated_by, self.admin_user)
+
+    def test_maintenance_mode_blocks_public_api_but_allows_admin(self):
+        SiteContentSettings.objects.create(
+            key="default",
+            maintenance_enabled=True,
+            maintenance_message="Maintenance window in progress.",
+        )
+
+        response = self.client.get("/api/leaderboard/global?metric=combined&period=monthly")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["detail"], "Maintenance window in progress.")
+
+        response = self.client.get("/api/site-content")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["maintenance_enabled"])
+
+        self.client.force_login(self.admin_user)
+        response = self.client.get("/api/leaderboard/global?metric=combined&period=monthly")
+        self.assertEqual(response.status_code, 200)
 
     def test_site_content_write_requires_admin(self):
         self.client.force_login(self.regular_user)

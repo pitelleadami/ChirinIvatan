@@ -26,6 +26,8 @@ export const DEFAULT_SITE_CONTENT = {
   support_statements: [],
   partner_details: [],
   faq_sections: [],
+  maintenance_enabled: false,
+  maintenance_message: 'Chirin Ivatan is temporarily paused for maintenance. Please check back soon.',
 }
 
 const PARAGRAPH_KEYS = [
@@ -50,6 +52,10 @@ export function normalizeSiteContent(payload = {}) {
   normalized.support_statements = Array.isArray(payload?.support_statements) ? payload.support_statements : []
   normalized.partner_details = Array.isArray(payload?.partner_details) ? payload.partner_details : []
   normalized.faq_sections = Array.isArray(payload?.faq_sections) ? payload.faq_sections : []
+  normalized.maintenance_enabled = Boolean(payload?.maintenance_enabled)
+  normalized.maintenance_message = String(
+    payload?.maintenance_message || DEFAULT_SITE_CONTENT.maintenance_message,
+  ).trim()
   return normalized
 }
 

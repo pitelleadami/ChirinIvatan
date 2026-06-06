@@ -201,6 +201,8 @@ function siteContentToForm(payload) {
     support_statements: rowsForSiteEditor(content.support_statements, EMPTY_SUPPORT_STATEMENT),
     partner_details: rowsForSiteEditor(content.partner_details, EMPTY_PARTNER_DETAIL),
     faq_sections: faqSectionsForEditor(content.faq_sections),
+    maintenance_enabled: Boolean(content.maintenance_enabled),
+    maintenance_message: content.maintenance_message || '',
   }
 }
 
@@ -214,6 +216,8 @@ function siteContentFromForm(form) {
     about_final_quote: form.about_final_quote,
     yaru_heading: form.yaru_heading,
     yaru_intro_paragraphs: textToParagraphs(form.yaru_intro_text),
+    maintenance_enabled: Boolean(form.maintenance_enabled),
+    maintenance_message: form.maintenance_message,
     support_statements: form.support_statements
       .map((row) => ({
         quote: row.quote.trim(),
@@ -2154,6 +2158,36 @@ export default function AdminApplicationsPage({ currentUser }) {
           {error && <p className="alert error">{error}</p>}
           {message && <p className="alert ok">{message}</p>}
           {loadingSiteContent && <p className="muted">Loading site content...</p>}
+
+          <section className="admin-app-card admin-site-content-card admin-maintenance-card">
+            <div className="section-heading">
+              <div>
+                <p className="profile-kicker">Operations</p>
+                <h2>Site Maintenance Mode</h2>
+              </div>
+            </div>
+            <label className="checkbox-inline checkbox-inline-spacious" htmlFor="site-maintenance-enabled">
+              <input
+                id="site-maintenance-enabled"
+                type="checkbox"
+                checked={siteContentForm.maintenance_enabled}
+                onChange={(event) => setSiteContentField('maintenance_enabled', event.target.checked)}
+              />
+              <span>Pause public site access</span>
+            </label>
+            <p className="muted">
+              Visitors and non-admin accounts will see the maintenance message. Admins can still log in and use Steward's Desk to turn this off.
+            </p>
+            <label className="field" htmlFor="site-maintenance-message">
+              <span>Visitor message</span>
+              <textarea
+                id="site-maintenance-message"
+                rows={4}
+                value={siteContentForm.maintenance_message}
+                onChange={(event) => setSiteContentField('maintenance_message', event.target.value)}
+              />
+            </label>
+          </section>
 
           <section className="admin-app-card admin-site-content-card">
             <div className="section-heading">

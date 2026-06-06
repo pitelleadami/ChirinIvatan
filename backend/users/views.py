@@ -152,6 +152,11 @@ DEFAULT_SITE_CONTENT = {
     "support_statements": [],
     "partner_details": [],
     "faq_sections": [],
+    "maintenance_enabled": False,
+    "maintenance_message": (
+        "Chirin Ivatan is temporarily paused for maintenance. "
+        "Please check back soon."
+    ),
 }
 
 
@@ -366,6 +371,8 @@ def _site_content_payload(row=None):
         "support_statements": row.support_statements or [],
         "partner_details": row.partner_details or [],
         "faq_sections": row.faq_sections or [],
+        "maintenance_enabled": bool(row.maintenance_enabled),
+        "maintenance_message": row.maintenance_message or DEFAULT_SITE_CONTENT["maintenance_message"],
         "is_default": False,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         "updated_by": row.updated_by.username if row.updated_by else "",
@@ -978,6 +985,11 @@ def site_content_view(request):
     row.support_statements = _sanitize_support_statements(payload.get("support_statements", []))
     row.partner_details = _sanitize_partner_details(payload.get("partner_details", []))
     row.faq_sections = _sanitize_faq_sections(payload.get("faq_sections", []))
+    row.maintenance_enabled = _payload_bool(payload.get("maintenance_enabled"))
+    row.maintenance_message = (
+        str(payload.get("maintenance_message", "")).strip()
+        or DEFAULT_SITE_CONTENT["maintenance_message"]
+    )
     row.updated_by = request.user
     row.save()
 
