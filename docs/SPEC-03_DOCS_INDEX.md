@@ -22,28 +22,31 @@ This is the single entry point for project documentation.
 6. `docs/SPEC-03_QA_WORKSHEET_EDITABLE.md`
 - Beginner-friendly QA checklist with editable pass/fail notes.
 
-7. `docs/SPEC-03_FRONTEND_FIGMA_HANDOFF.md`
+7. `docs/SPEC-03_BETA_TESTER_PACKET.md`
+- Full beta tester instructions, role-based task lists, questionnaire, bug report form, consent template, coordinator checklist, and summary form.
+
+8. `docs/SPEC-03_FRONTEND_FIGMA_HANDOFF.md`
 - Detailed beginner Figma build instructions for final UI.
 
-8. `docs/SPEC-03_PLAIN_ENGLISH_PAGE_MAP.md`
+9. `docs/SPEC-03_PLAIN_ENGLISH_PAGE_MAP.md`
 - Role-by-role and screen-by-screen map for visitor, contributor, reviewer, consultant, and admin experiences.
 
-9. `docs/SPEC-03_GAMIFICATION_IMPLEMENTATION_NOTES.md`
+10. `docs/SPEC-03_GAMIFICATION_IMPLEMENTATION_NOTES.md`
 - What is already implemented in backend gamification.
 
-10. `docs/SPEC-03_DEFENSE_ARCHITECTURE_PACK.md`
+11. `docs/SPEC-03_DEFENSE_ARCHITECTURE_PACK.md`
 - Defense-ready diagrams: ERD, state machines, and sequence flows.
 
-11. `docs/SPEC-03_DEPLOYMENT_CHECKLIST.md`
+12. `docs/SPEC-03_DEPLOYMENT_CHECKLIST.md`
 - Exact local/staging/production deployment settings and release gate.
 
-12. `docs/SPEC-03_DOMAIN_HOSTING_SECURITY_GUIDE.md`
+13. `docs/SPEC-03_DOMAIN_HOSTING_SECURITY_GUIDE.md`
 - Beginner guide for buying domain, hosting, SSL, and secure deployment order.
 
-13. `deploy/README.md`
+14. `deploy/README.md`
 - Server deployment templates (systemd + Nginx) and how to apply them.
 
-14. `docs/SPEC-03_SERVER_BOOTSTRAP_SCRIPT_GUIDE.md`
+15. `docs/SPEC-03_SERVER_BOOTSTRAP_SCRIPT_GUIDE.md`
 - How to use the Ubuntu bootstrap deployment script safely.
 
 ## Legacy / Historical Docs
