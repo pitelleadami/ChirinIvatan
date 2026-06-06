@@ -1,20 +1,21 @@
 # SPEC-03 Developer Handoff Specification (Authoritative, Exhaustive)
 
-Status: locked handoff for reimplementation  
+Status: implementation handoff; superseded by `SPEC-03_REBUILD_SPEC.md` where conflicts exist
 Audience: backend + frontend engineers rebuilding this exact system  
 Goal: zero room for interpretation drift
 
-Implementation status snapshot (2026-02-27):
-- Backend core workflows: implemented and passing automated tests.
-- Database/migrations: clean (`makemigrations --check` no changes, `migrate --plan` no pending ops).
-- Operational checks: `manage.py check` clean.
-- Main remaining work: frontend product pages/UX polish and graphics/brand integration.
-- Optional backend enhancements can continue, but are not blockers for UI build.
+Implementation status snapshot (2026-06-06):
+- Backend core workflows are implemented and test-backed.
+- Frontend product screens are implemented and build successfully.
+- Production release preparation is committed and pushed.
+- Admin-managed maintenance mode is implemented.
+- Use `SPEC-03_REBUILD_SPEC.md` as the rebuild-grade master specification.
 
 Canonical path note:
 - Active backend root: `backend/`
 - Active frontend root: `frontend/`
 - Use only these two roots for all new development and onboarding.
+- If this file conflicts with `docs/SPEC-03_REBUILD_SPEC.md`, the rebuild spec wins.
 
 ---
 
@@ -57,7 +58,7 @@ Rules:
 - Self-review is forbidden in both dictionary and folklore.
 - Admin has additional override power (`force_reject`, `restore_approved`, `archive`).
 - Admin can edit public About/Digital Yaru copy, Statements of Support, Partner Details, role-aware FAQ sections, and FAQ images through Steward's Desk -> Site Content.
-- Each user profile has `include_in_leaderboard`; when false, contribution credits remain on the public profile but the user is excluded from Hall of Stewards leaderboard rows and municipality aggregate scores. The profile owner and admins can toggle this through `POST /api/users/<username>/leaderboard-visibility`; admins also get the control in Steward's Desk -> People.
+- Each user profile has `include_in_leaderboard`; when false, contribution credits remain on the public profile but the user is excluded from Hall of Stewards leaderboard rows and municipality aggregate scores. Only admins can toggle this through `POST /api/users/<username>/leaderboard-visibility` or the admin profile/people controls.
 
 ---
 
@@ -212,7 +213,12 @@ The revision payload must follow `ENTRY_SNAPSHOT_FIELDS` in `backend/dictionary/
 - `title`: string, required
 - `content`: text, required
 - `category`: enum required:
-  - `myth`, `legend`, `laji`, `poem`, `proverb`, `idiom`
+  - `oral_narratives`
+  - `wisdom_expressions`
+  - `songs_poetry`
+  - `beliefs_ritual_life`
+  - `traditional_knowledge`
+- `subcategory`: enum required, must belong to selected category
 - `municipality_source`: enum required, allowed:
   - `Basco`, `Mahatao`, `Ivana`, `Uyugan`, `Sabtang`, `Itbayat`, `Not Applicable`
 - `source`: text (conditionally required)
@@ -260,6 +266,7 @@ Must align with `FOLKLORE_SNAPSHOT_FIELDS`:
 - `title`
 - `content`
 - `category`
+- `subcategory`
 - `municipality_source`
 - `source`
 - `self_knowledge`
@@ -565,7 +572,7 @@ Screen: `Folklore Create/Edit Draft`
   - update: `PATCH /api/folklore/revisions/<revision_id>`
   - submit: `POST /api/folklore/revisions/<revision_id>/submit`
 - Form controls required:
-  - title, content, category, municipality_source, source/self_knowledge
+  - title, content, category, subcategory, municipality_source, source/self_knowledge
   - media_url, photo_upload, audio_upload, media_source/self_produced_media
   - copyright_usage
 - Form logic required:

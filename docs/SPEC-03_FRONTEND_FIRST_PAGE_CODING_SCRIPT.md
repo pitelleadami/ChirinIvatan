@@ -6,6 +6,11 @@ Goal: integrate one real page end-to-end (UI + backend API) with minimal guesswo
 This script is intentionally literal.
 Follow it in order.
 
+Canonical note:
+- Current app-wide rebuild rules live in `docs/SPEC-03_REBUILD_SPEC.md`.
+- Current screen inventory lives in `docs/SPEC-03_PLAIN_ENGLISH_PAGE_MAP.md`.
+- If this older first-page script conflicts with those files, use the rebuild spec and screen map.
+
 ---
 
 ## 0) What you are building

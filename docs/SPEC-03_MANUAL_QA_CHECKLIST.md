@@ -203,13 +203,21 @@ Note:
    - FAQs show admin-saved sections only to selected roles
    - FAQ images render inside answers
    - non-admin users cannot save `/api/site-content`
-4. Open a public profile as the profile owner.
-5. Confirm the profile owner cannot see or use the leaderboard visibility control.
+4. In the same Site Content tab, enable maintenance mode and set a custom visitor message.
+5. Open the site in a logged-out/incognito browser.
 6. Expected:
+   - visitor sees the custom maintenance message
+   - visitor can still navigate to admin/login access
+   - public API calls return controlled `503`
+7. Log in as admin and confirm Steward's Desk remains available.
+8. Disable maintenance mode and save.
+9. Open a public profile as the profile owner.
+10. Confirm the profile owner cannot see or use the leaderboard visibility control.
+11. Expected:
    - public profile contribution credits remain visible
    - profile owners cannot hide or restore leaderboard participation
-7. Open a public profile as admin and use the leaderboard visibility action.
-8. Expected:
+12. Open a public profile as admin and use the leaderboard visibility action.
+13. Expected:
    - admin can hide or restore that person's leaderboard participation
    - individual leaderboard rows no longer include hidden users
 
@@ -225,7 +233,7 @@ Mark GO only if all are true:
 5. Folklore conditional validation rules behave exactly as expected.
 6. Public visibility and masking rules are correct.
 7. Revision history limits and audience visibility are correct.
-8. Admin-managed site content and leaderboard participation settings work.
+8. Admin-managed site content, maintenance mode, and leaderboard participation settings work.
 
 If any check fails, log:
 - exact URL or screen

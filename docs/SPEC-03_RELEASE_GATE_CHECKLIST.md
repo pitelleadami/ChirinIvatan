@@ -60,6 +60,9 @@ python3 manage.py test users reviews dictionary folklore
 - [ ] role application create/my/decide works
 - [ ] invitation endpoint works for reviewer/admin
 - [ ] public profile includes accountability labels + gamification block
+- [ ] `GET /api/site-content` includes maintenance fields
+- [ ] when maintenance is enabled, non-admin public API calls return controlled `503`
+- [ ] when maintenance is enabled, admin API access remains available
 
 ---
 
@@ -89,6 +92,8 @@ python3 manage.py test users reviews dictionary folklore
 - [ ] Steward's Desk menu hides Edit Profile and Role Center, keeps Help as FAQs, and no longer exposes a standalone User Manual
 - [ ] FAQs include former manual guidance with role-aware sections for visitor/contributor/reviewer/admin users
 - [ ] Admin Site Content can edit role-aware FAQ sections and upload FAQ screenshots/graphs under `/media/site/faq/`
+- [ ] Admin Site Content can enable/disable maintenance mode and edit the visitor message
+- [ ] Maintenance screen appears for visitors/non-admins and still allows admin login
 - [ ] Admin People tab shows per-person action logs capped at 500 displayed rows without deleting audit records
 
 ---
@@ -105,6 +110,7 @@ python3 manage.py test users reviews dictionary folklore
 - [ ] no dead helper functions left in active modules
 - [ ] beginner comments remain present in core workflow files
 - [ ] docs point to canonical frontend path (`frontend/`)
+- [ ] `docs/SPEC-03_REBUILD_SPEC.md`, `DATA_MODEL.md`, and the screen map match the implemented behavior
 
 ---
 

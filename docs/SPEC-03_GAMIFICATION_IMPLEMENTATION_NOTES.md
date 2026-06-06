@@ -137,4 +137,5 @@ Result:
 
 1. Admin UI helper for validating JSON threshold schema.
 2. Scheduled nightly integrity audit command comparing aggregates vs raw events.
-3. Frontend milestone charts, stacked titles, and badge progress cards.
+3. Richer frontend milestone charts and share-card visuals.
+4. Additional recognition-event timeline visualizations.
