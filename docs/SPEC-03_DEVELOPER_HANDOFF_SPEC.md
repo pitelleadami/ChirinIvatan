@@ -56,6 +56,8 @@ Rules:
 - Reviewer/Admin can approve/reject/flag.
 - Self-review is forbidden in both dictionary and folklore.
 - Admin has additional override power (`force_reject`, `restore_approved`, `archive`).
+- Admin can edit public About/Digital Yaru copy, Statements of Support, Partner Details, role-aware FAQ sections, and FAQ images through Steward's Desk -> Site Content.
+- Each user profile has `include_in_leaderboard`; when false, contribution credits remain on the public profile but the user is excluded from Hall of Stewards leaderboard rows and municipality aggregate scores. The profile owner and admins can toggle this through `POST /api/users/<username>/leaderboard-visibility`; admins also get the control in Steward's Desk -> People.
 
 ---
 
@@ -493,7 +495,10 @@ Must implement:
   - Save as Draft
   - Submit
   - Delete Draft
-  - note: current backend does not expose a dedicated delete-draft endpoint yet; frontend delete requires adding one or using local draft discard behavior
+- do not show routine “loaded draft” notification banners; draft state should be obvious from the form state
+- source and usage/copyright permission belong in one related panel
+- uploaded images must be at least `200px x 200px`
+- preview images whose longest side is less than `600px` should render in the right/half column rather than full width
 
 ### 13.2 Reviewer Dashboard UX Recommendation
 Recommended sections:
@@ -522,6 +527,12 @@ Screen: `Reviewer Dashboard`
   - Folklore re-review queue from `folklore.pending_rereview`
   - Review history from `reviews.my_reviews`
   - Quorum wait list from `reviews.awaiting_quorum_after_my_approval`
+- Must not render:
+  - `dictionary.published_entries`
+  - `folklore.published_entries`
+- Queue filtering:
+  - exclude rows where `contributor_username` matches the logged-in reviewer/admin
+  - backend still enforces self-review prevention even if a client bypasses UI filtering
 - Expected outcomes:
   - reviewer/admin gets HTTP 200 with grouped payload
   - unauthenticated gets 401
@@ -540,6 +551,9 @@ Screen: `Dictionary Entry Detail`
 - Variant block must use `variant_section` object.
 - Connected terms must use `connected_variants`.
 - Contributor block must use `contributors` and `attribution`.
+- Public visibility includes `approved` and `approved_under_review` entries so a flagged entry remains browsable while under re-review.
+- Reviewer/admin users may see a “Flag for re-review” action when `review_action.can_flag_for_rereview=true`.
+- Flag action must POST `decision=flag` with non-empty notes to `/api/reviews/dictionary/submit` using `review_action.latest_approved_revision_id`.
 - Expected outcomes:
   - if entry is variant, semantics still come from mother source entry
   - masked sources remain hidden per attribution flags
@@ -572,19 +586,67 @@ Screen: `Folklore Public List/Detail`
   - only `approved` and `approved_under_review` appear
   - hidden source/media_source values obey self flags
   - media URLs present only when uploaded
+- Reviewer/admin users may see a “Flag for re-review” action when `review_action.can_flag_for_rereview=true`.
+- Flag action must POST `decision=flag` with non-empty notes to `/api/reviews/folklore/submit` using `review_action.latest_approved_revision_id`.
 
 Screen: `Review Action Controls`
 - Data source:
   - dictionary: `POST /api/reviews/dictionary/submit`
   - folklore: `POST /api/reviews/folklore/submit`
 - Control requirements:
-  - approve/reject/flag buttons
+  - Reviewer Dashboard queues show approve/reject controls for pending and re-review rows
+  - live Dictionary/Folklore entry details show flag-for-re-review controls for flaggable published entries
   - notes input required for reject and flag
   - disable duplicate action per same revision and review round if backend returns duplicate-review error
 - Expected outcomes:
   - one reject can immediately reject pending or re-review flows
   - quorum approve transitions to approved outcomes
   - flag transitions to under-review state
+
+Screen: `Steward Workspace`
+- Top navigation workspace menu must show:
+  - Personal: My Profile
+  - Steward's Desk with indented subsections in this order:
+    1. Reviews
+    2. Applications
+    3. Add New Dictionary Entry
+    4. Add New Folklore Entry
+  - Help: FAQs
+- Hidden/retired:
+  - Edit Profile
+  - Role Center
+  - Standalone User Manual (manual content is incorporated into role-aware FAQs)
+- Reviews and Applications must keep the Steward's Desk page title/tab frame instead of navigating to an unrelated-looking view.
+
+Screen: `FAQs and Guides`
+- Public visitors see public dictionary, folklore, joining, and troubleshooting guidance.
+- Contributors see contributor workflow, status, quality/cultural care, troubleshooting, and dictionary field guides.
+- Reviewers see contributor guidance plus reviewer responsibilities and re-review guidance.
+- Admins see all FAQ sections, including administrator responsibilities and audit/action-log guidance.
+- Admin-managed FAQ sections are stored on `SiteContentSettings.faq_sections` and include `roles`, `items`, optional `image_url`, and optional `image_alt`.
+- FAQ media uploads use `POST /api/site-content/faq-media` and store images under `/media/site/faq/`.
+- Builder Learn More links must target FAQ anchors such as `#guide-pronunciation`, `#guide-variants`, `#guide-inflected-forms`, `#guide-usage-notes`, `#guide-etymology`, and `#guide-sources`.
+- `/manual` remains only as a compatibility redirect to `/faqs`.
+
+Screen: `Applications / Invitations`
+- Applications tab should not show a separate “Loaded” count card.
+- Status filter should be compact and one-row.
+- Application cards paginate at 5 per page.
+- Recent invitations paginate at 8 per page.
+
+Screen: `Admin People Activity Log`
+- Admin-only People tab should let admins inspect a selected person's recent major actions.
+- Data source: `GET /api/admin/users/<username>/activity`
+- Include actions such as:
+  - contribution credits
+  - dictionary revisions
+  - folklore revisions
+  - dictionary reviews
+  - folklore reviews
+  - role application decisions
+  - role invitations sent
+- UI/API should show the latest 500 rows per person.
+- Do not auto-delete older audit records simply because the list exceeds 500; cap retrieval/display while preserving audit history.
 
 Screen: `Admin Override Panel` (if implemented)
 - Data source: `POST /api/reviews/admin/override`

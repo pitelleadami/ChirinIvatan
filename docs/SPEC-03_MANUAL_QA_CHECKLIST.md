@@ -123,7 +123,7 @@ If frontend is incomplete, use API endpoints from browser network calls.
 
 ## A. Required Field Rules
 Expected behavior on create/update/submit draft:
-1. `title`, `content`, `category` are required.
+1. `title`, `content`, `category`, and `subcategory` are required.
 2. `source` required unless self-knowledge is checked.
 3. If media exists (URL/photo/audio), `media_source` required unless self-produced is checked.
 4. Municipality must be one of:
@@ -135,6 +135,7 @@ Expected behavior on create/update/submit draft:
 1. Attach photo and submit draft.
 2. Expected:
    - accepted and visible in revision payload/detail
+   - image is at least `200px x 200px`
 3. Attach audio and submit draft.
 4. Expected:
    - accepted and visible in revision payload/detail
@@ -150,11 +151,12 @@ Expected behavior on create/update/submit draft:
 3. Review decisions expected outcomes:
    - first approve: may remain pending until quorum
    - quorum approve: revision `approved`, entry `approved`
-   - flag approved entry: entry `approved_under_review`
+   - flag approved entry from the live Folklore detail page with notes: entry `approved_under_review`
    - one reject during re-review: entry `rejected`
 
 Note:
-- If your frontend has no review action buttons yet, this is a frontend gap, not necessarily backend logic failure.
+- Published entries are not shown as review cards in the Reviews tab.
+- Reviewers/admins should not see their own submissions in review queues.
 
 ---
 
@@ -169,6 +171,7 @@ Note:
 4. Expected masking:
    - `source` hidden when self-knowledge = true
    - `media_source` hidden when self-produced-media = true
+5. As reviewer/admin, confirm eligible approved entries show a flag-for-re-review action that requires notes.
 
 ---
 
@@ -183,7 +186,36 @@ Note:
 
 ---
 
-## 9) Final Go/No-Go
+## 9) Admin Site Content and Leaderboard Privacy
+
+1. Log in as an Admin account and open:
+   - Steward's Desk -> Site Content
+2. Update and save:
+   - About page heading and paragraphs
+   - Digital Yaru introductory text
+   - at least one Statement of Support
+   - at least one Partner Detail
+   - at least one FAQ section/question with role visibility
+   - at least one FAQ image upload or image URL
+3. Expected:
+   - About and Digital Yaru pages show the saved copy
+   - support/partner sections appear only when rows are populated
+   - FAQs show admin-saved sections only to selected roles
+   - FAQ images render inside answers
+   - non-admin users cannot save `/api/site-content`
+4. Open a public profile as the profile owner.
+5. Confirm the profile owner cannot see or use the leaderboard visibility control.
+6. Expected:
+   - public profile contribution credits remain visible
+   - profile owners cannot hide or restore leaderboard participation
+7. Open a public profile as admin and use the leaderboard visibility action.
+8. Expected:
+   - admin can hide or restore that person's leaderboard participation
+   - individual leaderboard rows no longer include hidden users
+
+---
+
+## 10) Final Go/No-Go
 
 Mark GO only if all are true:
 1. Baseline tests pass.
@@ -193,6 +225,7 @@ Mark GO only if all are true:
 5. Folklore conditional validation rules behave exactly as expected.
 6. Public visibility and masking rules are correct.
 7. Revision history limits and audience visibility are correct.
+8. Admin-managed site content and leaderboard participation settings work.
 
 If any check fails, log:
 - exact URL or screen

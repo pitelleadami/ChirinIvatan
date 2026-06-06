@@ -161,13 +161,13 @@ Go to page: `02 Reviewer Dashboard`
 - Reuse shell structure (top bar + tabs)
 
 ### Step 5.2: Queue panels
-Create 6 panels:
+Create 4 queue panels:
 1. Dictionary Pending Submissions
 2. Dictionary Re-review Queue
-3. Dictionary Published Entries (Flag Eligible)
-4. Folklore Pending Submissions
-5. Folklore Re-review Queue
-6. Folklore Published Entries (Flag Eligible)
+3. Folklore Pending Submissions
+4. Folklore Re-review Queue
+
+Do not place published/live entries in the Reviewer Dashboard. Re-review flagging belongs on the live Dictionary and Folklore detail pages.
 
 Panel style:
 - Fill `bg/panel`
@@ -180,7 +180,7 @@ Inside each panel:
 - top row: title + status badge
 - metadata rows
 - notes textarea
-- action buttons: Approve, Reject, Flag for re-review
+- action buttons: Approve, Reject
 - inline success/error text
 
 Card style:
@@ -321,7 +321,7 @@ Go to page: `10 QA`
 Create one frame per scenario:
 1. reject without notes error
 2. approve quorum pending state
-3. flag for re-review from published queue
+3. flag for re-review from live Dictionary/Folklore detail
 4. role application pending -> approved
 5. invite action success
 6. profile with unlocked badges

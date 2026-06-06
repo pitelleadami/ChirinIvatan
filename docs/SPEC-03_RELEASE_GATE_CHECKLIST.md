@@ -65,22 +65,31 @@ python3 manage.py test users reviews dictionary folklore
 
 ## D) Governance Rules Gate
 - [ ] self-review blocked
+- [ ] reviewer/admin Reviews tab hides own submissions
 - [ ] reject requires notes
-- [ ] flag requires notes
+- [ ] flag requires notes and is initiated from live Dictionary/Folklore detail pages
 - [ ] approval quorum behaves correctly
 - [ ] re-review state transitions behave correctly
+- [ ] `approved_under_review` Dictionary/Folklore entries remain publicly browsable
 - [ ] contribution counting remains historical (not decremented by archive/delete)
 
 ---
 
 ## E) Frontend Integration Gate
-- [ ] Reviewer Dashboard can load and submit approve/reject/flag
+- [ ] Reviewer Dashboard can load and submit approve/reject for pending/re-review queues
+- [ ] Reviewer Dashboard does not show published-entry flag queues
 - [ ] Folklore Viewer loads list/detail and shows masking behavior
-- [ ] Dictionary Viewer loads by UUID
+- [ ] Folklore Viewer supports reviewer/admin flag-for-re-review with required notes
+- [ ] Dictionary Viewer loads by UUID and supports reviewer/admin flag-for-re-review with required notes
 - [ ] Dictionary Draft Builder supports create/start-edit/update/submit
 - [ ] Folklore Draft Builder supports upload + create/update/submit
+- [ ] upload image minimum is `200px x 200px`
+- [ ] Application cards paginate 5 per page; recent invitations paginate 8 per page
 - [ ] Public Profile and Leaderboards load correctly
-- [ ] Role Center flows work
+- [ ] Steward's Desk menu hides Edit Profile and Role Center, keeps Help as FAQs, and no longer exposes a standalone User Manual
+- [ ] FAQs include former manual guidance with role-aware sections for visitor/contributor/reviewer/admin users
+- [ ] Admin Site Content can edit role-aware FAQ sections and upload FAQ screenshots/graphs under `/media/site/faq/`
+- [ ] Admin People tab shows per-person action logs capped at 500 displayed rows without deleting audit records
 
 ---
 

@@ -9,16 +9,17 @@
 
 import { useEffect, useState } from 'react'
 
-import SampleProfilePhoto from '../components/SampleProfilePhoto'
 import { apiRequest } from '../lib/api'
-import { getSamplePublicProfile } from '../lib/sampleProfiles'
+import { getBadgeImageByKey } from '../lib/badgeImages'
+import { getMunicipalityFlag } from '../lib/municipalityFlags'
+import { copyShareText, openSocialShare, shareWithNative } from '../lib/socialShare'
 import { ROUTES, navigate } from '../lib/router'
 
-function SummaryCard({ label, value }) {
+function SummaryItem({ label, value }) {
   return (
-    <article className="stat-card">
-      <p className="stat-label">{label}</p>
+    <article className="contribution-inline-item">
       <p className="stat-value">{value}</p>
+      <p className="stat-label">{label}</p>
     </article>
   )
 }
@@ -28,12 +29,23 @@ function ProfileAvatar({ profile }) {
   if (profile.header?.profile_photo) {
     return <img className="public-profile-avatar" src={profile.header.profile_photo} alt="" />
   }
-  if (Number.isInteger(profile.header?.sample_profile_photo_index)) {
-    return <SampleProfilePhoto className="public-profile-avatar" index={profile.header.sample_profile_photo_index} />
-  }
   return (
     <div className="public-profile-avatar public-profile-avatar-fallback" aria-hidden="true">
       {username.slice(0, 2).toUpperCase()}
+    </div>
+  )
+}
+
+function AffiliationRows({ title, rows, firstKey, secondKey }) {
+  const visibleRows = (rows || []).filter((row) => row?.[firstKey] || row?.[secondKey])
+  if (!visibleRows.length) return null
+  return (
+    <div className="public-profile-affiliations-group">
+      {visibleRows.map((row, index) => (
+        <p key={`${title}-${index}`} className="public-profile-affiliation-line">
+          {[row[firstKey], row[secondKey]].filter(Boolean).join(', ')}
+        </p>
+      ))}
     </div>
   )
 }
@@ -44,32 +56,266 @@ function ContributionList({ title, emptyText, items, getLabel }) {
       <h4>{title}</h4>
       {items.length === 0 && <p className="muted">{emptyText}</p>}
       {items.map((item) => (
-        <article key={item.entry_id} className="queue-card">
-          <p className="meta">{getLabel(item)}</p>
+        <article key={item.entry_id} className="public-profile-entry-row">
+          <p>{getLabel(item)}</p>
         </article>
       ))}
     </div>
   )
 }
 
+function nameWithPostNominals(firstName, lastName, postNominals) {
+  const baseName = [firstName, lastName].filter(Boolean).join(' ').trim()
+  if (baseName && postNominals) return `${baseName}, ${postNominals}`
+  return baseName || postNominals || ''
+}
+
+function badgeProgressPercent(badge) {
+  const currentValue = Number(badge.current_value) || 0
+  const threshold = Number(badge.threshold) || 0
+  if (threshold <= 0) return badge.unlocked ? 100 : 0
+  return Math.max(0, Math.min(100, Math.round((currentValue / threshold) * 100)))
+}
+
+function allBadgesFromProfile(profile) {
+  return [
+    ...(profile?.gamification?.dictionary_badges || []).map((badge) => ({ ...badge, category: 'Dictionary' })),
+    ...(profile?.gamification?.folklore_badges || []).map((badge) => ({ ...badge, category: 'Folklore' })),
+    ...(profile?.gamification?.quality_badges || []).map((badge) => ({ ...badge, category: 'Quality' })),
+  ]
+}
+
+function badgeSortValue(badge) {
+  if (badge.unlocked_at) {
+    const parsed = Date.parse(badge.unlocked_at)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return Number(badge.threshold) || 0
+}
+
+function nextInProgressBadgesByCategory(badges) {
+  const categoryOrder = ['Dictionary', 'Folklore', 'Quality']
+  const rowsByCategory = new Map()
+  badges
+    .filter((badge) => !badge.unlocked)
+    .sort((a, b) => badgeSortValue(a) - badgeSortValue(b))
+    .forEach((badge) => {
+      if (!rowsByCategory.has(badge.category)) {
+        rowsByCategory.set(badge.category, badge)
+      }
+    })
+
+  return categoryOrder
+    .map((category) => rowsByCategory.get(category))
+    .filter(Boolean)
+}
+
+function contributionTotal(summary) {
+  return Number(summary?.total_contributions) || 0
+}
+
+function formatBadgeDate(value) {
+  if (!value) return ''
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return ''
+  return parsed.toLocaleDateString(undefined, {
+    month: 'numeric',
+    day: 'numeric',
+    year: 'numeric',
+  })
+}
+
+const BADGE_TITLE_BY_KEY = {
+  word_contributor: 'Word Contributor',
+  lexicon_builder: 'Lexicon Builder',
+  language_preserver: 'Language Preserver',
+  dictionary_steward: 'Dictionary Steward',
+  master_lexicon_keeper: 'Master Lexicon Keeper',
+  story_contributor: 'Story Contributor',
+  folklore_weaver: 'Folklore Weaver',
+  tradition_keeper: 'Tradition Keeper',
+  cultural_narrator: 'Cultural Narrator',
+  oral_historian: 'Oral Historian',
+  accuracy_champion: 'Accuracy Champion',
+  dictionary_seed: 'Word Contributor',
+  dictionary_grove: 'Lexicon Builder',
+  folklore_voice: 'Story Contributor',
+  folklore_keeper: 'Folklore Weaver',
+  quality_steward: 'Accuracy Champion',
+}
+
+function getBadgeDisplayName(badge) {
+  const normalizedKey = String(badge?.key || '').replace(/-/g, '_')
+  return BADGE_TITLE_BY_KEY[normalizedKey] || badge?.name || 'Badge'
+}
+
+function badgeRequirementText(badge) {
+  const threshold = Number(badge.threshold) || 0
+  if (badge.category === 'Dictionary') {
+    return `Approve ${threshold} original dictionary ${threshold === 1 ? 'term' : 'terms'} as your contribution.`
+  }
+  if (badge.category === 'Folklore') {
+    return `Approve ${threshold} original folklore ${threshold === 1 ? 'entry' : 'entries'} as your contribution.`
+  }
+  if (badge.category === 'Quality') {
+    return `Reach ${threshold} approved contributions with no rejected submissions.`
+  }
+  return `Reach ${threshold} approved contributions.`
+}
+
+function achievementGroupsFromBadges(badges) {
+  return ['Dictionary', 'Folklore', 'Quality']
+    .map((category) => ({
+      category,
+      badges: badges
+        .filter((badge) => badge.category === category)
+        .sort((a, b) => (Number(a.threshold) || 0) - (Number(b.threshold) || 0)),
+    }))
+    .filter((group) => group.badges.length)
+}
+
+function displayActorName(value) {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  if (raw.includes('.') || raw.includes('_') || raw.includes('-')) {
+    const parts = raw.replace(/[_-]/g, '.').split('.').map((item) => item.trim()).filter(Boolean)
+    if (parts.length >= 2) {
+      return `${parts[0].slice(0, 1).toUpperCase()}. ${parts[parts.length - 1].slice(0, 1).toUpperCase()}${parts[parts.length - 1].slice(1)}`
+    }
+  }
+  return raw
+}
+
+function summarizeAccountability(label) {
+  const value = String(label || '').trim()
+  if (!value) return ''
+  const match = value.match(/^(Approved|Invited)\s+as\s+.+?\s+by\s+(.+)$/i)
+  const simpleMatch = value.match(/^(Approved|Invited)\s+by\s+(.+)$/i)
+  const target = match || simpleMatch
+  if (!target) return ''
+  const action = target[1].toLowerCase() === 'approved' ? 'Approved by' : 'Invited by'
+  const names = target[2]
+    .split(/\s+and\s+/i)
+    .map((name) => displayActorName(name))
+    .filter(Boolean)
+  return `${action} ${names.join(' and ')}`
+}
+
+function BadgeCard({ badge, category = 'Badge', allowShare = false, onShare = null, showRequirement = false }) {
+  const image = getBadgeImageByKey(badge.key)
+  const progressPercent = badgeProgressPercent(badge)
+  const displayName = getBadgeDisplayName(badge)
+  const statusLabel = 'In progress'
+  const qualityNote = badge.rejection_count !== undefined ? `Rejections: ${badge.rejection_count}` : ''
+  const unlockedDate = formatBadgeDate(badge.unlocked_at)
+
+  return (
+    <article className={badge.unlocked ? 'badge-card unlocked' : 'badge-card'}>
+      <div className="badge-card-media" aria-hidden={!image}>
+        {image ? (
+          <img className="badge-card-image" src={image} alt="" loading="lazy" />
+        ) : (
+          <span className="badge-card-fallback">{displayName.slice(0, 1)}</span>
+        )}
+      </div>
+      {badge.unlocked && (
+        <div className="badge-card-caption">
+          <h5>{displayName}</h5>
+          <p>{unlockedDate || 'Unlocked'}</p>
+        </div>
+      )}
+      <div className="badge-card-body">
+        <div className="badge-card-title-row">
+          <div>
+            <p className="badge-card-category">{category}</p>
+            <h5>{displayName}</h5>
+          </div>
+          {!badge.unlocked && <span className="badge-status">{statusLabel}</span>}
+        </div>
+        {!badge.unlocked && (
+          <>
+            {showRequirement && <p className="badge-requirement">{badgeRequirementText({ ...badge, category })}</p>}
+            <div className="badge-progress-row">
+              <span>
+                {badge.current_value}/{badge.threshold}
+              </span>
+              {qualityNote && <span>{qualityNote}</span>}
+            </div>
+            <div className="badge-progress-track" aria-hidden="true">
+              <span style={{ width: `${progressPercent}%` }} />
+            </div>
+          </>
+        )}
+        {badge.unlocked && allowShare && (
+          <div className="badge-share-row">
+            <button type="button" className="ghost compact-button" onClick={() => onShare?.('native', badge)}>
+              Share
+            </button>
+            <button type="button" className="ghost compact-button" onClick={() => onShare?.('facebook', badge)}>
+              Facebook
+            </button>
+            <button type="button" className="ghost compact-button" onClick={() => onShare?.('x', badge)}>
+              X
+            </button>
+            <button type="button" className="ghost compact-button" onClick={() => onShare?.('copy', badge)}>
+              Copy
+            </button>
+          </div>
+        )}
+      </div>
+    </article>
+  )
+}
+
+function AchievementShelf({ group, expanded, onToggle = null, allowShare, onShare }) {
+  const unlockedCount = group.badges.filter((badge) => badge.unlocked).length
+  const visibleBadges = expanded ? group.badges : group.badges.slice(0, 5)
+  const canToggle = Boolean(onToggle) && (group.badges.length > visibleBadges.length || expanded)
+
+  return (
+    <section className="achievement-shelf">
+      <div className="achievement-shelf-heading">
+        <div>
+          <h4>{group.category}</h4>
+          <p>{unlockedCount} of {group.badges.length} unlocked</p>
+        </div>
+        {canToggle && (
+          <button type="button" className="ghost compact-button" onClick={onToggle}>
+            {expanded ? 'Show less' : 'View all'}
+          </button>
+        )}
+      </div>
+      <div className="achievement-badge-row">
+        {visibleBadges.map((badge) => (
+          <BadgeCard
+            key={badge.key}
+            badge={badge}
+            category={group.category}
+            allowShare={allowShare}
+            onShare={onShare}
+            showRequirement
+          />
+        ))}
+      </div>
+    </section>
+  )
+}
+
 export default function PublicProfilePage({ currentUser }) {
-  const [username, setUsername] = useState('')
-  const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [profile, setProfile] = useState(null)
   const [locationSearch, setLocationSearch] = useState(window.location.search)
+  const [shareFeedback, setShareFeedback] = useState('')
+  const [leaderboardUpdating, setLeaderboardUpdating] = useState(false)
+  const [showAllAchievements, setShowAllAchievements] = useState(false)
 
   async function loadProfile(explicitUsername = null) {
-    const value = (explicitUsername || username).trim()
+    const value = (explicitUsername || '').trim()
     if (!value) {
-      setError('Enter a username first.')
+      setError('No profile username was provided.')
       return
     }
-    if (explicitUsername && explicitUsername !== username) {
-      setUsername(explicitUsername)
-    }
 
-    setLoading(true)
     setError('')
     setProfile(null)
 
@@ -78,14 +324,7 @@ export default function PublicProfilePage({ currentUser }) {
       const payload = await apiRequest(`/api/users/${value}`)
       setProfile(payload)
     } catch (requestError) {
-      const sampleProfile = getSamplePublicProfile(value)
-      if (sampleProfile) {
-        setProfile(sampleProfile)
-      } else {
-        setError(requestError.message)
-      }
-    } finally {
-      setLoading(false)
+      setError(requestError.message)
     }
   }
 
@@ -110,138 +349,295 @@ export default function PublicProfilePage({ currentUser }) {
   }, [currentUser?.username, locationSearch])
 
   const isOwnProfile = currentUser?.is_authenticated && profile?.header?.username === currentUser.username
-  const fullName = [profile?.header?.first_name, profile?.header?.last_name].filter(Boolean).join(' ').trim()
+  const currentUserGroups = currentUser?.groups || []
+  const canApplyAsReviewer = Boolean(
+    isOwnProfile
+      && currentUserGroups.includes('Contributor')
+      && !currentUserGroups.includes('Reviewer')
+      && !currentUserGroups.includes('Admin')
+      && !currentUser?.is_superuser,
+  )
+  const canManageLeaderboardVisibility = Boolean(
+    profile?.header?.username
+      && currentUser?.is_authenticated
+      && (currentUser?.is_superuser || currentUserGroups.includes('Admin')),
+  )
+  const isIncludedInLeaderboard = profile?.header?.include_in_leaderboard !== false
+  const allBadges = allBadgesFromProfile(profile)
+  const earnedBadges = allBadges.filter((badge) => badge.unlocked).sort((a, b) => badgeSortValue(a) - badgeSortValue(b))
+  const inProgressBadges = nextInProgressBadgesByCategory(allBadges)
+  const achievementGroups = achievementGroupsFromBadges(allBadges)
+  const totalContributions = contributionTotal(profile?.contribution_summary)
+  const fullName = nameWithPostNominals(
+    profile?.header?.first_name,
+    profile?.header?.last_name,
+    profile?.header?.post_nominals,
+  )
+  const municipalityLabel = profile?.header?.municipality || 'Ivatan community member'
+  const municipalityFlag = getMunicipalityFlag(profile?.header?.municipality)
+  const accountabilityRows = [
+    profile?.header?.onboarding_accountability?.contributor,
+    profile?.header?.onboarding_accountability?.reviewer,
+    profile?.header?.onboarding_accountability?.consultant,
+  ]
+    .map(summarizeAccountability)
+    .filter(Boolean)
+  const accountabilityText = accountabilityRows[0] || ''
+
+  async function shareBadge(platform, badge) {
+    if (!profile?.header?.username) return
+    const badgeName = getBadgeDisplayName(badge)
+    const profileUrl = `${window.location.origin}${ROUTES.profileView}?username=${encodeURIComponent(profile.header.username)}`
+    const text = `I just earned the ${badgeName} badge on Chirin Ivatan.`
+
+    if (platform === 'native') {
+      const shared = await shareWithNative({
+        title: 'Chirin Ivatan Badge',
+        text,
+        url: profileUrl,
+      })
+      if (!shared) {
+        setShareFeedback('Native sharing is not available on this browser.')
+      }
+      return
+    }
+
+    if (platform === 'copy') {
+      const copied = await copyShareText({ text, url: profileUrl })
+      setShareFeedback(copied ? 'Badge share text copied.' : 'Could not copy share text.')
+      return
+    }
+
+    const opened = openSocialShare(platform, { text, url: profileUrl })
+    if (!opened) {
+      setShareFeedback('Could not open social share window.')
+    }
+  }
+
+  async function updateLeaderboardVisibility(nextValue) {
+    if (!profile?.header?.username) return
+    setLeaderboardUpdating(true)
+    setError('')
+    setShareFeedback('')
+    try {
+      await apiRequest('/api/auth/csrf')
+      const payload = await apiRequest(`/api/users/${encodeURIComponent(profile.header.username)}/leaderboard-visibility`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ include_in_leaderboard: nextValue }),
+      })
+      setProfile((current) => ({
+        ...current,
+        header: {
+          ...(current?.header || {}),
+          include_in_leaderboard: payload.include_in_leaderboard,
+        },
+      }))
+      setShareFeedback(payload.include_in_leaderboard ? 'Contributions will count on the leaderboard.' : 'Contributions are hidden from leaderboard rankings.')
+    } catch (requestError) {
+      setError(requestError.message)
+    } finally {
+      setLeaderboardUpdating(false)
+    }
+  }
 
   return (
     <div className="public-profile-page">
-      <section className="public-profile-search">
-        <div>
-          <h2>Public Profiles</h2>
-          <p className="muted">Search by username or open your own public profile from the top bar.</p>
-        </div>
-        <div className="public-profile-search-row">
-          <input
-            id="profile-username"
-            value={username}
-            onChange={(event) => setUsername(event.target.value)}
-            placeholder="Username"
-          />
-          <button disabled={loading} onClick={() => loadProfile()}>
-            {loading ? 'Loading...' : 'Load'}
-          </button>
-        </div>
-      </section>
-
       {error && <section className="alert error">{error}</section>}
+      {shareFeedback && <section className="alert ok">{shareFeedback}</section>}
 
       {profile && (
         <>
           <section className="public-profile-hero">
             <ProfileAvatar profile={profile} />
             <div className="public-profile-headline">
-              <p className="profile-kicker">{profile.header?.municipality || 'Ivatan community member'}</p>
+              <div className="profile-kicker-row">
+                {municipalityFlag && (
+                  <img className="profile-kicker-flag" src={municipalityFlag} alt={`${municipalityLabel} flag`} />
+                )}
+                <p className="profile-kicker">{municipalityLabel}</p>
+              </div>
               <h1>{fullName || profile.header?.username}</h1>
-              <p className="public-profile-username">@{profile.header?.username}</p>
-              <p className="public-profile-bio">{profile.header?.bio || 'No bionote has been added yet.'}</p>
-              <div className="public-profile-tags">
-                <span>{profile.header?.occupation || 'Occupation not set'}</span>
-                <span>{profile.header?.affiliation || 'Affiliation not set'}</span>
-                <span>Joined {profile.header?.joined_date || '-'}</span>
+              <p className="public-profile-username">{profile.header?.role || 'Community Member'}</p>
+              {profile.header?.bio && <p className="public-profile-bio">{profile.header.bio}</p>}
+              <div className="public-profile-affiliations">
+                <AffiliationRows
+                  title="Cultural Affiliations"
+                  rows={profile.header?.cultural_affiliations}
+                  firstKey="role"
+                  secondKey="organization"
+                />
+                <AffiliationRows
+                  title="Other Affiliations"
+                  rows={profile.header?.other_affiliations}
+                  firstKey="designation"
+                  secondKey="institution"
+                />
               </div>
             </div>
-            {isOwnProfile && (
-              <button className="public-profile-edit" onClick={() => navigate(ROUTES.profileEdit)}>
-                Edit Profile
-              </button>
-            )}
-          </section>
-
-          <section className="public-profile-section">
-            <h3>Contribution Summary</h3>
-            <div className="stats-grid">
-              <SummaryCard label="Dictionary Terms" value={profile.contribution_summary?.dictionary_terms || 0} />
-              <SummaryCard label="Folklore Entries" value={profile.contribution_summary?.folklore_entries || 0} />
-              <SummaryCard label="Revisions" value={profile.contribution_summary?.revisions || 0} />
-              <SummaryCard label="Total Contributions" value={profile.contribution_summary?.total_contributions || 0} />
+            <div className="public-profile-hero-actions">
+              {isOwnProfile && (
+                <button className="public-profile-edit" onClick={() => navigate(ROUTES.profileEdit)}>
+                  Edit Profile
+                </button>
+              )}
+              {canApplyAsReviewer && (
+                <button className="ghost compact-button public-profile-reviewer-button" onClick={() => navigate(`${ROUTES.roleCenter}?role=reviewer`)}>
+                  Apply as Reviewer
+                </button>
+              )}
+              {canManageLeaderboardVisibility && (
+                <button
+                  className="ghost compact-button public-profile-leaderboard-button"
+                  disabled={leaderboardUpdating}
+                  onClick={() => updateLeaderboardVisibility(!isIncludedInLeaderboard)}
+                >
+                  {leaderboardUpdating
+                    ? 'Updating...'
+                    : isIncludedInLeaderboard
+                      ? 'Hide from Leaderboard'
+                      : 'Count on Leaderboard'}
+                </button>
+              )}
+              <div className="public-profile-tags">
+                <span>Joined {profile.header?.joined_date || '-'}</span>
+                {accountabilityText && <span>{accountabilityText}</span>}
+                {canManageLeaderboardVisibility && (
+                  <span>{isIncludedInLeaderboard ? 'Leaderboard: included' : 'Leaderboard: hidden'}</span>
+                )}
+              </div>
             </div>
           </section>
 
+          {isOwnProfile && achievementGroups.length > 0 && (
+            <section className="public-profile-section">
+              <div className="achievement-section-heading">
+                <div>
+                  <h3 className="public-profile-section-title">Achievements</h3>
+                  <p className="muted">Your earned badges and the next badges in progress.</p>
+                </div>
+                <button type="button" className="ghost compact-button" onClick={() => setShowAllAchievements(true)}>
+                  View all badges
+                </button>
+              </div>
+              {earnedBadges.length > 0 && (
+                <>
+                  <h4>Earned Badges</h4>
+                  <div className="badge-row badge-row-earned">
+                    {earnedBadges.map((badge) => (
+                      <BadgeCard
+                        key={badge.key}
+                        badge={badge}
+                        category={badge.category}
+                        allowShare={isOwnProfile}
+                        onShare={shareBadge}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
+              {inProgressBadges.length > 0 && (
+                <>
+                  <h4>{inProgressBadges.length === 1 ? 'Next Badge In Progress' : 'Next Badges In Progress'}</h4>
+                  <div className="badge-row badge-row-progress">
+                    {inProgressBadges.map((badge) => (
+                      <BadgeCard
+                        key={badge.key}
+                        badge={badge}
+                        category={badge.category}
+                        allowShare={false}
+                        onShare={shareBadge}
+                        showRequirement
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
+            </section>
+          )}
+
+          {showAllAchievements && (
+            <div className="achievements-modal-backdrop" role="presentation" onClick={() => setShowAllAchievements(false)}>
+              <section
+                className="achievements-modal"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="achievements-modal-title"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="achievements-modal-heading">
+                  <div>
+                    <h3 id="achievements-modal-title">All Badges</h3>
+                    <p>Track every badge, what unlocks it, and your current progress.</p>
+                  </div>
+                  <button type="button" className="ghost compact-button" onClick={() => setShowAllAchievements(false)}>
+                    Close
+                  </button>
+                </div>
+                <div className="achievement-shelf-list achievements-modal-body">
+                  {achievementGroups.map((group) => (
+                    <AchievementShelf
+                      key={group.category}
+                      group={group}
+                      expanded
+                      allowShare={isOwnProfile}
+                      onShare={shareBadge}
+                    />
+                  ))}
+                </div>
+              </section>
+            </div>
+          )}
+
+          {!isOwnProfile && earnedBadges.length > 0 && (
+            <section className="public-profile-section">
+              <h3 className="public-profile-section-title">Cultural Stewardship Badges</h3>
+              <div className="badge-row badge-row-earned">
+                {earnedBadges.map((badge) => (
+                  <BadgeCard
+                    key={badge.key}
+                    badge={badge}
+                    category={badge.category}
+                    allowShare={false}
+                    onShare={shareBadge}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {totalContributions > 0 && (
+            <section className="public-profile-section">
+              <h3 className="public-profile-section-title">Contribution Summary</h3>
+              <div className="contribution-inline-grid">
+                <SummaryItem label="Dictionary Terms" value={profile.contribution_summary?.dictionary_terms || 0} />
+                <SummaryItem label="Folklore Entries" value={profile.contribution_summary?.folklore_entries || 0} />
+                <SummaryItem label="Revisions" value={profile.contribution_summary?.revisions || 0} />
+                <SummaryItem label="Total Contributions" value={totalContributions} />
+              </div>
+            </section>
+          )}
+
           <section className="public-profile-section">
-            <h3>Community Standing</h3>
-            <div className="profile-level-grid">
-              <article>
-                <p className="stat-label">Contributor Level</p>
-                <p className="stat-value">{profile.gamification?.contributor_level?.title || '-'}</p>
-                <p className="meta">{profile.gamification?.contributor_level?.current_count || 0} contributions</p>
-              </article>
-              <article>
-                <p className="stat-label">Reviewer Level</p>
-                <p className="stat-value">{profile.gamification?.reviewer_level?.title || '-'}</p>
-                <p className="meta">{profile.gamification?.reviewer_level?.current_count || 0} reviews</p>
-              </article>
-            </div>
-
-            <p className="meta">{profile.gamification?.language?.headline || '-'}</p>
-            <p className="meta">Contributor Accountability: {profile.header?.onboarding_accountability?.contributor || '-'}</p>
-            <p className="meta">Reviewer Accountability: {profile.header?.onboarding_accountability?.reviewer || '-'}</p>
-
-            <h4>Dictionary Badges</h4>
-            <div className="badge-grid">
-              {(profile.gamification?.dictionary_badges || []).map((badge) => (
-                <article key={badge.key} className={badge.unlocked ? 'badge-card unlocked' : 'badge-card'}>
-                  <p className="stat-label">{badge.name}</p>
-                  <p className="meta">
-                    {badge.current_value}/{badge.threshold}
-                  </p>
-                </article>
-              ))}
-            </div>
-
-            <h4>Folklore Badges</h4>
-            <div className="badge-grid">
-              {(profile.gamification?.folklore_badges || []).map((badge) => (
-                <article key={badge.key} className={badge.unlocked ? 'badge-card unlocked' : 'badge-card'}>
-                  <p className="stat-label">{badge.name}</p>
-                  <p className="meta">
-                    {badge.current_value}/{badge.threshold}
-                  </p>
-                </article>
-              ))}
-            </div>
-
-            <h4>Quality Badge</h4>
-            <div className="badge-grid">
-              {(profile.gamification?.quality_badges || []).map((badge) => (
-                <article key={badge.key} className={badge.unlocked ? 'badge-card unlocked' : 'badge-card'}>
-                  <p className="stat-label">{badge.name}</p>
-                  <p className="meta">
-                    {badge.current_value}/{badge.threshold} | rejections: {badge.rejection_count}
-                  </p>
-                </article>
-              ))}
-            </div>
-          </section>
-
-          <section className="public-profile-section">
-            <h3>Public Contribution Lists</h3>
+            <h3 className="public-profile-section-title">Published Contributions</h3>
             <div className="public-profile-lists-grid">
               <ContributionList
-                title="Approved Mother Terms"
+                title="Dictionary Terms"
                 emptyText="No approved mother terms yet."
                 items={profile.lists?.approved_mother_terms || []}
-                getLabel={(item) => `${item.term} (${item.status})`}
+                getLabel={(item) => item.term}
               />
               <ContributionList
-                title="Approved Folklore Entries"
+                title="Folklore Entries"
                 emptyText="No approved folklore entries yet."
                 items={profile.lists?.approved_folklore_entries || []}
-                getLabel={(item) => `${item.title} (${item.status})`}
+                getLabel={(item) => item.title}
               />
               <ContributionList
-                title="Entries Revised"
+                title="Revised Entries"
                 emptyText="No revised entries yet."
                 items={profile.lists?.entries_revised || []}
-                getLabel={(item) => `${item.term} (${item.status})`}
+                getLabel={(item) => item.term}
               />
             </div>
           </section>

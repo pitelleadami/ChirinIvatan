@@ -80,12 +80,11 @@ Confirm the component supports:
 - notes textarea
 - Approve button
 - Reject button
-- Flag for re-review button
 - row-level error message
 - row-level success/result message
 
 Why this matters:
-- dashboard has 6 queues and this avoids repeating large JSX blocks.
+- dashboard has pending/re-review queues and this avoids repeating large JSX blocks.
 
 ---
 
@@ -154,11 +153,13 @@ If error is `Authentication required`:
 5. click `Reject` again
 6. expect success + refreshed queue
 
-### 5.3 Flag test (published queue)
-1. choose one row in `Published Entries`
-2. click `Flag` without notes -> expect error
-3. add notes
-4. click `Flag` -> expect success + status update on refresh
+### 5.3 Flag test (live entry detail)
+1. open a live Dictionary or Folklore entry as a reviewer/admin
+2. confirm a flaggable entry shows `Flag for re-review`
+3. click it and submit without notes -> expect UI error
+4. add notes/justification
+5. submit flag -> expect success and entry status moves to `approved_under_review`
+6. confirm the entry remains visible in the public Dictionary/Folklore viewer while under re-review
 
 ---
 
@@ -232,7 +233,7 @@ Files:
 
 Checklist:
 - panel background and border match Figma
-- button colors match status (approve/reject/flag)
+- button colors match status (approve/reject in queues; flag on live detail pages)
 - note textarea spacing and readability
 - mobile layout stacks buttons/fields
 

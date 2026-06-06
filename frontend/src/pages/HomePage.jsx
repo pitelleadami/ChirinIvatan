@@ -1,113 +1,35 @@
 import { useEffect, useState } from 'react'
 
-import SampleProfilePhoto from '../components/SampleProfilePhoto'
+import brandLogo from '../assets/brand/chirin-ivatan-logo.png'
+import heroVillageImage from '../assets/landing/ivatan-village-hero.jpg'
 import { apiRequest } from '../lib/api'
-import { SAMPLE_HOME_GLOBAL_ROWS, getSampleProfileSummary } from '../lib/sampleProfiles'
+import { folkloreTaxonomyLabel } from '../lib/folkloreTaxonomy'
+import { getMunicipalityFlag } from '../lib/municipalityFlags'
 import { ROUTES, navigate } from '../lib/router'
-
-const SAMPLE_TOP_CONTRIBUTOR = SAMPLE_HOME_GLOBAL_ROWS[0]
-const SAMPLE_TOP_MUNICIPALITY = { municipality: 'Ivana', score: 146 }
-
-const SAMPLE_DICTIONARY_ENTRIES = [
-  {
-    term: 'Chirin',
-    municipality: 'Basco',
-    status: 'approved',
-    meaning: 'language, speech, or spoken expression',
-    part_of_speech: 'noun',
-    created_at: '2026-05-14T09:20:00+08:00',
-  },
-  {
-    term: 'Yaru',
-    municipality: 'Ivana',
-    status: 'approved',
-    meaning: 'community cooperation or shared labor',
-    part_of_speech: 'noun',
-    created_at: '2026-05-14T09:12:00+08:00',
-  },
-  {
-    term: 'Mahahad',
-    municipality: 'Mahatao',
-    status: 'approved_under_review',
-    meaning: 'a remembered saying or familiar expression',
-    part_of_speech: 'noun',
-    created_at: '2026-05-14T08:54:00+08:00',
-  },
-]
-
-const SAMPLE_FOLKLORE_ENTRIES = [
-  {
-    title: 'The Wind at Naidi',
-    municipality_source: 'Basco',
-    status: 'approved',
-    category: 'legend',
-    created_at: '2026-05-14T08:42:00+08:00',
-  },
-  {
-    title: 'Song of Iraya Cliffs',
-    municipality_source: 'Itbayat',
-    status: 'approved',
-    category: 'laji',
-    created_at: '2026-05-13T16:18:00+08:00',
-  },
-]
-
-const SAMPLE_ARCHIVE_COUNTS = {
-  dictionaryApproved: SAMPLE_DICTIONARY_ENTRIES.filter((row) => row.status === 'approved').length,
-  folkloreApproved: SAMPLE_FOLKLORE_ENTRIES.filter((row) => row.status === 'approved').length,
-}
-
-const SAMPLE_TESTIMONIES = [
-  {
-    quote:
-      'Chirin Ivatan helps us retain oral memory in forms that young learners can revisit without losing local context.',
-    author: 'Batanes Cultural Alliance',
-  },
-  {
-    quote:
-      'This platform is a meaningful bridge between elders, schools, and digital learners across municipalities.',
-    author: 'Provincial Educators Network',
-  },
-  {
-    quote:
-      'The archive gives us a practical way to protect words and stories before they fade from everyday use.',
-    author: 'Community Youth Volunteer',
-  },
-]
-
-const SAMPLE_PARTNERS = [
-  { initials: 'BSC', name: 'Batanes State College' },
-  { initials: 'MCO', name: 'Municipal Culture Office' },
-  { initials: 'IYC', name: 'Ivatan Youth Collective' },
-]
-
-function sampleProfilePhoto(name) {
-  const source = name || 'Chirin Ivatan'
-  const total = source.split('').reduce((sum, char) => sum + char.charCodeAt(0), 0)
-  return total % 12
-}
+import { DEFAULT_SITE_CONTENT, normalizeSiteContent } from '../lib/siteContent'
 
 function contributorLabel(row) {
-  const sampleProfile = getSampleProfileSummary(row.username)
-  return sampleProfile?.display_name || row.username
+  return row.display_name || row.full_name || row.username
 }
 
 function shortenText(value, limit = 76) {
-  if (!value) return 'Meaning not provided yet'
+  if (!value) return ''
   return value.length > limit ? `${value.slice(0, limit).trim()}...` : value
 }
 
-function formatContributionDate(value) {
-  if (!value) return 'Date not available'
+function formatPublicDate(value) {
+  if (!value) return 'Recently added'
   const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat('en', {
+  if (Number.isNaN(date.getTime())) return 'Recently added'
+  return `Added ${new Intl.DateTimeFormat('en', {
     month: 'short',
     day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(date)
+  }).format(date)}`
+}
+
+function hasMeaning(row) {
+  const meaning = row.meaning?.trim()
+  return meaning && meaning.toLowerCase() !== 'meaning not provided yet'
 }
 
 function toNumber(value) {
@@ -128,25 +50,69 @@ function withCompetitionRank(rows, valueKey = 'value') {
   })
 }
 
-export default function HomePage() {
+function openDictionaryEntry(row) {
+  if (row.entry_id) {
+    navigate(`${ROUTES.dictionaryView}?entry_id=${encodeURIComponent(row.entry_id)}`)
+    return
+  }
+
+  navigate(`${ROUTES.dictionaryView}?q=${encodeURIComponent(row.term || '')}`)
+}
+
+function openFolkloreEntry(row) {
+  if (row.entry_id) {
+    navigate(`${ROUTES.folkloreView}?entry_id=${encodeURIComponent(row.entry_id)}`)
+    return
+  }
+
+  navigate(ROUTES.folkloreView)
+}
+
+function LandingFooter() {
+  return (
+    <footer className="site-footer landing-site-footer">
+      <div className="site-footer-inner">
+        <span className="site-footer-left">© 2026 Chirin Ivatan.</span>
+        <span className="site-footer-center">
+          <em>Developed for the preservation and continuity of the Ivatan language and heritage.</em>
+        </span>
+        <span className="site-footer-right">Contact: chirinivatan@gmail.com</span>
+        <span className="site-footer-mobile">
+          © 2026 Chirin Ivatan. Preserving Ivatan language and heritage. Contact: chirinivatan@gmail.com
+        </span>
+      </div>
+    </footer>
+  )
+}
+
+export default function HomePage({ currentUser = {} }) {
   const [globalRows, setGlobalRows] = useState([])
   const [topMunicipality, setTopMunicipality] = useState(null)
   const [dictionaryRows, setDictionaryRows] = useState([])
   const [folkloreRows, setFolkloreRows] = useState([])
-  const [archiveCounts, setArchiveCounts] = useState(SAMPLE_ARCHIVE_COUNTS)
+  const [siteContent, setSiteContent] = useState(DEFAULT_SITE_CONTENT)
+  const [archiveCounts, setArchiveCounts] = useState({ dictionaryApproved: 0, folkloreApproved: 0 })
   const [leaderMunicipality, setLeaderMunicipality] = useState('All')
+  const todayLabel = new Intl.DateTimeFormat('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(new Date())
+  const currentMonthLabel = new Intl.DateTimeFormat('en-US', {
+    month: 'long',
+  }).format(new Date())
 
   useEffect(() => {
     async function loadHomepageData() {
       try {
-        const globalPayload = await apiRequest('/leaderboard/global?metric=combined&period=monthly')
+        const globalPayload = await apiRequest('/api/leaderboard/global?metric=combined&period=monthly')
         setGlobalRows(globalPayload.rows || [])
       } catch {
         setGlobalRows([])
       }
 
       try {
-        const municipalityWinners = await apiRequest('/leaderboard/municipality-winners')
+        const municipalityWinners = await apiRequest('/api/leaderboard/municipality-winners')
         const row = (municipalityWinners.rows || [])[0] || null
         setTopMunicipality(row)
       } catch {
@@ -164,7 +130,7 @@ export default function HomePage() {
         setDictionaryRows([])
         setArchiveCounts((current) => ({
           ...current,
-          dictionaryApproved: SAMPLE_ARCHIVE_COUNTS.dictionaryApproved,
+          dictionaryApproved: 0,
         }))
       }
 
@@ -179,17 +145,39 @@ export default function HomePage() {
         setFolkloreRows([])
         setArchiveCounts((current) => ({
           ...current,
-          folkloreApproved: SAMPLE_ARCHIVE_COUNTS.folkloreApproved,
+          folkloreApproved: 0,
         }))
+      }
+
+      try {
+        const siteContentPayload = await apiRequest('/api/site-content')
+        setSiteContent(normalizeSiteContent(siteContentPayload))
+      } catch {
+        setSiteContent(DEFAULT_SITE_CONTENT)
       }
     }
 
     loadHomepageData()
   }, [])
 
-  const topContributor = globalRows[0] || SAMPLE_TOP_CONTRIBUTOR
-  const leadingMunicipality = topMunicipality || SAMPLE_TOP_MUNICIPALITY
-  const rankedRows = withCompetitionRank(globalRows.length ? globalRows : SAMPLE_HOME_GLOBAL_ROWS, 'value')
+  const rankedRows = withCompetitionRank(globalRows, 'value')
+  const municipalityRankRows = withCompetitionRank(
+    Object.entries(
+      rankedRows.reduce((accumulator, row) => {
+        const key = row.municipality || 'Not set'
+        accumulator[key] = (accumulator[key] || 0) + toNumber(row.value)
+        return accumulator
+      }, {}),
+    ).map(([municipality, score]) => ({ municipality, score })),
+    'score',
+  ).slice(0, 6)
+  const topMunicipalitySummary = municipalityRankRows[0] || {
+    municipality: topMunicipality?.municipality || 'No contributors yet',
+    score: toNumber(topMunicipality?.score || topMunicipality?.value),
+    rank: 1,
+  }
+  const municipalityRankList = municipalityRankRows.slice(1)
+  const topMunicipalityFlag = getMunicipalityFlag(topMunicipalitySummary.municipality)
   const municipalityOptions = [
     'All',
     ...Array.from(new Set(rankedRows.map((row) => row.municipality).filter(Boolean))).sort(),
@@ -197,27 +185,45 @@ export default function HomePage() {
   const filteredRows = leaderMunicipality === 'All'
     ? rankedRows
     : rankedRows.filter((row) => row.municipality === leaderMunicipality)
-  const topEightMunicipality = filteredRows.slice(0, 8)
-  const latestDictionary = dictionaryRows.length ? dictionaryRows : SAMPLE_DICTIONARY_ENTRIES
-  const latestFolklore = folkloreRows.length ? folkloreRows : SAMPLE_FOLKLORE_ENTRIES
+  const topFiveMunicipality = filteredRows.slice(0, 5)
+  const latestDictionary = dictionaryRows.filter(hasMeaning).slice(0, 3)
+  const latestFolklore = folkloreRows.slice(0, 3)
+  const visibleSupportStatements = siteContent.support_statements.filter((statement) => (
+    statement?.quote || statement?.name || statement?.role
+  ))
+  const visiblePartnerDetails = siteContent.partner_details.filter((partner) => (
+    partner?.name || partner?.description || partner?.url
+  ))
+  const hasClosingContent = visibleSupportStatements.length > 0 || visiblePartnerDetails.length > 0
+  const currentUserGroups = currentUser.groups || []
+  const isMember = Boolean(
+    currentUser.is_authenticated
+      && (
+        currentUser.is_superuser
+        || currentUserGroups.includes('Admin')
+        || currentUserGroups.includes('Reviewer')
+        || currentUserGroups.includes('Contributor')
+      ),
+  )
 
   return (
-    <main className="home-seamless">
-      <section className="visitor-hero">
+    <div className="home-seamless">
+      <section className="visitor-hero" style={{ '--visitor-hero-image': `url(${heroVillageImage})` }}>
         <div className="visitor-hero-overlay">
+          <img className="visitor-hero-logo" src={brandLogo} alt="Chirin Ivatan logo" />
           <h1>Chirin Ivatan</h1>
           <p className="visitor-lead">
-            Chirin Ivatan, from Chirin meaning language and Ivatan meaning of the Ivatans or of Batanes, is an online
-            dictionary and folklore archive dedicated to preserving the Ivatan language, stories, and cultural
-            heritage in the digital age.
+            — from <em>"Chirin"</em>, meaning language, and <em>"nu Ivatan,"</em> referring to the people and culture of
+            Batanes — is an online dictionary and folklore archive dedicated to preserving the Ivatan language, stories,
+            and cultural heritage in the digital age.
           </p>
           <p className="visitor-copy">
-            Developed to safeguard the Ivatan language in the digital age, it welcomes Ivatans and all who wish to
-            learn about the language and heritage to join in preserving the words, stories, and living traditions that
-            give life to Batanes.
+            Developed as a community-centered initiative for cultural preservation, it welcomes Ivatans and all who wish
+            to contribute or learn about the language and heritage to take part in safeguarding the words, stories, and
+            living traditions that continue to shape the identity of the Ivatans.
           </p>
           <div className="hero-actions">
-            <button onClick={() => navigate(ROUTES.roleCenter)}>Join our digital yaru</button>
+            {!isMember && <button onClick={() => navigate(ROUTES.roleCenter)}>Join the Digital Yaru</button>}
             <button className="ghost" onClick={() => navigate(ROUTES.dictionaryView)}>
               Explore the Dictionary
             </button>
@@ -229,193 +235,244 @@ export default function HomePage() {
       </section>
 
       <section id="yaru-spirit" className="panel home-snapshot">
-        <h2>Chirin Ivatan is built by the Ivatans for the Ivatans, with the timeold spirit of Yaru.</h2>
-
-        <div className="home-snapshot-stats">
-          <article className="panel stat-panel">
-            <button
-              className="winner-card-main winner-card-button"
-              onClick={() => navigate(`${ROUTES.profileView}?username=${encodeURIComponent(topContributor.username)}`)}
-            >
-              {topContributor.profile_photo ? (
-                <img className="winner-avatar" src={topContributor.profile_photo} alt="" />
-              ) : (
-                <SampleProfilePhoto
-                  className="winner-avatar"
-                  index={topContributor.profile_photo_index ?? sampleProfilePhoto(topContributor.username)}
-                />
-              )}
-              <div>
-                <p className="stat-value">{contributorLabel(topContributor)}</p>
-                <p className="meta">@{topContributor.username}</p>
-              </div>
-            </button>
-            <h3>Top Contributor of the Month</h3>
-            <p className="muted">{topContributor.municipality || 'Batanes'} municipality</p>
-          </article>
-          <article className="panel stat-panel">
-            <div className="winner-card-main">
-              <span className="municipality-flag" aria-hidden="true">
-                &#128681;
-              </span>
-              <p className="stat-value">{leadingMunicipality.municipality}</p>
-            </div>
-            <h3>Top Municipality of the Month</h3>
-            <p className="muted">Score: {leadingMunicipality.score || leadingMunicipality.value}</p>
-          </article>
-          <article className="panel stat-panel archive-count-card">
+        <div className="snapshot-intro">
+          <div>
+            <h2>
+              <em>"Built by the Ivatans, for the Ivatans, with the enduring spirit of Yaru."</em>
+            </h2>
+          </div>
+          <article className="archive-count-card archive-count-inline">
             <div className="archive-count-grid">
               <div>
-                <p className="stat-label">Existing Approved Terms</p>
                 <p className="stat-value">{archiveCounts.dictionaryApproved}</p>
+                <p className="stat-label">Dictionary Terms</p>
               </div>
               <div>
-                <p className="stat-label">Existing Approved Folklore</p>
                 <p className="stat-value">{archiveCounts.folkloreApproved}</p>
+                <p className="stat-label">Folklore Entries</p>
               </div>
             </div>
-            <button className="ghost" onClick={() => navigate(ROUTES.leaderboards)}>
-              Open Leaderboards
-            </button>
+            <h3>Total Live Entries as of {todayLabel}</h3>
           </article>
         </div>
 
         <div className="home-snapshot-grid">
-          <article className="panel">
-            <div className="section-heading">
-              <h3>Top 8 Contributors per Municipality</h3>
-              <div className="field">
-                <label htmlFor="home-municipality-filter">Municipality</label>
-                <select
-                  id="home-municipality-filter"
-                  value={leaderMunicipality}
-                  onChange={(event) => setLeaderMunicipality(event.target.value)}
-                >
-                  {municipalityOptions.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
+          <div className="home-snapshot-main">
+            <article className="panel top-municipality-card">
+              <div className="top-municipality-card-left">
+                <div className="top-municipality-flag-wrap">
+                  {topMunicipalityFlag ? (
+                    <img className="municipality-flag" src={topMunicipalityFlag} alt="" />
+                  ) : (
+                    <span className="municipality-flag" aria-hidden="true">
+                      {topMunicipalitySummary.municipality?.slice(0, 1) || 'Y'}
+                    </span>
+                  )}
+                </div>
+                <div className="top-municipality-text">
+                  <h3>Top Contributor Municipality</h3>
+                  <p className="stat-value">{topMunicipalitySummary.municipality}</p>
+                  <p className="meta">Score: {topMunicipalitySummary.score}</p>
+                </div>
               </div>
-            </div>
-            <div className="table-wrap">
-              <table className="simple-table">
-                <thead>
-                  <tr>
-                    <th>Rank</th>
-                    <th>Contributor</th>
-                    <th>Municipality</th>
-                    <th>Monthly Value</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {topEightMunicipality.map((row) => (
-                    <tr key={`${row.username}-${row.municipality}`}>
-                      <td>{row.rank}</td>
-                      <td>
-                        <button
-                          className="leaderboard-person leaderboard-person-button"
-                          onClick={() => navigate(`${ROUTES.profileView}?username=${encodeURIComponent(row.username)}`)}
-                        >
-                          {row.profile_photo ? (
-                            <img className="leaderboard-avatar" src={row.profile_photo} alt="" />
-                          ) : (
-                            <SampleProfilePhoto
-                              className="leaderboard-avatar"
-                              index={row.profile_photo_index ?? sampleProfilePhoto(row.username)}
-                            />
-                          )}
-                          <span className="leaderboard-person-text">
-                            <span>{contributorLabel(row)}</span>
-                            <span className="meta">@{row.username}</span>
+              <div className="top-municipality-card-right">
+                <ol className="municipality-rank-list">
+                  {municipalityRankList.map((row) => {
+                    const flag = getMunicipalityFlag(row.municipality)
+                    return (
+                      <li key={row.municipality} className="municipality-rank-item">
+                        <span className="municipality-rank-number">{row.rank}</span>
+                        {flag ? (
+                          <img className="municipality-flag municipality-flag-small" src={flag} alt="" />
+                        ) : (
+                          <span className="municipality-flag municipality-flag-small" aria-hidden="true">
+                            {row.municipality?.slice(0, 1) || 'M'}
                           </span>
-                        </button>
-                      </td>
-                      <td>{row.municipality || 'Not set'}</td>
-                      <td>{row.value}</td>
+                        )}
+                        <span className="municipality-rank-name">{row.municipality}</span>
+                        <span className="municipality-rank-score">{row.score}</span>
+                      </li>
+                    )
+                  })}
+                </ol>
+              </div>
+            </article>
+            <article className="panel leaderboard-panel">
+              <div className="section-heading">
+                <div>
+                  <h3>Top {currentMonthLabel} Contributors</h3>
+                </div>
+                <div className="field">
+                  <label htmlFor="home-municipality-filter">Municipality</label>
+                  <select
+                    id="home-municipality-filter"
+                    value={leaderMunicipality}
+                    onChange={(event) => setLeaderMunicipality(event.target.value)}
+                  >
+                    {municipalityOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="table-wrap">
+                <table className="simple-table">
+                  <thead>
+                    <tr>
+                      <th>Rank</th>
+                      <th>Contributor</th>
+                      <th>Municipality</th>
+                      <th>Score</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </article>
-
-          <aside className="visitor-sidepanels">
+                  </thead>
+                  <tbody>
+                    {topFiveMunicipality.length === 0 && (
+                      <tr>
+                        <td colSpan="4">No contributor rankings yet.</td>
+                      </tr>
+                    )}
+                    {topFiveMunicipality.map((row) => (
+                      <tr key={`${row.username}-${row.municipality}`}>
+                        <td>{row.rank}</td>
+                        <td>
+                          <button
+                            className="leaderboard-person leaderboard-person-button"
+                            onClick={() => navigate(`${ROUTES.profileView}?username=${encodeURIComponent(row.username)}`)}
+                          >
+                            {row.profile_photo ? (
+                              <img className="leaderboard-avatar" src={row.profile_photo} alt="" />
+                            ) : (
+                              <span className="leaderboard-avatar leaderboard-avatar-fallback" aria-hidden="true">
+                                {String(row.username || 'CI').slice(0, 2).toUpperCase()}
+                              </span>
+                            )}
+                            <span className="leaderboard-person-text">
+                              <span>{contributorLabel(row)}</span>
+                              <span className="meta">@{row.username}</span>
+                            </span>
+                          </button>
+                        </td>
+                        <td>{row.municipality || 'Not set'}</td>
+                        <td>{row.value}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <button className="quiet-link-button leaderboard-panel-link" onClick={() => navigate(ROUTES.leaderboards)}>
+                View Full Leaderboard
+              </button>
+            </article>
+          </div>
+          <aside className="visitor-sidepanels latest-entry-column">
             <article className="panel">
               <div className="section-heading">
-                <h3>Latest Approved Dictionary Entries</h3>
-                <span className="meta">Approved: {archiveCounts.dictionaryApproved}</span>
+                <div>
+                  <h3>Latest in Dictionary</h3>
+                </div>
               </div>
               <div className="card-list">
+                {latestDictionary.length === 0 && <p className="muted">No published dictionary terms yet.</p>}
                 {latestDictionary.map((row) => (
-                  <article key={row.entry_id || row.term} className="queue-card">
+                  <button
+                    key={row.entry_id || row.term}
+                    className="queue-card queue-card-link"
+                    type="button"
+                    onClick={() => openDictionaryEntry(row)}
+                  >
                     <div className="queue-header">
                       <strong>{row.term}</strong>
-                      <span className="badge">{row.status}</span>
                     </div>
                     <p className="entry-summary">{shortenText(row.meaning)}</p>
                     <p className="meta">
-                      {row.part_of_speech || 'Word type not set'} | {formatContributionDate(row.created_at)}
+                      {row.part_of_speech || 'Entry'} · {formatPublicDate(row.created_at)}
                     </p>
-                  </article>
+                  </button>
                 ))}
               </div>
             </article>
             <article className="panel">
               <div className="section-heading">
-                <h3>Latest Approved Folklore Entries</h3>
-                <span className="meta">Approved: {archiveCounts.folkloreApproved}</span>
+                <div>
+                  <h3>Latest in Folklore</h3>
+                </div>
               </div>
               <div className="card-list">
+                {latestFolklore.length === 0 && <p className="muted">No published folklore entries yet.</p>}
                 {latestFolklore.map((row) => (
-                  <article key={row.entry_id || row.title} className="queue-card">
+                  <button
+                    key={row.entry_id || row.title}
+                    className="queue-card queue-card-link"
+                    type="button"
+                    onClick={() => openFolkloreEntry(row)}
+                  >
                     <div className="queue-header">
                       <strong>{row.title}</strong>
-                      <span className="badge">{row.status}</span>
                     </div>
                     <p className="meta">
-                      {row.category || 'Type not set'} | {formatContributionDate(row.created_at)}
+                      {folkloreTaxonomyLabel(row.category, row.subcategory) || 'Story'} · {formatPublicDate(row.created_at)}
                     </p>
-                  </article>
+                  </button>
                 ))}
               </div>
             </article>
           </aside>
         </div>
+        {!hasClosingContent && <LandingFooter />}
       </section>
 
-      <section className="panel home-closing-slide">
-        <div>
-          <h2>Commendations</h2>
-          <div className="testimonial-grid">
-            {SAMPLE_TESTIMONIES.map((item) => (
-              <article key={item.author} className="step-card">
-                <p>{item.quote}</p>
-                <p className="muted">{item.author}</p>
-              </article>
-            ))}
-          </div>
-        </div>
-
-        <div>
-          <h2>Partner Organizations</h2>
-          <div className="partner-grid">
-            {SAMPLE_PARTNERS.map((partner) => (
-              <div key={partner.name} className="partner-logo">
-                <span className="partner-logo-mark" aria-hidden="true">
-                  {partner.initials}
-                </span>
-                <span className="partner-agency-name">{partner.name}</span>
+      {hasClosingContent && (
+        <section className="panel home-closing-slide">
+          {visibleSupportStatements.length > 0 && (
+            <section className="recommendation-section">
+              <div className="recommendation-header">
+                <h2>Statements of Support</h2>
               </div>
-            ))}
-          </div>
-        </div>
+              <div className="recommendation-stack">
+                {visibleSupportStatements.map((statement, index) => (
+                  <article key={`home-support-${index}`} className="recommendation-card">
+                    <span className="recommendation-quote-mark" aria-hidden="true">"</span>
+                    {statement.quote && <p className="recommendation-copy">{statement.quote}</p>}
+                    {(statement.name || statement.role) && (
+                      <p className="recommendation-source">
+                        <span className="recommendation-logo" aria-hidden="true">CI</span>
+                        {[statement.name, statement.role].filter(Boolean).join(' · ')}
+                      </p>
+                    )}
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
 
-        <footer className="visitor-footer">
-          Copyright © Kristelle Joyce Adami. This work may be shared for non-commercial purposes only.
-        </footer>
-      </section>
-    </main>
+          {visiblePartnerDetails.length > 0 && (
+            <section className="partner-strip-section">
+              <h2>Partners</h2>
+              <div className="partner-grid">
+                {visiblePartnerDetails.map((partner, index) => (
+                  <a
+                    key={`home-partner-${index}`}
+                    className="partner-logo"
+                    href={partner.url || undefined}
+                    target={partner.url ? '_blank' : undefined}
+                    rel={partner.url ? 'noreferrer' : undefined}
+                  >
+                    <span className="partner-logo-mark" aria-hidden="true">
+                      {(partner.name || 'Partner').slice(0, 2).toUpperCase()}
+                    </span>
+                    <span className="partner-agency-name">{partner.name || 'Partner'}</span>
+                    {partner.description && <span className="meta">{partner.description}</span>}
+                  </a>
+                ))}
+              </div>
+            </section>
+          )}
+
+          <LandingFooter />
+        </section>
+      )}
+    </div>
   )
 }

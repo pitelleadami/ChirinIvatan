@@ -360,6 +360,11 @@ class FolkloreContributorApiTests(TestCase):
         revision = FolkloreRevision.objects.get(id=response.json()["revision_id"])
         self.assertTrue(bool(revision.photo_upload))
         self.assertTrue(bool(revision.audio_upload))
+        list_response = self.client.get("/api/folklore/revisions/my")
+        self.assertEqual(list_response.status_code, 200)
+        row = list_response.json()["rows"][0]
+        self.assertIn("/media/folklore/photos/", row["photo_upload_url"])
+        self.assertIn("/media/folklore/audio/", row["audio_upload_url"])
 
     def test_create_draft_legacy_entries_route_still_works(self):
         self.client.force_login(self.owner)

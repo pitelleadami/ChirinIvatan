@@ -14,6 +14,40 @@ from django.db import models
 from django.core.exceptions import ValidationError
 
 
+FOLKLORE_SUBCATEGORIES_BY_CATEGORY = {
+    "oral_narratives": {"myths", "legends", "folktales", "oral_histories"},
+    "wisdom_expressions": {"proverbs", "idioms", "riddles"},
+    "songs_poetry": {"laji", "songs", "childrens_rhymes", "poems"},
+    "beliefs_ritual_life": {"beliefs", "rituals", "prayers"},
+    "traditional_knowledge": {
+        "fishing_knowledge",
+        "agriculture",
+        "boatbuilding",
+        "architecture",
+        "folk_medicine",
+        "weather_knowledge",
+        "crafts",
+    },
+}
+
+LEGACY_FOLKLORE_CATEGORY_MAP = {
+    "myth": ("oral_narratives", "myths"),
+    "legend": ("oral_narratives", "legends"),
+    "proverb": ("wisdom_expressions", "proverbs"),
+    "idiom": ("wisdom_expressions", "idioms"),
+    "laji": ("songs_poetry", "laji"),
+    "poem": ("songs_poetry", "poems"),
+}
+
+
+def normalize_folklore_taxonomy(data):
+    category, subcategory = LEGACY_FOLKLORE_CATEGORY_MAP.get(str(data.get("category", "")).strip(), (None, None))
+    if category:
+        data["category"] = category
+        data["subcategory"] = data.get("subcategory") or subcategory
+    return data
+
+
 class FolkloreEntry(models.Model):
     """
     Live/public folklore entry.
@@ -36,12 +70,34 @@ class FolkloreEntry(models.Model):
         DELETED = 'deleted', 'Deleted'
 
     class Category(models.TextChoices):
-        MYTH = 'myth', 'Myth'
-        LEGEND = 'legend', 'Legend'
-        LAJI = 'laji', 'Laji'
-        POEM = 'poem', 'Poem'
-        PROVERB = 'proverb', 'Proverb'
-        IDIOM = 'idiom', 'Idiom'
+        ORAL_NARRATIVES = "oral_narratives", "Oral Narratives"
+        WISDOM_EXPRESSIONS = "wisdom_expressions", "Wisdom and Expressions"
+        SONGS_POETRY = "songs_poetry", "Songs and Poetry"
+        BELIEFS_RITUAL_LIFE = "beliefs_ritual_life", "Beliefs and Ritual Life"
+        TRADITIONAL_KNOWLEDGE = "traditional_knowledge", "Traditional Knowledge"
+
+    class Subcategory(models.TextChoices):
+        MYTHS = "myths", "Myths"
+        LEGENDS = "legends", "Legends"
+        FOLKTALES = "folktales", "Folktales"
+        ORAL_HISTORIES = "oral_histories", "Oral Histories"
+        PROVERBS = "proverbs", "Proverbs"
+        IDIOMS = "idioms", "Idioms"
+        RIDDLES = "riddles", "Riddles"
+        LAJI = "laji", "Laji"
+        SONGS = "songs", "Songs"
+        CHILDRENS_RHYMES = "childrens_rhymes", "Children's Rhymes"
+        POEMS = "poems", "Poems"
+        BELIEFS = "beliefs", "Beliefs"
+        RITUALS = "rituals", "Rituals"
+        PRAYERS = "prayers", "Prayers"
+        FISHING_KNOWLEDGE = "fishing_knowledge", "Fishing Knowledge"
+        AGRICULTURE = "agriculture", "Agriculture"
+        BOATBUILDING = "boatbuilding", "Boatbuilding"
+        ARCHITECTURE = "architecture", "Architecture"
+        FOLK_MEDICINE = "folk_medicine", "Folk Medicine"
+        WEATHER_KNOWLEDGE = "weather_knowledge", "Weather Knowledge"
+        CRAFTS = "crafts", "Crafts"
 
     class MunicipalitySource(models.TextChoices):
         BASCO = "Basco", "Basco"
@@ -56,7 +112,8 @@ class FolkloreEntry(models.Model):
 
     title = models.CharField(max_length=255)
     content = models.TextField()
-    category = models.CharField(max_length=20, choices=Category.choices)
+    category = models.CharField(max_length=40, choices=Category.choices)
+    subcategory = models.CharField(max_length=40, choices=Subcategory.choices, blank=True, default="")
     municipality_source = models.CharField(
         max_length=32,
         choices=MunicipalitySource.choices,
@@ -91,6 +148,12 @@ class FolkloreEntry(models.Model):
     def save(self, *args, **kwargs):
         # Always validate before persisting.
         update_fields = kwargs.get("update_fields")
+        normalized = normalize_folklore_taxonomy({"category": self.category, "subcategory": self.subcategory})
+        previous_subcategory = self.subcategory
+        self.category = normalized.get("category", self.category)
+        self.subcategory = normalized.get("subcategory", self.subcategory)
+        if update_fields is not None and self.subcategory != previous_subcategory and "subcategory" not in update_fields:
+            kwargs["update_fields"] = list(update_fields) + ["subcategory"]
         self.clean()
 
         if (
@@ -120,6 +183,16 @@ class FolkloreEntry(models.Model):
 
     def clean(self):
         # Controlled-choice validation.
+        valid_categories = {choice for choice, _ in self.Category.choices}
+        if self.category not in valid_categories:
+            raise ValidationError("Invalid category value.")
+
+        valid_subcategories = {choice for choice, _ in self.Subcategory.choices}
+        if self.subcategory and self.subcategory not in valid_subcategories:
+            raise ValidationError("Invalid subcategory value.")
+        if self.subcategory and self.subcategory not in FOLKLORE_SUBCATEGORIES_BY_CATEGORY.get(self.category, set()):
+            raise ValidationError("Subcategory does not belong to selected category.")
+
         valid_municipalities = {choice for choice, _ in self.MunicipalitySource.choices}
         if self.municipality_source not in valid_municipalities:
             raise ValidationError("Invalid municipality_source value.")
@@ -135,6 +208,14 @@ class FolkloreEntry(models.Model):
 
     def __str__(self):
         return self.title
+
+
+setattr(FolkloreEntry.Category, "MYTH", "myth")
+setattr(FolkloreEntry.Category, "LEGEND", "legend")
+setattr(FolkloreEntry.Category, "LAJI", "laji")
+setattr(FolkloreEntry.Category, "POEM", "poem")
+setattr(FolkloreEntry.Category, "PROVERB", "proverb")
+setattr(FolkloreEntry.Category, "IDIOM", "idiom")
 
 
 class FolkloreRevision(models.Model):

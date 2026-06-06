@@ -138,6 +138,8 @@ Folklore entries have **no variants**. Each one stands on its own.
 ## 6.3 Conditional source rules
 - if `self_knowledge = true`, source may be optional
 - if media is self-produced, media source may be optional
+- source and usage/copyright permission are shown together because they describe provenance and reuse rights
+- uploaded photos must be at least `200px x 200px`
 
 ## 6.4 License behavior
 If copyright/license is blank at approval time, default is stored:
@@ -169,6 +171,9 @@ When flagged:
 - it may remain visible as `APPROVED_UNDER_REVIEW`
 - reviewers/admins reassess it
 - outcome can restore or reject status
+- flagging is done from the live Dictionary/Folklore entry detail page, not from the Reviews tab
+- reviewer/admin users must provide notes or justification when flagging
+- reviewers/admins cannot review or flag their own submissions
 
 What you should do:
 - read notes carefully

@@ -1,5 +1,11 @@
 from django.db import transaction
 from django.utils import timezone
+from dictionary.field_groups import (
+    ENTRY_SNAPSHOT_FIELDS,
+    MEDIA_FIELDS,
+    SEMANTIC_CORE_FIELDS,
+    VARIANT_SPECIFIC_FIELDS,
+)
 from dictionary.models import Entry, EntryRevision, EntryStatus
 from dictionary.state_machine import validate_transition
 from dictionary.variant_services import ensure_group_and_mother, maybe_promote_general_ivatan
@@ -9,51 +15,149 @@ from dictionary.variant_services import ensure_group_and_mother, maybe_promote_g
 # - Takes approved revisions and applies them to live entries.
 # - Preserves base snapshot and revision retention rules.
 # - Keeps mother/variant group state in sync after publish.
-ENTRY_SNAPSHOT_FIELDS = (
-    "term",
-    "meaning",
-    "part_of_speech",
-    "photo",
-    "photo_source",
-    "photo_source_is_contributor_owned",
-    "english_synonym",
-    "ivatan_synonym",
-    "english_antonym",
-    "ivatan_antonym",
-    "pronunciation_text",
-    "phonetic",
-    "audio_pronunciation",
-    "audio_source",
-    "audio_source_is_self_recorded",
-    "variant_type",
-    "usage_notes",
-    "etymology",
-    "example_sentence",
-    "example_translation",
-    "source_text",
-    "term_source_is_self_knowledge",
-    "inflected_forms",
-)
-
 REVISION_HISTORY_LIMITS = {
     "public": 5,
     "staff": 15,  # reviewers/admins
 }
 
 
+def _semantic_source_entry(entry: Entry) -> Entry:
+    """
+    Return the entry that owns shared semantic fields.
+    """
+
+    if entry.is_mother:
+        return entry
+
+    group = entry.variant_group
+    if not group or not group.mother_entry:
+        return entry
+
+    return group.mother_entry
+
+
+def _field_snapshot_value(entry: Entry, field: str):
+    value = getattr(entry, field)
+    if field in MEDIA_FIELDS:
+        return value.name if value else ""
+    return value
+
+
 def _snapshot_entry(entry: Entry) -> dict:
     """
     Build a JSON-serializable snapshot of editable entry content.
+
+    Variant revisions use the clicked variant for variant-specific fields,
+    but inherit semantic core fields from the mother term. That matches the
+    public dictionary display and prevents variants from silently carrying
+    their own separate meaning/part-of-speech data.
     """
 
+    semantic_entry = _semantic_source_entry(entry)
     snapshot = {}
     for field in ENTRY_SNAPSHOT_FIELDS:
-        value = getattr(entry, field)
-        if field in {"photo", "audio_pronunciation"}:
-            snapshot[field] = value.name if value else ""
-        else:
-            snapshot[field] = value
+        source = semantic_entry if field in SEMANTIC_CORE_FIELDS else entry
+        snapshot[field] = _field_snapshot_value(source, field)
     return snapshot
+
+
+def _assign_if_changed(*, target: Entry, field: str, value, update_fields: set):
+    """
+    Assign a field only when the stored value actually changes.
+    """
+
+    if _field_snapshot_value(target, field) == value:
+        return
+    setattr(target, field, value)
+    update_fields.add(field)
+
+
+def _build_variant_create_kwargs(*, variant_data: dict, semantic_entry: Entry, revision):
+    """
+    Build a live Entry payload for an additional variant submitted with a draft.
+    """
+
+    create_kwargs = {
+        "term": str(variant_data.get("term") or "").strip(),
+        "status": EntryStatus.APPROVED,
+        "variant_group": semantic_entry.variant_group,
+        "is_mother": False,
+        "initial_contributor": revision.contributor,
+        "last_revised_by": revision.contributor,
+        "last_approved_at": timezone.now(),
+        "photo_contributor": semantic_entry.photo_contributor,
+    }
+
+    for field in SEMANTIC_CORE_FIELDS:
+        create_kwargs[field] = _field_snapshot_value(semantic_entry, field)
+
+    for field in VARIANT_SPECIFIC_FIELDS:
+        if field == "term":
+            continue
+        if field in variant_data:
+            create_kwargs[field] = variant_data[field]
+
+    if variant_data.get("audio_pronunciation"):
+        create_kwargs["audio_contributor"] = revision.contributor
+
+    return create_kwargs
+
+
+def _create_additional_variants(*, entry: Entry, revision, approvers) -> list[Entry]:
+    """
+    Publish extra variant rows carried in revision.proposed_data["variants"].
+    """
+
+    variants = revision.proposed_data.get("variants") or []
+    if not variants:
+        return []
+
+    ensure_group_and_mother(entry=entry)
+    entry.refresh_from_db()
+    semantic_entry = _semantic_source_entry(entry)
+    if not semantic_entry.variant_group_id:
+        ensure_group_and_mother(entry=semantic_entry)
+        semantic_entry.refresh_from_db()
+
+    created = []
+    group = semantic_entry.variant_group
+    for variant_data in variants:
+        if not isinstance(variant_data, dict):
+            continue
+        term = str(variant_data.get("term") or "").strip()
+        if not term:
+            continue
+
+        variant_type = str(variant_data.get("variant_type") or "").strip()
+        duplicate = group.entries.filter(
+            term__iexact=term,
+            variant_type__iexact=variant_type,
+            status__in=[EntryStatus.APPROVED, EntryStatus.APPROVED_UNDER_REVIEW],
+        ).first()
+        if duplicate:
+            continue
+
+        variant_entry = Entry.objects.create(
+            **_build_variant_create_kwargs(
+                variant_data=variant_data,
+                semantic_entry=semantic_entry,
+                revision=revision,
+            )
+        )
+        variant_entry.last_approved_by.set(approvers)
+        maybe_promote_general_ivatan(entry=variant_entry)
+
+        EntryRevision.objects.create(
+            entry=variant_entry,
+            contributor=revision.contributor,
+            proposed_data=_snapshot_entry(variant_entry),
+            status=EntryRevision.Status.APPROVED,
+            approved_at=revision.approved_at or timezone.now(),
+            is_base_snapshot=True,
+        )
+        created.append(variant_entry)
+
+    return created
 
 
 def get_visible_revision_history(*, entry: Entry, audience: str = "public") -> dict:
@@ -214,8 +318,9 @@ def publish_revision(*, revision, approvers):
 
     else:
         entry = revision.entry
+        semantic_entry = _semantic_source_entry(entry)
         old_audio = entry.audio_pronunciation.name if entry.audio_pronunciation else ""
-        old_photo = entry.photo.name if entry.photo else ""
+        old_photo = semantic_entry.photo.name if semantic_entry.photo else ""
         validate_transition(
             entry.status,
             EntryStatus.APPROVED,
@@ -223,18 +328,45 @@ def publish_revision(*, revision, approvers):
             entity_name="DictionaryEntry",
         )
 
-        entry.term = term
+        now = timezone.now()
+        entry_update_fields = set()
+        semantic_update_fields = set()
+
+        _assign_if_changed(
+            target=entry,
+            field="term",
+            value=term,
+            update_fields=entry_update_fields,
+        )
         entry.last_revised_by = revision.contributor
         entry.status = EntryStatus.APPROVED
-        entry.last_approved_at = timezone.now()
+        entry.last_approved_at = now
+        entry_update_fields.update({"last_revised_by", "status", "last_approved_at"})
 
-        update_fields = ["term", "last_revised_by", "status", "last_approved_at"]
-        for field in ENTRY_SNAPSHOT_FIELDS:
+        for field in VARIANT_SPECIFIC_FIELDS:
             if field == "term":
                 continue
             if field in data:
-                setattr(entry, field, data[field])
-                update_fields.append(field)
+                _assign_if_changed(
+                    target=entry,
+                    field=field,
+                    value=data[field],
+                    update_fields=entry_update_fields,
+                )
+
+        for field in SEMANTIC_CORE_FIELDS:
+            if field in data:
+                _assign_if_changed(
+                    target=semantic_entry,
+                    field=field,
+                    value=data[field],
+                    update_fields=semantic_update_fields,
+                )
+
+        if semantic_update_fields:
+            semantic_entry.last_revised_by = revision.contributor
+            semantic_entry.last_approved_at = now
+            semantic_update_fields.update({"last_revised_by", "last_approved_at"})
 
         # If active media changed in this approved revision, update
         # the media contributor attribution to the revising user.
@@ -242,14 +374,22 @@ def publish_revision(*, revision, approvers):
             new_audio = entry.audio_pronunciation.name if entry.audio_pronunciation else ""
             if new_audio != old_audio:
                 entry.audio_contributor = revision.contributor
-                update_fields.append("audio_contributor")
+                entry_update_fields.add("audio_contributor")
         if "photo" in data:
-            new_photo = entry.photo.name if entry.photo else ""
+            new_photo = semantic_entry.photo.name if semantic_entry.photo else ""
             if new_photo != old_photo:
-                entry.photo_contributor = revision.contributor
-                update_fields.append("photo_contributor")
+                semantic_entry.photo_contributor = revision.contributor
+                semantic_update_fields.add("photo_contributor")
 
-        entry.save(update_fields=update_fields)
+        if semantic_entry.id == entry.id:
+            entry_update_fields.update(semantic_update_fields)
+            if entry_update_fields:
+                entry.save(update_fields=sorted(entry_update_fields))
+        else:
+            if semantic_update_fields:
+                semantic_entry.save(update_fields=sorted(semantic_update_fields))
+            if entry_update_fields:
+                entry.save(update_fields=sorted(entry_update_fields))
 
     # -------------------------------------------------------
     # Update approval metadata
@@ -259,6 +399,7 @@ def publish_revision(*, revision, approvers):
     entry.last_approved_by.set(approvers)
     ensure_group_and_mother(entry=entry)
     maybe_promote_general_ivatan(entry=entry)
+    _create_additional_variants(entry=entry, revision=revision, approvers=approvers)
 
     return entry
 

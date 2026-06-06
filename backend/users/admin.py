@@ -8,7 +8,9 @@ from users.models import (
     RecognitionEvent,
     RoleApplication,
     RoleApplicationDecision,
+    RoleInvitation,
     RoleOnboardingRecord,
+    SiteContentSettings,
     UserContributionStats,
     UserProfile,
 )
@@ -30,8 +32,26 @@ If you add a new user-facing model in users app:
 class UserProfileAdmin(admin.ModelAdmin):
     """Manage user profile metadata shown in public profile pages."""
 
-    list_display = ("user", "municipality", "affiliation", "occupation")
-    search_fields = ("user__username", "municipality", "affiliation", "occupation")
+    list_display = (
+        "user",
+        "post_nominals",
+        "municipality",
+        "include_in_leaderboard",
+        "show_on_yaru_chart",
+        "show_live_contributions",
+        "affiliation",
+        "occupation",
+    )
+    list_filter = ("include_in_leaderboard", "show_on_yaru_chart", "show_live_contributions")
+    search_fields = ("user__username", "post_nominals", "municipality", "affiliation", "occupation")
+
+
+@admin.register(SiteContentSettings)
+class SiteContentSettingsAdmin(admin.ModelAdmin):
+    """Edit public page copy and public relationship sections."""
+
+    list_display = ("key", "updated_by", "updated_at")
+    readonly_fields = ("updated_at",)
 
 
 @admin.register(ContributionEvent)
@@ -68,6 +88,15 @@ class RoleOnboardingRecordAdmin(admin.ModelAdmin):
     list_display = ("user", "role", "method", "invited_by", "created_at")
     list_filter = ("role", "method")
     search_fields = ("user__username", "invited_by__username")
+
+
+@admin.register(RoleInvitation)
+class RoleInvitationAdmin(admin.ModelAdmin):
+    """Inspect email invitations that bypass role application quorum."""
+
+    list_display = ("email", "role", "status", "invited_by", "created_at", "expires_at", "accepted_at")
+    list_filter = ("role", "status")
+    search_fields = ("email", "invited_by__username", "accepted_by__username")
 
 
 @admin.register(UserContributionStats)

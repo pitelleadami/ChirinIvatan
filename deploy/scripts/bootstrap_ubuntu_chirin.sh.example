@@ -93,9 +93,7 @@ cd "${BACKEND_ROOT}"
 "${PYTHON_BIN}" -m venv "${VENV_PATH}"
 source "${VENV_PATH}/bin/activate"
 pip install --upgrade pip
-# Install Django stack dependencies inferred from project usage.
-# If you later add requirements files, switch to: pip install -r requirements.txt
-pip install django gunicorn psycopg2-binary pillow
+pip install -r "${PROJECT_ROOT}/requirements.txt"
 
 echo "[7/10] Preparing frontend dependencies and build"
 cd "${FRONTEND_ROOT}"

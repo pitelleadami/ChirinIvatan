@@ -309,3 +309,17 @@ TSWLatexianTemp*
 
 # Virtual environment
 venv/
+
+# Python / Django generated files
+__pycache__/
+*.py[cod]
+*.sqlite3
+db.sqlite3
+backend/db.sqlite3
+backend/staticfiles/
+
+# Local uploads and generated media should be handled by production storage/backups.
+backend/media/
+
+# macOS / editor noise
+.DS_Store

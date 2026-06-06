@@ -1,23 +1,6 @@
 import { useState } from 'react'
 
-const STORAGE_KEY = 'chirin_ivatan_submission_count'
 const MILESTONES = new Set([1, 5, 10, 25, 50, 100])
-
-function safeSubmissionCount() {
-  try {
-    return Number.parseInt(window.localStorage.getItem(STORAGE_KEY) || '0', 10) || 0
-  } catch {
-    return 0
-  }
-}
-
-function saveSubmissionCount(count) {
-  try {
-    window.localStorage.setItem(STORAGE_KEY, String(count))
-  } catch {
-    // Celebration should never block a successful contribution.
-  }
-}
 
 function playContributionChime(isMilestone) {
   const AudioContextCtor = window.AudioContext || window.webkitAudioContext
@@ -48,6 +31,7 @@ function playContributionChime(isMilestone) {
 
 function buildCelebration(kind, count) {
   const label = kind === 'folklore' ? 'story' : 'word'
+  const pluralLabel = kind === 'folklore' ? 'stories' : 'words'
   const isFirst = count === 1
   const isMilestone = MILESTONES.has(count)
 
@@ -55,7 +39,7 @@ function buildCelebration(kind, count) {
     return {
       count,
       isMilestone: true,
-      eyebrow: 'First contribution submitted',
+      eyebrow: `First ${label} submitted`,
       title: 'You are a Cultural Bearer',
       message: `Your first ${label} has entered the Chirin Ivatan review path. Thank you for helping carry Ivatan memory forward.`,
       badge: 'Cultural Bearer',
@@ -66,9 +50,9 @@ function buildCelebration(kind, count) {
     return {
       count,
       isMilestone: true,
-      eyebrow: `Milestone ${count}`,
+      eyebrow: `${count} ${pluralLabel} submitted`,
       title: 'Yaru Milestone Reached',
-      message: `You have submitted ${count} contributions. Every remembered word and story strengthens the archive.`,
+      message: `You have submitted ${count} ${pluralLabel}. Every remembered ${label} strengthens the archive.`,
       badge: 'Yaru Keeper',
     }
   }
@@ -83,20 +67,33 @@ function buildCelebration(kind, count) {
   }
 }
 
+function buildDraftSavedCelebration(kind) {
+  const label = kind === 'folklore' ? 'folklore draft' : 'dictionary draft'
+  return {
+    isMilestone: false,
+    eyebrow: 'Draft saved',
+    title: 'Draft Saved',
+    message: `Your ${label} has been saved. You can find it in Steward's Desk under Contributions.`,
+    badge: 'Saved Draft',
+  }
+}
+
 export function useContributionCelebration() {
   const [celebration, setCelebration] = useState(null)
 
-  function celebrateContribution(kind) {
-    const nextCount = safeSubmissionCount() + 1
-    saveSubmissionCount(nextCount)
-    const nextCelebration = buildCelebration(kind, nextCount)
+  function celebrateContribution(kind, submittedCount = 0) {
+    const nextCelebration = buildCelebration(kind, submittedCount)
     setCelebration(nextCelebration)
     playContributionChime(nextCelebration.isMilestone)
+  }
+
+  function celebrateDraftSaved(kind) {
+    setCelebration(buildDraftSavedCelebration(kind))
   }
 
   function closeCelebration() {
     setCelebration(null)
   }
 
-  return { celebration, celebrateContribution, closeCelebration }
+  return { celebration, celebrateContribution, celebrateDraftSaved, closeCelebration }
 }
