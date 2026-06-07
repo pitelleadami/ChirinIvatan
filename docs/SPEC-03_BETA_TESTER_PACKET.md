@@ -13,6 +13,7 @@ How to use this packet:
 - Give sections 1 to 12 to beta testers.
 - Use section 13 if the beta session needs a simple feedback permission statement.
 - Give sections 14 to 16 to the test coordinator.
+- Preserve all beta accounts, submissions, application records, reviews, and uploaded media after testing. Nothing may be deleted, archived, deactivated, or reset unless the project owner gives explicit approval.
 - Assign each tester one primary role. A tester may complete multiple roles only if the coordinator gives separate accounts and instructions.
 - Ask testers to report what happened naturally. Do not treat confusion as a tester mistake; confusion is product feedback.
 - Collect screenshots or screen recordings only when the tester is comfortable sharing them.
@@ -135,7 +136,7 @@ Please read before starting.
 10. Feedback can be honest. You are testing the system, not being tested yourself.
 11. Do not share your temporary password with anyone.
 12. Do not upload real private family stories, personal documents, or copyrighted media unless the coordinator specifically approved that content for beta testing.
-13. If you want your test content removed after testing, tell the coordinator.
+13. If you have a concern about test content, tell the coordinator. The coordinator must record the request but must not remove data without explicit project-owner approval.
 14. If a page says the site is under maintenance, report it unless the coordinator told you maintenance mode is part of the test.
 
 ---
@@ -798,8 +799,12 @@ Steps:
 2. Open admin override action.
 3. Try without notes and confirm it is blocked.
 4. Add notes.
-5. Force reject, restore approved, or archive as instructed.
+5. Force reject or restore approved as instructed.
 6. Confirm override appears in audit trail/status.
+7. Open the assigned public dictionary or folklore entry as an admin and use its admin-only Archive option.
+8. Confirm the archived entry disappears from the public list and appears in the Archive tab.
+9. Restore the assigned test entry from the Archive tab with notes and confirm it returns to approved status.
+10. Do not permanently delete the entry; archive is the reversible preservation workflow.
 
 Result:
 
@@ -1200,25 +1205,28 @@ After beta test:
 - [ ] separate bugs from suggestions
 - [ ] identify top 5 blockers
 - [ ] identify top 5 confusing screens
-- [ ] decide which test submissions to delete/archive/keep
+- [ ] preserve all test accounts, submissions, reviews, applications, and media
+- [ ] record any requested data changes for project-owner review
 - [ ] turn maintenance mode off if used
 - [ ] update QA checklist with findings
 
 ---
 
-## 15. Test Data Cleanup Checklist
+## 15. Test Data Preservation Checklist
 
-After beta testing, decide what happens to test accounts and test submissions.
+Beta test accounts and data are reusable QA fixtures and must be preserved. Do not delete, archive, deactivate, reset, or overwrite them unless the project owner gives explicit approval for a specific record.
 
 - [ ] list test usernames/accounts created for beta
 - [ ] list beta dictionary entries created
 - [ ] list beta folklore entries created
 - [ ] list uploaded media created during beta
 - [ ] list reviewer applications created during beta
-- [ ] delete clearly fake content if it should not remain in staging
-- [ ] archive useful test content if needed for future QA
-- [ ] remove media that testers requested to remove
-- [ ] reset temporary passwords or deactivate accounts no longer needed
+- [ ] list reviews and moderation decisions created during beta
+- [ ] retain all listed accounts and records for regression testing
+- [ ] label clearly fake records as beta/test data where supported
+- [ ] record requested removals or account changes without performing them
+- [ ] obtain explicit project-owner approval before any destructive data action
+- [ ] document the exact approved record and action before making a change
 - [ ] confirm maintenance mode is off
 - [ ] confirm site content edited during admin tests was restored
 

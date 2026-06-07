@@ -231,11 +231,11 @@ export default function App() {
           >
             <img
               className={isHome && hideHomeBrandText ? 'site-logo site-logo-hidden' : 'site-logo'}
-              src={brandLogo}
-              alt="Chirin Ivatan logo"
+              src={siteContent.brand_logo_url || brandLogo}
+              alt={`${siteContent.brand_name} logo`}
             />
             <div className={hideHomeBrandText ? 'brand-text brand-text-hidden' : 'brand-text'}>
-              <p className="brand">Chirin Ivatan</p>
+              <p className="brand">{siteContent.brand_name}</p>
             </div>
           </button>
           <button
@@ -307,12 +307,42 @@ export default function App() {
                   </div>
                   {canUseContributorTools && (
                     <div className="top-tools-section">
-                      <p>{canUseReviewerTools ? 'Review & Contribute' : 'Contribute'}</p>
-                      <button className="top-link-button top-tools-parent-link" onClick={() => closeMenusAndNavigate(ROUTES.adminApplications)}>
-                        Steward's Desk
+                      <p>{isAdminUser ? 'Admin Workspace' : canUseReviewerTools ? 'Review & Contribute' : 'Contribute'}</p>
+                      <button
+                        className="top-link-button top-tools-parent-link"
+                        onClick={() => closeMenusAndNavigate(isAdminUser ? `${ROUTES.adminApplications}?tab=overview` : ROUTES.adminApplications)}
+                      >
+                        {isAdminUser ? 'Admin Dashboard' : "Steward's Desk"}
                       </button>
-                      <div className="top-tools-subsection" aria-label="Steward's Desk sections">
-                        {canUseReviewerTools && (
+                      <div
+                        className="top-tools-subsection"
+                        aria-label={isAdminUser ? 'Admin workspace sections' : "Steward's Desk sections"}
+                      >
+                        {isAdminUser ? (
+                          <>
+                            <button className="top-link-button" onClick={() => closeMenusAndNavigate(`${ROUTES.adminApplications}?tab=overview`)}>
+                              Overview
+                            </button>
+                            <button className="top-link-button" onClick={() => closeMenusAndNavigate(`${ROUTES.adminApplications}?tab=reviews`)}>
+                              Reviews
+                            </button>
+                            <button className="top-link-button" onClick={() => closeMenusAndNavigate(`${ROUTES.adminApplications}?tab=applications`)}>
+                              Role Applications
+                            </button>
+                            <button className="top-link-button" onClick={() => closeMenusAndNavigate(`${ROUTES.adminApplications}?tab=people`)}>
+                              People & Accounts
+                            </button>
+                            <button className="top-link-button" onClick={() => closeMenusAndNavigate(`${ROUTES.adminApplications}?tab=archive`)}>
+                              Entry Archive
+                            </button>
+                            <button className="top-link-button" onClick={() => closeMenusAndNavigate(`${ROUTES.adminApplications}?tab=site`)}>
+                              Site Content
+                            </button>
+                            <button className="top-link-button" onClick={() => closeMenusAndNavigate(`${ROUTES.adminApplications}?tab=contributions`)}>
+                              Contributions
+                            </button>
+                          </>
+                        ) : canUseReviewerTools && (
                           <>
                             <button className="top-link-button" onClick={() => closeMenusAndNavigate(`${ROUTES.adminApplications}?tab=reviews`)}>
                               Reviews
@@ -413,13 +443,15 @@ export default function App() {
       {!isHome && !isLogin && !isMaintenanceMode && (
         <footer className="site-footer">
           <div className="site-footer-inner">
-            <span className="site-footer-left">© 2026 Chirin Ivatan.</span>
+            <span className="site-footer-left">{siteContent.footer_left_text}</span>
             <span className="site-footer-center">
-              <em>Developed for the preservation and continuity of the Ivatan language and heritage.</em>
+              <em>{siteContent.footer_center_text}</em>
             </span>
-            <span className="site-footer-right">Contact: chirinivatan@gmail.com</span>
+            <span className="site-footer-right">{siteContent.footer_right_text}</span>
             <span className="site-footer-mobile">
-              © 2026 Chirin Ivatan. Preserving Ivatan language and heritage. Contact: chirinivatan@gmail.com
+              {[siteContent.footer_left_text, siteContent.footer_center_text, siteContent.footer_right_text]
+                .filter(Boolean)
+                .join(' ')}
             </span>
           </div>
         </footer>

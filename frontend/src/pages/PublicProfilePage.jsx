@@ -308,6 +308,12 @@ export default function PublicProfilePage({ currentUser }) {
   const [shareFeedback, setShareFeedback] = useState('')
   const [leaderboardUpdating, setLeaderboardUpdating] = useState(false)
   const [showAllAchievements, setShowAllAchievements] = useState(false)
+  const [isFlagFormOpen, setIsFlagFormOpen] = useState(false)
+  const [accountFlagNotes, setAccountFlagNotes] = useState('')
+  const [accountFlagCaptcha, setAccountFlagCaptcha] = useState({ question: '', token: '' })
+  const [accountFlagCaptchaAnswer, setAccountFlagCaptchaAnswer] = useState('')
+  const [accountFlagLoading, setAccountFlagLoading] = useState(false)
+  const [accountFlagCaptchaLoading, setAccountFlagCaptchaLoading] = useState(false)
 
   async function loadProfile(explicitUsername = null) {
     const value = (explicitUsername || '').trim()
@@ -361,6 +367,11 @@ export default function PublicProfilePage({ currentUser }) {
     profile?.header?.username
       && currentUser?.is_authenticated
       && (currentUser?.is_superuser || currentUserGroups.includes('Admin')),
+  )
+  const canFlagSuspiciousAccount = Boolean(
+    profile?.header?.username
+      && currentUser?.is_authenticated
+      && profile.header.username !== currentUser.username,
   )
   const isIncludedInLeaderboard = profile?.header?.include_in_leaderboard !== false
   const allBadges = allBadgesFromProfile(profile)
@@ -441,6 +452,61 @@ export default function PublicProfilePage({ currentUser }) {
     }
   }
 
+  async function loadAccountFlagCaptcha() {
+    setAccountFlagCaptchaLoading(true)
+    try {
+      const payload = await apiRequest('/api/captcha/challenge')
+      setAccountFlagCaptcha({
+        question: payload.question || '',
+        token: payload.token || '',
+      })
+      setAccountFlagCaptchaAnswer('')
+    } catch (requestError) {
+      setError(requestError.message)
+    } finally {
+      setAccountFlagCaptchaLoading(false)
+    }
+  }
+
+  async function openAccountFlagForm() {
+    setError('')
+    setShareFeedback('')
+    setIsFlagFormOpen(true)
+    if (!accountFlagCaptcha.token) {
+      await loadAccountFlagCaptcha()
+    }
+  }
+
+  async function submitAccountFlag(event) {
+    event.preventDefault()
+    if (!profile?.header?.username) return
+    setAccountFlagLoading(true)
+    setError('')
+    setShareFeedback('')
+    try {
+      await apiRequest('/api/auth/csrf')
+      await apiRequest(`/api/users/${encodeURIComponent(profile.header.username)}/suspicious-flag`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          notes: accountFlagNotes,
+          captcha_token: accountFlagCaptcha.token,
+          captcha_answer: accountFlagCaptchaAnswer,
+        }),
+      })
+      setShareFeedback('Account flag sent for admin review.')
+      setIsFlagFormOpen(false)
+      setAccountFlagNotes('')
+      setAccountFlagCaptcha({ question: '', token: '' })
+      setAccountFlagCaptchaAnswer('')
+    } catch (requestError) {
+      setError(requestError.message)
+      await loadAccountFlagCaptcha()
+    } finally {
+      setAccountFlagLoading(false)
+    }
+  }
+
   return (
     <div className="public-profile-page">
       {error && <section className="alert error">{error}</section>}
@@ -506,8 +572,85 @@ export default function PublicProfilePage({ currentUser }) {
                   <span>{isIncludedInLeaderboard ? 'Leaderboard: included' : 'Leaderboard: hidden'}</span>
                 )}
               </div>
+              {canFlagSuspiciousAccount && (
+                <button
+                  type="button"
+                  className="public-profile-flag-button"
+                  onClick={openAccountFlagForm}
+                >
+                  Report suspicious account
+                </button>
+              )}
             </div>
           </section>
+
+          {canFlagSuspiciousAccount && isFlagFormOpen && (
+            <div
+              className="public-profile-flag-backdrop"
+              role="presentation"
+              onClick={accountFlagLoading ? undefined : () => setIsFlagFormOpen(false)}
+            >
+              <section
+                className="public-profile-flag-modal"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="public-profile-flag-title"
+                aria-describedby="public-profile-flag-description"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="public-profile-flag-heading">
+                  <div>
+                    <p className="profile-kicker">Account Safety</p>
+                    <h3 id="public-profile-flag-title">Flag suspicious account</h3>
+                    <p id="public-profile-flag-description" className="muted">
+                      Send this profile to admins for review. This does not hide, suspend, or change the account.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="ghost compact-button"
+                    disabled={accountFlagLoading}
+                    onClick={() => setIsFlagFormOpen(false)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+                <form className="public-profile-flag-form" onSubmit={submitAccountFlag}>
+                  <label className="field" htmlFor="public-profile-flag-notes">
+                    <span>Reason</span>
+                    <textarea
+                      id="public-profile-flag-notes"
+                      rows={3}
+                      value={accountFlagNotes}
+                      onChange={(event) => setAccountFlagNotes(event.target.value)}
+                      placeholder="Describe what looks suspicious or needs admin review."
+                    />
+                  </label>
+                  <div className="captcha-panel public-profile-flag-captcha">
+                    <div>
+                      <p className="profile-kicker">CAPTCHA</p>
+                      <p>{accountFlagCaptchaLoading ? 'Loading challenge...' : accountFlagCaptcha.question || 'Load a challenge to continue.'}</p>
+                    </div>
+                    <label className="field" htmlFor="public-profile-flag-captcha">
+                      <span>Answer</span>
+                      <input
+                        id="public-profile-flag-captcha"
+                        inputMode="numeric"
+                        value={accountFlagCaptchaAnswer}
+                        onChange={(event) => setAccountFlagCaptchaAnswer(event.target.value)}
+                      />
+                    </label>
+                    <button type="button" className="ghost compact-button" disabled={accountFlagCaptchaLoading} onClick={loadAccountFlagCaptcha}>
+                      New CAPTCHA
+                    </button>
+                  </div>
+                  <button type="submit" disabled={accountFlagLoading || accountFlagCaptchaLoading}>
+                    {accountFlagLoading ? 'Sending...' : 'Send Flag for Review'}
+                  </button>
+                </form>
+              </section>
+            </div>
+          )}
 
           {isOwnProfile && achievementGroups.length > 0 && (
             <section className="public-profile-section">

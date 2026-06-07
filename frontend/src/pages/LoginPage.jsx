@@ -135,6 +135,9 @@ export default function LoginPage({ currentUser, onAuthChange }) {
                 <button type="submit" disabled={isSubmitting}>
                   {isSubmitting ? 'Signing in...' : 'Log in'}
                 </button>
+                <button type="button" className="ghost" onClick={() => navigate(ROUTES.roleCenter)}>
+                  Apply to Contribute
+                </button>
                 <button type="button" className="ghost" onClick={() => navigate(ROUTES.home)}>
                   Back to Home
                 </button>

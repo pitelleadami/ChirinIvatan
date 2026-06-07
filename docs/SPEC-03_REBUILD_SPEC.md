@@ -539,6 +539,9 @@ Rules:
 - one decision per actor per application.
 - self-decision forbidden.
 - rejection requires notes.
+- after an actor approves an application that still needs quorum, it must leave that actor's Pending list.
+- the same application appears in that actor's Approved view with an `awaiting_quorum` classification until final approval.
+- other eligible screeners who have not decided still see the application in Pending.
 
 ### 4.13 RoleOnboardingRecord
 
@@ -757,8 +760,7 @@ Rules:
 
 Approval quorum:
 
-- two reviewers, or
-- one reviewer plus one admin
+- any two distinct reviewers/admins
 
 On quorum:
 
@@ -1390,20 +1392,31 @@ Applications section:
 - show reviewer reason
 - approve/reject with notes
 - show quorum/progress
+- Pending contains only applications on which the signed-in screener can still act.
+- Approved also contains applications approved by the signed-in screener that are awaiting another required approval.
+- quorum-pending approvals must be labeled `Awaiting final approval` and must not show approve/reject actions to the same screener.
+- successful approve/reject actions show a compact popup notification instead of a duplicate inline success banner.
+- approval notification states whether access is active or another required approver must still decide.
 
 Invitations section:
 
 - invite existing user into role
 - send email role invitation
 - show invitation status
+- email invitation form collects only email, role, and endorsement notes.
+- invited users provide first name, last name, municipality, username, and password when accepting.
 
 People section:
 
-- searchable users
-- create managed consultant profile
+- searchable approved/active role holders
+- include admins, consultants, reviewers, contributors, and role-assigned test accounts
+- exclude registered-only users whose contributor/reviewer applications are pending or rejected
+- keep an existing contributor visible while a separate reviewer application is pending
 - view user activity
 - admin public visibility controls
 - admin leaderboard visibility controls
+- show the managed consultant profile panel last, after the people directory and related controls
+- create managed consultant profile
 
 Contributions section:
 

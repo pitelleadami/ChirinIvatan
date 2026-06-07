@@ -45,7 +45,10 @@ export default function AboutProjectPage() {
         <div className="about-intro-top">
           <div className="about-intro-illustration-wrap">
             <div className="about-intro-illustration">
-              <img src={brandLogo} alt="Chirin Ivatan logo" />
+              <img
+                src={content.brand_logo_url || brandLogo}
+                alt={`${content.brand_name} logo`}
+              />
             </div>
           </div>
           <div className="about-intro-leads">
@@ -93,11 +96,14 @@ export default function AboutProjectPage() {
                 target={partner.url ? '_blank' : undefined}
                 rel={partner.url ? 'noreferrer' : undefined}
               >
-                <span className="partner-logo-mark" aria-hidden="true">
-                  {partnerInitials(partner.name)}
-                </span>
+                {partner.logo_url ? (
+                  <img className="partner-logo-image" src={partner.logo_url} alt="" />
+                ) : (
+                  <span className="partner-logo-mark" aria-hidden="true">
+                    {partnerInitials(partner.name)}
+                  </span>
+                )}
                 <span className="partner-agency-name">{partner.name || 'Partner'}</span>
-                {partner.description && <span className="meta">{partner.description}</span>}
               </a>
             ))}
           </div>

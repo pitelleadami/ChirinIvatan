@@ -57,6 +57,8 @@ Rules:
 - Reviewer/Admin can approve/reject/flag.
 - Self-review is forbidden in both dictionary and folklore.
 - Admin has additional override power (`force_reject`, `restore_approved`, `archive`).
+- Admins archive from the actual dictionary or folklore entry view. Steward's Desk includes an admin-only Archive tab for searching and restoring preserved records with required audit notes.
+- Automatic permanent deletion of archived entries is disabled. Archived records remain preserved unless the project owner explicitly approves a future deletion workflow.
 - Admin can edit public About/Digital Yaru copy, Statements of Support, Partner Details, role-aware FAQ sections, and FAQ images through Steward's Desk -> Site Content.
 - Each user profile has `include_in_leaderboard`; when false, contribution credits remain on the public profile but the user is excluded from Hall of Stewards leaderboard rows and municipality aggregate scores. Only admins can toggle this through `POST /api/users/<username>/leaderboard-visibility` or the admin profile/people controls.
 
@@ -640,10 +642,23 @@ Screen: `Applications / Invitations`
 - Status filter should be compact and one-row.
 - Application cards paginate at 5 per page.
 - Recent invitations paginate at 8 per page.
+- The Pending filter is viewer-specific: exclude any quorum-pending application already decided by the signed-in screener.
+- The Approved filter includes final approvals plus quorum-pending applications approved by the signed-in screener.
+- A quorum-pending approval must be labeled `Awaiting final approval`, show remaining quorum progress, and hide decision controls from that screener.
+- Other eligible screeners who have not decided continue to see the same application under Pending.
+- Approve and reject actions show compact auto-dismiss popup notifications.
+- Approval notification distinguishes recorded approval awaiting quorum from final approval with active access.
+- Do not also render a duplicate inline success message for the same decision.
+- Email invitation creation collects email, role, and endorsement notes only.
+- The invitation acceptance screen collects and saves first name, last name, municipality, username, and password.
 
 Screen: `Admin People Activity Log`
 - Admin-only People tab should let admins inspect a selected person's recent major actions.
 - Data source: `GET /api/admin/users/<username>/activity`
+- The People list source `GET /api/admin/users` includes only users with active Admin, Consultant, Reviewer, or Contributor access, including role-assigned test accounts.
+- Exclude registered-only applicants who do not yet have an active role, even when they have a pending application.
+- Do not exclude an existing contributor merely because that person has a separate pending reviewer application.
+- Render the managed consultant profile panel after the people directory as the final People-section tool.
 - Include actions such as:
   - contribution credits
   - dictionary revisions

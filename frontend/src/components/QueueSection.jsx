@@ -10,13 +10,16 @@ import { useState } from 'react'
 import { folkloreTaxonomyLabel } from '../lib/folkloreTaxonomy'
 
 function actionHint(mode, row) {
+  if (mode === 'awaiting') {
+    return 'Your approval is recorded. This item is read-only for you while it waits for quorum.'
+  }
   if (mode === 'published') {
     return 'This entry is already public. Flag only when it needs another review round.'
   }
   if (row.review_round !== undefined) {
     return 'Re-review round: approve restores confidence; reject moves the public entry to rejected.'
   }
-  return 'New submission: approve contributes to quorum; reject returns it to the contributor with notes.'
+  return ''
 }
 
 function formatDate(value) {
@@ -62,6 +65,9 @@ export default function QueueSection({
 }) {
   const [rejectNotesOpenById, setRejectNotesOpenById] = useState({})
   const [flagNotesOpenById, setFlagNotesOpenById] = useState({})
+  const [awaitingOpenById, setAwaitingOpenById] = useState({})
+  const [awaitingSectionOpen, setAwaitingSectionOpen] = useState(false)
+  const isAwaitingSection = mode === 'awaiting'
 
   function rejectNotesOpen(revisionId) {
     return Boolean(rejectNotesOpenById[revisionId])
@@ -88,35 +94,97 @@ export default function QueueSection({
   }
 
   return (
-    <section className="review-queue-panel">
-      <div className="queue-section-heading">
-        <h2>{title}</h2>
-        <span className="badge">{rows.length}</span>
-      </div>
-      {rows.length === 0 && <p className="muted">No items in this queue.</p>}
-      {rows.map((row) => {
+    <section className={isAwaitingSection ? 'review-queue-panel review-queue-panel-awaiting' : 'review-queue-panel'}>
+      {isAwaitingSection ? (
+        <button
+          type="button"
+          className="queue-section-toggle"
+          aria-expanded={awaitingSectionOpen}
+          onClick={() => setAwaitingSectionOpen((current) => !current)}
+        >
+          <h2>{title}</h2>
+          <span className="queue-section-toggle-end">
+            <span className="badge">{rows.length}</span>
+            <span className="queue-awaiting-chevron" aria-hidden="true">
+              {awaitingSectionOpen ? '−' : '+'}
+            </span>
+          </span>
+        </button>
+      ) : (
+        <div className="queue-section-heading">
+          <h2>{title}</h2>
+          <span className="badge">{rows.length}</span>
+        </div>
+      )}
+      {(!isAwaitingSection || awaitingSectionOpen) && rows.length === 0 && (
+        <p className="muted queue-empty-message">No items in this queue.</p>
+      )}
+      {(!isAwaitingSection || awaitingSectionOpen) && rows.map((row) => {
         const revisionId = row.revision_id
         const disabled = actionBusyId === revisionId
-        const canApprove = mode !== 'published'
-        const canReject = mode !== 'published'
+        const isAwaiting = mode === 'awaiting'
+        const awaitingOpen = Boolean(awaitingOpenById[revisionId])
+        const canApprove = mode !== 'published' && mode !== 'awaiting'
+        const canReject = mode !== 'published' && mode !== 'awaiting'
         const canFlag = mode === 'published'
         const titleText = kind === 'dictionary' ? row.term || '(no term)' : row.title || '(no title)'
         return (
-          <article className="queue-card" key={revisionId}>
-            <div className="queue-header">
-              <strong>{titleText}</strong>
-              <span className={`badge status-${row.status}`}>{row.status}</span>
-            </div>
-            <p className="meta">
-              By @{row.contributor_username}
-              {row.created_at ? ` | submitted ${formatDate(row.created_at)}` : ''}
-              {row.approved_at ? ` | approved ${formatDate(row.approved_at)}` : ''}
-            </p>
-            {row.entry_status && <p className="meta">Entry status: {row.entry_status}</p>}
-            {row.review_round !== undefined && <p className="meta">Round: {row.review_round}</p>}
-            <p className="hint">{actionHint(mode, row)}</p>
+          <article className={isAwaiting ? 'queue-card queue-card-awaiting' : 'queue-card'} key={revisionId}>
+            {isAwaiting ? (
+              <button
+                type="button"
+                className="queue-awaiting-toggle"
+                aria-expanded={awaitingOpen}
+                onClick={() => setAwaitingOpenById((current) => ({
+                  ...current,
+                  [revisionId]: !current[revisionId],
+                }))}
+              >
+                <span>
+                  <strong>{titleText}</strong>
+                  <small>
+                    Your approval is recorded · {row.quorum_requirement}
+                  </small>
+                </span>
+                <span className="queue-awaiting-toggle-end">
+                  <span className={`badge status-${row.status}`}>{row.status}</span>
+                  <span className="queue-awaiting-chevron" aria-hidden="true">
+                    {awaitingOpen ? '−' : '+'}
+                  </span>
+                </span>
+              </button>
+            ) : (
+              <div className="queue-header">
+                <strong>{titleText}</strong>
+                <span className={`badge status-${row.status}`}>{row.status}</span>
+              </div>
+            )}
 
-            {previewRows(kind, row).length > 0 && (
+            {(!isAwaiting || awaitingOpen) && (
+              <>
+                <p className="meta">
+                  By @{row.contributor_username}
+                  {row.created_at ? ` | submitted ${formatDate(row.created_at)}` : ''}
+                  {row.approved_at ? ` | approved ${formatDate(row.approved_at)}` : ''}
+                </p>
+                {row.entry_status && <p className="meta">Entry status: {row.entry_status}</p>}
+                {row.review_round !== undefined && <p className="meta">Round: {row.review_round}</p>}
+                {actionHint(mode, row) && <p className="hint">{actionHint(mode, row)}</p>}
+              </>
+            )}
+            {isAwaiting && awaitingOpen && (
+              <div className="queue-quorum-status" role="status">
+                <strong>Awaiting quorum</strong>
+                <span>
+                  {row.reviewer_approvals || 0} reviewer approval
+                  {row.reviewer_approvals === 1 ? '' : 's'} · {row.admin_approvals || 0} admin approval
+                  {row.admin_approvals === 1 ? '' : 's'}
+                </span>
+                <small>{row.quorum_requirement}</small>
+              </div>
+            )}
+
+            {(!isAwaiting || awaitingOpen) && previewRows(kind, row).length > 0 && (
               <dl className="queue-preview-list">
                 {previewRows(kind, row).map(([label, value]) => (
                   <div key={label} className="queue-preview-row">
@@ -127,7 +195,7 @@ export default function QueueSection({
               </dl>
             )}
 
-            {row.entry_id && (
+            {(!isAwaiting || awaitingOpen) && row.entry_id && (
               <p className="queue-detail-link-row">
                 <a href={kind === 'dictionary' ? `/dictionary-view?entry_id=${row.entry_id}` : `/folklore-view?entry_id=${row.entry_id}`}>
                   View actual item
@@ -135,11 +203,13 @@ export default function QueueSection({
               </p>
             )}
 
-            <details className="technical-details">
-              <summary>Technical reference</summary>
-              <p className="meta">Revision: {revisionId}</p>
-              <p className="meta">Entry: {row.entry_id || 'new submission'}</p>
-            </details>
+            {(!isAwaiting || awaitingOpen) && (
+              <details className="technical-details">
+                <summary>Technical reference</summary>
+                <p className="meta">Revision: {revisionId}</p>
+                <p className="meta">Entry: {row.entry_id || 'new submission'}</p>
+              </details>
+            )}
 
             <div className="actions">
               {canApprove && (

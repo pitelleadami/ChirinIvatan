@@ -1075,7 +1075,7 @@ class LifecycleMaintenanceCommandTests(TestCase):
             password="testpass123",
         )
 
-    def test_command_archives_old_rejected_and_deletes_old_archived(self):
+    def test_command_archives_old_rejected_and_preserves_archived_records(self):
         old = timezone.now() - timedelta(days=370)
 
         rejected_dict = Entry.objects.create(
@@ -1118,8 +1118,8 @@ class LifecycleMaintenanceCommandTests(TestCase):
 
         rejected_dict.refresh_from_db()
         self.assertEqual(rejected_dict.status, EntryStatus.ARCHIVED)
-        self.assertFalse(Entry.objects.filter(id=archived_dict.id).exists())
+        self.assertTrue(Entry.objects.filter(id=archived_dict.id).exists())
 
         rejected_folk.refresh_from_db()
         self.assertEqual(rejected_folk.status, FolkloreEntry.Status.ARCHIVED)
-        self.assertFalse(FolkloreEntry.objects.filter(id=archived_folk.id).exists())
+        self.assertTrue(FolkloreEntry.objects.filter(id=archived_folk.id).exists())

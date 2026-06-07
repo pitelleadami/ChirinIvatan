@@ -21,7 +21,10 @@ from dictionary.models import EntryRevision, EntryStatus
 from folklore.models import FolkloreEntry, FolkloreRevision
 from dictionary.services import finalize_approved_revision, publish_revision
 from dictionary.state_machine import validate_transition
-from dictionary.variant_services import handle_mother_removed_or_archived
+from dictionary.variant_services import (
+    handle_mother_removed_or_archived,
+    recompute_mother_for_group,
+)
 from folklore.services import (
     finalize_approved_revision as finalize_folklore_approved_revision,
     publish_revision as publish_folklore_revision,
@@ -92,19 +95,28 @@ def admin_override_dictionary_entry(*, entry, admin_user, action, notes=""):
     """
 
     _require_admin_with_notes(admin_user=admin_user, notes=notes)
-    if entry.status != EntryStatus.APPROVED_UNDER_REVIEW:
-        raise ValidationError("Dictionary entry must be under review for override.")
-
     before = entry.status
 
     if action == ReviewAdminOverride.Action.FORCE_REJECT:
+        if entry.status != EntryStatus.APPROVED_UNDER_REVIEW:
+            raise ValidationError("Dictionary entry must be under review to force reject.")
         entry.status = EntryStatus.REJECTED
         entry.save(update_fields=["status"])
     elif action == ReviewAdminOverride.Action.RESTORE_APPROVED:
+        if entry.status not in {EntryStatus.APPROVED_UNDER_REVIEW, EntryStatus.ARCHIVED}:
+            raise ValidationError("Only an archived or under-review dictionary entry can be restored.")
         entry.status = EntryStatus.APPROVED
-        entry.save(update_fields=["status"])
+        entry.archived_at = None
+        entry.save(update_fields=["status", "archived_at"])
+        if entry.variant_group_id:
+            recompute_mother_for_group(group=entry.variant_group)
     elif action == ReviewAdminOverride.Action.ARCHIVE:
-        # Archive can be forced directly as an admin authority action.
+        if entry.status not in {
+            EntryStatus.APPROVED,
+            EntryStatus.APPROVED_UNDER_REVIEW,
+            EntryStatus.REJECTED,
+        }:
+            raise ValidationError("This dictionary entry cannot be archived from its current status.")
         entry.status = EntryStatus.ARCHIVED
         entry.archived_at = timezone.now()
         entry.save(update_fields=["status", "archived_at"])
@@ -131,18 +143,28 @@ def admin_override_folklore_entry(*, entry, admin_user, action, notes=""):
     """
 
     _require_admin_with_notes(admin_user=admin_user, notes=notes)
-    if entry.status != FolkloreEntry.Status.APPROVED_UNDER_REVIEW:
-        raise ValidationError("Folklore entry must be under review for override.")
-
     before = entry.status
     if action == ReviewAdminOverride.Action.FORCE_REJECT:
+        if entry.status != FolkloreEntry.Status.APPROVED_UNDER_REVIEW:
+            raise ValidationError("Folklore entry must be under review to force reject.")
         entry.status = FolkloreEntry.Status.REJECTED
         entry.save(update_fields=["status"])
     elif action == ReviewAdminOverride.Action.RESTORE_APPROVED:
+        if entry.status not in {
+            FolkloreEntry.Status.APPROVED_UNDER_REVIEW,
+            FolkloreEntry.Status.ARCHIVED,
+        }:
+            raise ValidationError("Only an archived or under-review folklore entry can be restored.")
         entry.status = FolkloreEntry.Status.APPROVED
         entry.archived_at = None
         entry.save(update_fields=["status", "archived_at"])
     elif action == ReviewAdminOverride.Action.ARCHIVE:
+        if entry.status not in {
+            FolkloreEntry.Status.APPROVED,
+            FolkloreEntry.Status.APPROVED_UNDER_REVIEW,
+            FolkloreEntry.Status.REJECTED,
+        }:
+            raise ValidationError("This folklore entry cannot be archived from its current status.")
         entry.status = FolkloreEntry.Status.ARCHIVED
         entry.archived_at = timezone.now()
         entry.save(update_fields=["status", "archived_at"])
@@ -346,9 +368,7 @@ def submit_folklore_review(
         elif is_reviewer(review.reviewer):
             reviewer_ids.add(review.reviewer_id)
 
-    quorum_met = len(reviewer_ids) >= 2 or (
-        len(reviewer_ids) >= 1 and len(admin_ids) >= 1
-    )
+    quorum_met = len(reviewer_ids) + len(admin_ids) >= 2
     if not quorum_met:
         return revision
 
@@ -392,9 +412,7 @@ def submit_review(*, revision: EntryRevision, reviewer, decision, notes=""):
     - No self-review
     - Rejection requires notes
     - First rejection immediately rejects
-    - Approval quorum:
-        * 2 reviewers OR
-        * 1 reviewer + 1 admin
+    - Approval quorum: any two distinct reviewer/admin approvers
     - Publishing handled by publish_revision()
     - Re-review restores or rejects without republishing
     """
@@ -528,10 +546,7 @@ def submit_review(*, revision: EntryRevision, reviewer, decision, notes=""):
         elif is_reviewer(r.reviewer):
             reviewer_ids.add(r.reviewer_id)
 
-    quorum_met = (
-        len(reviewer_ids) >= 2
-        or (len(reviewer_ids) >= 1 and len(admin_ids) >= 1)
-    )
+    quorum_met = len(reviewer_ids) + len(admin_ids) >= 2
 
     if not quorum_met:
         return revision

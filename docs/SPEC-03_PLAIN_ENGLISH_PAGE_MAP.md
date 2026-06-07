@@ -451,8 +451,7 @@ Admin/reviewer can:
 
 Reviewer application quorum:
 
-- two reviewers, or
-- one reviewer plus one admin
+- any two distinct reviewers/admins
 
 ### 5.3 Invitations Tab
 

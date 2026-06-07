@@ -162,16 +162,9 @@ def _build_approval_set(application):
 
 
 def _has_quorum_for_target_role(*, application):
-    # Quorum rules are locked by governance spec.
+    # Any two distinct reviewer/admin approvers satisfy quorum for every role.
     reviewer_ids, admin_ids = _build_approval_set(application)
-
-    if application.target_role == RoleApplication.TargetRole.CONTRIBUTOR:
-        # Locked rule: contributor activation requires at least one reviewer OR one admin.
-        return bool(reviewer_ids or admin_ids)
-
-    # Locked rule update:
-    # reviewer activation requires (1 reviewer + 1 admin) OR (2 reviewers).
-    return (len(reviewer_ids) >= 1 and len(admin_ids) >= 1) or (len(reviewer_ids) >= 2)
+    return len(reviewer_ids) + len(admin_ids) >= 2
 
 
 def _create_onboarding_record_for_approved_application(*, application, accountability_notes=""):
@@ -299,7 +292,7 @@ def create_email_role_invitation(
         email__iexact=normalized_email,
         role=role,
         status=RoleInvitation.Status.PENDING,
-    ).update(status=RoleInvitation.Status.REVOKED)
+    ).update(status=RoleInvitation.Status.REPLACED)
 
     return RoleInvitation.objects.create(
         email=normalized_email,
@@ -324,7 +317,10 @@ def create_consultant_profile(
     post_nominals="",
     affiliation="",
     occupation="",
+    cultural_affiliations=None,
+    other_affiliations=None,
     bio="",
+    profile_photo=None,
     notes="",
 ):
     if not is_admin(created_by):
@@ -351,9 +347,39 @@ def create_consultant_profile(
     profile, _ = UserProfile.objects.get_or_create(user=user)
     profile.municipality = str(municipality or "").strip()
     profile.post_nominals = str(post_nominals or "").strip()
-    profile.affiliation = str(affiliation or "").strip()
-    profile.occupation = str(occupation or "").strip()
+    profile.cultural_affiliations = cultural_affiliations or []
+    profile.other_affiliations = other_affiliations or []
+    cultural_organizations = [
+        row.get("organization", "")
+        for row in profile.cultural_affiliations
+        if row.get("organization")
+    ]
+    other_institutions = [
+        row.get("institution", "")
+        for row in profile.other_affiliations
+        if row.get("institution")
+    ]
+    cultural_roles = [
+        row.get("role", "")
+        for row in profile.cultural_affiliations
+        if row.get("role")
+    ]
+    other_designations = [
+        row.get("designation", "")
+        for row in profile.other_affiliations
+        if row.get("designation")
+    ]
+    profile.affiliation = (
+        ", ".join(cultural_organizations + other_institutions)[:255]
+        or str(affiliation or "").strip()
+    )
+    profile.occupation = (
+        ", ".join(cultural_roles + other_designations)[:255]
+        or str(occupation or "").strip()
+    )
     profile.bio = str(bio or "").strip()
+    if profile_photo:
+        profile.profile_photo = profile_photo
     profile.include_in_leaderboard = False
     profile.save()
 
@@ -365,6 +391,96 @@ def create_consultant_profile(
         invited_by=created_by,
         accountability_notes=notes or "",
     )
+    return user, record
+
+
+@transaction.atomic
+def update_managed_consultant_profile(
+    *,
+    updated_by,
+    user,
+    first_name,
+    last_name,
+    email="",
+    municipality="",
+    post_nominals="",
+    affiliation="",
+    occupation="",
+    cultural_affiliations=None,
+    other_affiliations=None,
+    bio="",
+    profile_photo=None,
+    notes=None,
+):
+    if not is_admin(updated_by):
+        raise ValidationError("Only admin users can edit managed consultant profiles.")
+
+    record = (
+        user.role_onboarding_records.filter(
+            role=RoleOnboardingRecord.Role.CONSULTANT,
+            method=RoleOnboardingRecord.Method.ADMIN_CREATED,
+        )
+        .order_by("-created_at")
+        .first()
+    )
+    if not record:
+        raise ValidationError("This is not an admin-managed consultant profile.")
+
+    first_name = str(first_name or "").strip()
+    last_name = str(last_name or "").strip()
+    email = _clean_email(email, required=False)
+    if not first_name or not last_name:
+        raise ValidationError("First name and last name are required.")
+    if email and User.objects.filter(email__iexact=email).exclude(pk=user.pk).exists():
+        raise ValidationError("A user with this email already exists.")
+
+    user.first_name = first_name
+    user.last_name = last_name
+    user.email = email
+    user.save(update_fields=["first_name", "last_name", "email"])
+
+    profile, _ = UserProfile.objects.get_or_create(user=user)
+    profile.municipality = str(municipality or "").strip()
+    profile.post_nominals = str(post_nominals or "").strip()
+    profile.cultural_affiliations = cultural_affiliations or []
+    profile.other_affiliations = other_affiliations or []
+    cultural_organizations = [
+        row.get("organization", "")
+        for row in profile.cultural_affiliations
+        if row.get("organization")
+    ]
+    other_institutions = [
+        row.get("institution", "")
+        for row in profile.other_affiliations
+        if row.get("institution")
+    ]
+    cultural_roles = [
+        row.get("role", "")
+        for row in profile.cultural_affiliations
+        if row.get("role")
+    ]
+    other_designations = [
+        row.get("designation", "")
+        for row in profile.other_affiliations
+        if row.get("designation")
+    ]
+    profile.affiliation = (
+        ", ".join(cultural_organizations + other_institutions)[:255]
+        or str(affiliation or "").strip()
+    )
+    profile.occupation = (
+        ", ".join(cultural_roles + other_designations)[:255]
+        or str(occupation or "").strip()
+    )
+    profile.bio = str(bio or "").strip()
+    if profile_photo:
+        profile.profile_photo = profile_photo
+    profile.save()
+
+    if notes is not None:
+        record.accountability_notes = str(notes or "").strip()
+        record.save(update_fields=["accountability_notes"])
+
     return user, record
 
 
@@ -384,6 +500,9 @@ def _unique_username_for_user(seed):
 def accept_email_role_invitation(
     *,
     token,
+    first_name="",
+    last_name="",
+    municipality="",
     username,
     password,
 ):
@@ -399,6 +518,16 @@ def accept_email_role_invitation(
 
     normalized_email = str(invitation.email or "").strip().lower()
     user = User.objects.select_for_update().filter(email__iexact=normalized_email).first()
+    existing_municipality = ""
+    if user:
+        existing_profile = UserProfile.objects.filter(user=user).first()
+        existing_municipality = existing_profile.municipality if existing_profile else ""
+    first_name = str(first_name or invitation.first_name or (user.first_name if user else "")).strip()
+    last_name = str(last_name or invitation.last_name or (user.last_name if user else "")).strip()
+    municipality = str(municipality or invitation.municipality or existing_municipality).strip()
+    if not first_name or not last_name or not municipality:
+        raise ValidationError("First name, last name, and municipality are required.")
+
     username_taken = User.objects.filter(username__iexact=username)
     if user:
         username_taken = username_taken.exclude(id=user.id)
@@ -409,26 +538,22 @@ def accept_email_role_invitation(
         user = User.objects.create_user(
             username=username,
             email=normalized_email,
-            first_name=invitation.first_name,
-            last_name=invitation.last_name,
+            first_name=first_name,
+            last_name=last_name,
         )
     else:
         if user.has_usable_password():
             raise ValidationError("This email already has login credentials. Please log in instead.")
         user.username = username
-        if invitation.first_name and not user.first_name:
-            user.first_name = invitation.first_name
-        if invitation.last_name and not user.last_name:
-            user.last_name = invitation.last_name
+        user.first_name = first_name
+        user.last_name = last_name
 
     user.set_password(password)
     user.save(update_fields=["username", "email", "first_name", "last_name", "password"])
 
-    if invitation.municipality:
-        profile, _ = UserProfile.objects.get_or_create(user=user)
-        if not profile.municipality:
-            profile.municipality = invitation.municipality
-            profile.save(update_fields=["municipality"])
+    profile, _ = UserProfile.objects.get_or_create(user=user)
+    profile.municipality = municipality
+    profile.save(update_fields=["municipality"])
 
     _activate_role(user=user, role=invitation.role)
     record = RoleOnboardingRecord.objects.create(

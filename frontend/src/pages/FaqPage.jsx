@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { apiRequest } from '../lib/api'
-import { ALL_FAQ_ROLES, DEFAULT_FAQ_SECTIONS, DICTIONARY_FIELD_GUIDES } from '../lib/faqContent'
+import { ALL_FAQ_ROLES, DEFAULT_FAQ_SECTIONS, DICTIONARY_FIELD_GUIDES, ensureCoreFaqSections } from '../lib/faqContent'
 import { normalizeSiteContent } from '../lib/siteContent'
 
 const HIDDEN_FAQ_INTROS = new Set([
@@ -80,7 +80,7 @@ function GuideCard({ guide }) {
 
 export default function FaqPage({ currentUser }) {
   const role = userRole(currentUser)
-  const [faqSections, setFaqSections] = useState(DEFAULT_FAQ_SECTIONS)
+  const [faqSections, setFaqSections] = useState(() => ensureCoreFaqSections(DEFAULT_FAQ_SECTIONS))
   const [loadingContent, setLoadingContent] = useState(true)
   const groups = visibleGroupsForRole(role, faqSections)
   const showContributorGuides =
@@ -90,9 +90,9 @@ export default function FaqPage({ currentUser }) {
     apiRequest('/api/site-content')
       .then((payload) => {
         const content = normalizeSiteContent(payload)
-        setFaqSections(content.faq_sections.length ? content.faq_sections : DEFAULT_FAQ_SECTIONS)
+        setFaqSections(ensureCoreFaqSections(content.faq_sections))
       })
-      .catch(() => setFaqSections(DEFAULT_FAQ_SECTIONS))
+      .catch(() => setFaqSections(ensureCoreFaqSections(DEFAULT_FAQ_SECTIONS)))
       .finally(() => setLoadingContent(false))
   }, [])
 
@@ -150,7 +150,11 @@ export default function FaqPage({ currentUser }) {
         <div className="faq-main">
           <div className="faq-group-list">
             {groups.map((group) => (
-              <section key={group.id} id={group.id} className="faq-group">
+              <section
+                key={group.id}
+                id={group.id}
+                className={group.id === 'how-review-works' ? 'faq-group faq-trust-section' : 'faq-group'}
+              >
                 <div className="faq-group-heading">
                   <div>
                     <h2>{group.title}</h2>

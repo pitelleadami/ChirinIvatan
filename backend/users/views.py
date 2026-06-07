@@ -13,29 +13,36 @@ while this file handles request parsing and response shaping.
 
 from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model, login, logout
+from django.contrib.auth.forms import PasswordResetForm
+from django.contrib.auth.models import Group
 from django.contrib.auth.password_validation import validate_password
 from django.core.validators import validate_email
 from django.core.files.storage import default_storage
 from django.core.mail import send_mail
+from django.core import signing
 from django.http import Http404, JsonResponse
 from django.db import transaction
 from django.db.models import Max, Q, Sum
+from django.utils import timezone
 from django.utils.text import slugify
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_http_methods
 import json
+import random
 import uuid
 
 from dictionary.models import Entry, EntryRevision, EntryStatus
 from folklore.models import FolkloreEntry, FolkloreRevision
-from reviews.models import FolkloreReview, Review
+from reviews.models import FolkloreReview, Review, ReviewAdminOverride
 from users.models import (
+    AdminAccountAction,
     ContributionEvent,
     MunicipalityMonthlyWinner,
     RecognitionEvent,
     RoleApplication,
     RoleApplicationDecision,
     RoleInvitation,
+    RoleOnboardingRecord,
     SiteContentSettings,
     UserSessionEvent,
     UserContributionStats,
@@ -53,6 +60,7 @@ from users.role_onboarding import (
     invite_user_to_role,
     is_admin,
     is_reviewer,
+    update_managed_consultant_profile,
 )
 from users.recognition import (
     build_gamification_profile_payload,
@@ -64,7 +72,28 @@ from django.core.exceptions import ValidationError
 
 User = get_user_model()
 ADMIN_ACTIVITY_LIMIT = 500
+ADMIN_OVERVIEW_RECENT_LIMIT = 5
+CAPTCHA_MAX_AGE_SECONDS = 600
+CAPTCHA_SALT = "chirin-role-onboarding-captcha"
 DEFAULT_SITE_CONTENT = {
+    "brand_name": "Chirin Ivatan",
+    "brand_logo_url": "",
+    "landing_intro_text": (
+        '— from "Chirin", meaning language, and "nu Ivatan," referring to the people and culture '
+        "of Batanes — is an online dictionary and folklore archive dedicated to preserving the "
+        "Ivatan language, stories, and cultural heritage in the digital age."
+    ),
+    "landing_body_text": (
+        "Developed as a community-centered initiative for cultural preservation, it welcomes "
+        "Ivatans and all who wish to contribute or learn about the language and heritage to take "
+        "part in safeguarding the words, stories, and living traditions that continue to shape "
+        "the identity of the Ivatans."
+    ),
+    "footer_left_text": "© 2026 Chirin Ivatan.",
+    "footer_center_text": (
+        "Developed for the preservation and continuity of the Ivatan language and heritage."
+    ),
+    "footer_right_text": "Contact: chirinivatan@gmail.com",
     "about_heading": "About the project",
     "about_intro_paragraphs": [
         (
@@ -152,6 +181,38 @@ DEFAULT_SITE_CONTENT = {
     "support_statements": [],
     "partner_details": [],
     "faq_sections": [],
+    "privacy_notice_paragraphs": [
+        (
+            "Chirin Ivatan collects account and contribution details only to manage role access, "
+            "review submissions, credit contributors, and protect the integrity of the archive."
+        ),
+        (
+            "Submitted names, contact details, affiliation notes, and contribution history may be "
+            "reviewed by authorized stewards for moderation, accountability, and support."
+        ),
+    ],
+    "media_upload_policy_paragraphs": [
+        (
+            "Upload only media you created, have permission to share, or can clearly cite from a "
+            "lawful source. Photos, audio, and video should respect people, places, cultural context, "
+            "and community sensitivities."
+        ),
+        (
+            "Media attached to approved entries may become visible on public archive pages. Reviewers "
+            "may request source details, remove unsuitable media, or return a submission for clarification."
+        ),
+    ],
+    "contributor_agreement_paragraphs": [
+        (
+            "By applying for a role or submitting content, contributors agree to share accurate, "
+            "respectful information and to provide source details when material is not personally "
+            "known, created, or recorded."
+        ),
+        (
+            "Contributors understand that submissions may be reviewed, edited for clarity, returned "
+            "for changes, or declined when they do not meet archive standards."
+        ),
+    ],
     "maintenance_enabled": False,
     "maintenance_message": (
         "Chirin Ivatan is temporarily paused for maintenance. "
@@ -297,10 +358,10 @@ def _sanitize_partner_details(value):
         if not isinstance(row, dict):
             continue
         name = str(row.get("name", "")).strip()
-        description = str(row.get("description", "")).strip()
         url = str(row.get("url", "")).strip()
-        if name or description or url:
-            cleaned.append({"name": name, "description": description, "url": url})
+        logo_url = str(row.get("logo_url", "")).strip()
+        if name or url or logo_url:
+            cleaned.append({"name": name, "url": url, "logo_url": logo_url})
     return cleaned
 
 
@@ -360,6 +421,13 @@ def _site_content_payload(row=None):
     if not row:
         return {**DEFAULT_SITE_CONTENT, "is_default": True, "updated_at": None, "updated_by": ""}
     return {
+        "brand_name": row.brand_name or DEFAULT_SITE_CONTENT["brand_name"],
+        "brand_logo_url": row.brand_logo_url,
+        "landing_intro_text": row.landing_intro_text or DEFAULT_SITE_CONTENT["landing_intro_text"],
+        "landing_body_text": row.landing_body_text or DEFAULT_SITE_CONTENT["landing_body_text"],
+        "footer_left_text": row.footer_left_text or DEFAULT_SITE_CONTENT["footer_left_text"],
+        "footer_center_text": row.footer_center_text or DEFAULT_SITE_CONTENT["footer_center_text"],
+        "footer_right_text": row.footer_right_text or DEFAULT_SITE_CONTENT["footer_right_text"],
         "about_heading": row.about_heading,
         "about_intro_paragraphs": row.about_intro_paragraphs or [],
         "about_body_paragraphs": row.about_body_paragraphs or [],
@@ -371,6 +439,13 @@ def _site_content_payload(row=None):
         "support_statements": row.support_statements or [],
         "partner_details": row.partner_details or [],
         "faq_sections": row.faq_sections or [],
+        "privacy_notice_paragraphs": row.privacy_notice_paragraphs or DEFAULT_SITE_CONTENT["privacy_notice_paragraphs"],
+        "media_upload_policy_paragraphs": (
+            row.media_upload_policy_paragraphs or DEFAULT_SITE_CONTENT["media_upload_policy_paragraphs"]
+        ),
+        "contributor_agreement_paragraphs": (
+            row.contributor_agreement_paragraphs or DEFAULT_SITE_CONTENT["contributor_agreement_paragraphs"]
+        ),
         "maintenance_enabled": bool(row.maintenance_enabled),
         "maintenance_message": row.maintenance_message or DEFAULT_SITE_CONTENT["maintenance_message"],
         "is_default": False,
@@ -446,12 +521,21 @@ def _serialize_role_application(request, application):
     applicant = application.applicant
     profile = _safe_profile(applicant)
     groups = list(applicant.groups.order_by("name").values_list("name", flat=True))
-    decisions = application.decisions.select_related("decided_by").order_by("created_at")
+    decisions = list(application.decisions.select_related("decided_by").order_by("created_at"))
+    current_user_decision = next(
+        (row.decision for row in decisions if row.decided_by_id == request.user.id),
+        "",
+    )
+    screening_status = application.status
+    if application.status == RoleApplication.Status.PENDING and current_user_decision == RoleApplicationDecision.Decision.APPROVE:
+        screening_status = "awaiting_quorum"
     return {
         "application_id": str(application.id),
         "target_role": application.target_role,
         "reviewer_reason": application.reviewer_reason,
         "status": application.status,
+        "screening_status": screening_status,
+        "current_user_decision": current_user_decision,
         "created_at": application.created_at.isoformat(),
         "updated_at": application.updated_at.isoformat(),
         "decided_at": application.decided_at.isoformat() if application.decided_at else None,
@@ -570,6 +654,7 @@ def _serialize_admin_user(request, user):
                 "role": record.role,
                 "method": record.method,
                 "accountability_label": format_accountability_label(record),
+                "accountability_notes": record.accountability_notes,
                 "invited_by": record.invited_by.username if record.invited_by else "",
                 "approved_by_reviewers": [
                     reviewer.username for reviewer in record.approved_by_reviewers.order_by("username")
@@ -582,6 +667,7 @@ def _serialize_admin_user(request, user):
             for record in onboarding_records
         ],
         "pending_applications": user.role_applications.filter(status=RoleApplication.Status.PENDING).count(),
+        "pending_account_flags": _serialize_account_flags(user),
     }
 
 
@@ -609,6 +695,224 @@ def _serialize_admin_activity_row(row):
         "target_id": row.get("target_id", ""),
         "target_label": row.get("target_label", ""),
         "created_at": row["created_at"].isoformat() if row.get("created_at") else None,
+    }
+
+
+def _active_admin_count():
+    return User.objects.filter(
+        is_active=True,
+    ).filter(
+        Q(is_superuser=True) | Q(groups__name="Admin")
+    ).distinct().count()
+
+
+def _admin_account_action_payload(row):
+    return {
+        "action_id": str(row.id),
+        "target_username": row.target_user.username,
+        "admin": row.admin.username,
+        "action": row.action,
+        "role": row.role,
+        "notes": row.notes,
+        "status_before": row.status_before,
+        "status_after": row.status_after,
+        "flag_status": row.flag_status,
+        "resolved_by": row.resolved_by.username if row.resolved_by else "",
+        "resolved_at": row.resolved_at.isoformat() if row.resolved_at else None,
+        "resolution_notes": row.resolution_notes,
+        "created_at": row.created_at.isoformat(),
+    }
+
+
+def _pending_account_flags_for_user(user):
+    return AdminAccountAction.objects.filter(
+        target_user=user,
+        action=AdminAccountAction.Action.FLAG_SUSPICIOUS,
+        flag_status=AdminAccountAction.FlagStatus.PENDING,
+    ).select_related("admin", "resolved_by")
+
+
+def _serialize_account_flags(user):
+    return [
+        _admin_account_action_payload(row)
+        for row in _pending_account_flags_for_user(user).order_by("-created_at")
+    ]
+
+
+def _record_admin_account_action(
+    *,
+    target_user,
+    admin,
+    action,
+    notes="",
+    role="",
+    status_before="",
+    status_after="",
+    flag_status=AdminAccountAction.FlagStatus.NONE,
+):
+    return AdminAccountAction.objects.create(
+        target_user=target_user,
+        admin=admin,
+        action=action,
+        notes=str(notes or "").strip(),
+        role=role,
+        status_before=status_before,
+        status_after=status_after,
+        flag_status=flag_status,
+    )
+
+
+def _apply_role_revocation(user, role):
+    role = str(role or "").strip().lower()
+    group_names_by_role = {
+        "contributor": ["Contributor"],
+        "reviewer": ["Reviewer"],
+        "consultant": ["Consultant"],
+        "admin": ["Admin"],
+    }
+    if role not in group_names_by_role:
+        raise ValidationError("Invalid role to revoke.")
+    if role == "admin" and user.is_superuser:
+        raise ValidationError("Superuser status must be changed in Django admin.")
+    if role == "admin" and _active_admin_count() <= 1 and is_admin(user):
+        raise ValidationError("Cannot revoke the final active admin.")
+
+    groups = Group.objects.filter(name__in=group_names_by_role[role])
+    removed = [group.name for group in groups if user.groups.filter(id=group.id).exists()]
+    if not removed:
+        raise ValidationError(f"This user does not currently have {role} group access.")
+    user.groups.remove(*groups)
+    if role == "admin" and user.is_staff and not user.is_superuser:
+        user.is_staff = False
+        user.save(update_fields=["is_staff"])
+    return removed
+
+
+def _revision_media_labels(revision):
+    labels = []
+    proposed_data = revision.proposed_data or {}
+    for key, label in [
+        ("photo", "photo"),
+        ("photo_url", "photo"),
+        ("audio_pronunciation", "audio"),
+        ("audio_pronunciation_url", "audio"),
+        ("media_url", "media link"),
+        ("photo_upload", "photo"),
+        ("audio_upload", "audio"),
+    ]:
+        if proposed_data.get(key) and label not in labels:
+            labels.append(label)
+    if getattr(revision, "photo_upload", None):
+        labels.append("photo")
+    if getattr(revision, "audio_upload", None):
+        labels.append("audio")
+    return list(dict.fromkeys(labels))
+
+
+def _serialize_admin_submission_row(revision, contribution_type):
+    proposed_data = revision.proposed_data or {}
+    title = proposed_data.get("term") if contribution_type == "dictionary" else proposed_data.get("title")
+    contributor = getattr(revision, "contributor", None)
+    return {
+        "id": str(revision.id),
+        "type": contribution_type,
+        "title": title or str(revision.id),
+        "status": revision.status,
+        "contributor": contributor.username if contributor else "",
+        "created_at": revision.created_at.isoformat() if revision.created_at else None,
+        "media": _revision_media_labels(revision),
+    }
+
+
+def _serialize_admin_override_row(row):
+    target = row.dictionary_entry if row.target_type == "dictionary" else row.folklore_entry
+    target_label = ""
+    if target:
+        target_label = getattr(target, "term", "") or getattr(target, "title", "") or str(target.id)
+    return {
+        "id": str(row.id),
+        "target_type": row.target_type,
+        "target_label": target_label,
+        "action": row.action,
+        "admin": row.admin.username if row.admin else "",
+        "status_before": row.status_before,
+        "status_after": row.status_after,
+        "notes": row.notes,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
+
+
+def _admin_overview_payload(request):
+    site_content = SiteContentSettings.objects.filter(key="default").select_related("updated_by").first()
+    dictionary_pending = EntryRevision.objects.filter(status=EntryRevision.Status.PENDING).count()
+    folklore_pending = FolkloreRevision.objects.filter(status=FolkloreRevision.Status.PENDING).count()
+    dictionary_re_review = Entry.objects.filter(status=EntryStatus.APPROVED_UNDER_REVIEW).count()
+    folklore_re_review = FolkloreEntry.objects.filter(status=FolkloreEntry.Status.APPROVED_UNDER_REVIEW).count()
+
+    latest_dictionary = [
+        _serialize_admin_submission_row(row, "dictionary")
+        for row in EntryRevision.objects.select_related("contributor")
+        .order_by("-created_at")[:ADMIN_OVERVIEW_RECENT_LIMIT]
+    ]
+    latest_folklore = [
+        _serialize_admin_submission_row(row, "folklore")
+        for row in FolkloreRevision.objects.select_related("contributor")
+        .order_by("-created_at")[:ADMIN_OVERVIEW_RECENT_LIMIT]
+    ]
+    latest_submissions = sorted(
+        latest_dictionary + latest_folklore,
+        key=lambda row: row.get("created_at") or "",
+        reverse=True,
+    )[:ADMIN_OVERVIEW_RECENT_LIMIT]
+    latest_media_uploads = [
+        row for row in latest_submissions if row.get("media")
+    ][:ADMIN_OVERVIEW_RECENT_LIMIT]
+
+    recent_overrides = [
+        _serialize_admin_override_row(row)
+        for row in ReviewAdminOverride.objects.select_related(
+            "admin",
+            "dictionary_entry",
+            "folklore_entry",
+        ).order_by("-created_at")[:ADMIN_OVERVIEW_RECENT_LIMIT]
+    ]
+
+    return {
+        "counts": {
+            "users": User.objects.filter(is_active=True).count(),
+            "contributors": User.objects.filter(is_active=True, groups__name="Contributor").distinct().count(),
+            "reviewers": User.objects.filter(is_active=True, groups__name="Reviewer").distinct().count(),
+            "approved_entries": (
+                Entry.objects.filter(status=EntryStatus.APPROVED).count()
+                + FolkloreEntry.objects.filter(status=FolkloreEntry.Status.APPROVED).count()
+            ),
+            "pending_entries": dictionary_pending + folklore_pending,
+        },
+        "queues": {
+            "pending_role_applications": RoleApplication.objects.filter(status=RoleApplication.Status.PENDING).count(),
+            "pending_dictionary_reviews": dictionary_pending,
+            "pending_folklore_reviews": folklore_pending,
+            "entries_under_re_review": dictionary_re_review + folklore_re_review,
+            "dictionary_under_re_review": dictionary_re_review,
+            "folklore_under_re_review": folklore_re_review,
+            "pending_account_flags": AdminAccountAction.objects.filter(
+                action=AdminAccountAction.Action.FLAG_SUSPICIOUS,
+                flag_status=AdminAccountAction.FlagStatus.PENDING,
+            ).count(),
+        },
+        "maintenance": {
+            "enabled": bool(site_content.maintenance_enabled) if site_content else False,
+            "message": (
+                site_content.maintenance_message
+                if site_content and site_content.maintenance_message
+                else DEFAULT_SITE_CONTENT["maintenance_message"]
+            ),
+            "updated_at": site_content.updated_at.isoformat() if site_content and site_content.updated_at else None,
+            "updated_by": site_content.updated_by.username if site_content and site_content.updated_by else "",
+        },
+        "latest_submissions": latest_submissions,
+        "latest_media_uploads": latest_media_uploads,
+        "recent_admin_overrides": recent_overrides,
     }
 
 
@@ -772,6 +1076,32 @@ def _admin_user_activity_rows(user):
             }
         )
 
+    for action in (
+        AdminAccountAction.objects.filter(Q(admin=user) | Q(target_user=user))
+        .select_related("admin", "target_user")
+        .order_by("-created_at")[:ADMIN_ACTIVITY_LIMIT]
+    ):
+        actor_prefix = "Admin action" if action.admin_id == user.id else "Account action"
+        detail_parts = []
+        if action.role:
+            detail_parts.append(action.role)
+        if action.flag_status != AdminAccountAction.FlagStatus.NONE:
+            detail_parts.append(action.flag_status)
+        if action.status_before or action.status_after:
+            detail_parts.append(f"{action.status_before} -> {action.status_after}")
+        rows.append(
+            {
+                "id": f"admin-account-action-{action.id}",
+                "kind": "admin_account_action",
+                "label": f"{actor_prefix}: {action.get_action_display()}",
+                "detail": " · ".join(detail_parts),
+                "target_type": "user",
+                "target_id": str(action.target_user_id),
+                "target_label": action.target_user.username,
+                "created_at": action.created_at,
+            }
+        )
+
     rows.sort(key=lambda item: item["created_at"], reverse=True)
     return rows[:ADMIN_ACTIVITY_LIMIT]
 
@@ -783,10 +1113,25 @@ def auth_csrf_view(request):
 
 
 @require_GET
+def captcha_challenge_view(request):
+    return JsonResponse(_captcha_challenge_payload())
+
+
+@require_GET
 def auth_me_view(request):
     if not request.user.is_authenticated:
         return JsonResponse({"is_authenticated": False})
     return JsonResponse(_serialize_auth_user(request.user, request=request))
+
+
+@require_GET
+def admin_overview_view(request):
+    auth_error = _require_authenticated(request)
+    if auth_error:
+        return auth_error
+    if not is_admin(request.user):
+        return JsonResponse({"detail": "Admin access required."}, status=403)
+    return JsonResponse(_admin_overview_payload(request))
 
 
 @require_http_methods(["POST"])
@@ -974,6 +1319,31 @@ def site_content_view(request):
         return error
 
     row, _ = SiteContentSettings.objects.get_or_create(key="default")
+    row.brand_name = (
+        str(payload.get("brand_name", "")).strip()
+        or DEFAULT_SITE_CONTENT["brand_name"]
+    )
+    row.brand_logo_url = str(payload.get("brand_logo_url", "")).strip()
+    row.landing_intro_text = (
+        str(payload.get("landing_intro_text", "")).strip()
+        or DEFAULT_SITE_CONTENT["landing_intro_text"]
+    )
+    row.landing_body_text = (
+        str(payload.get("landing_body_text", "")).strip()
+        or DEFAULT_SITE_CONTENT["landing_body_text"]
+    )
+    row.footer_left_text = (
+        str(payload.get("footer_left_text", "")).strip()
+        or DEFAULT_SITE_CONTENT["footer_left_text"]
+    )
+    row.footer_center_text = (
+        str(payload.get("footer_center_text", "")).strip()
+        or DEFAULT_SITE_CONTENT["footer_center_text"]
+    )
+    row.footer_right_text = (
+        str(payload.get("footer_right_text", "")).strip()
+        or DEFAULT_SITE_CONTENT["footer_right_text"]
+    )
     row.about_heading = str(payload.get("about_heading", "")).strip()
     row.about_intro_paragraphs = _sanitize_paragraphs(payload.get("about_intro_paragraphs", []))
     row.about_body_paragraphs = _sanitize_paragraphs(payload.get("about_body_paragraphs", []))
@@ -985,6 +1355,9 @@ def site_content_view(request):
     row.support_statements = _sanitize_support_statements(payload.get("support_statements", []))
     row.partner_details = _sanitize_partner_details(payload.get("partner_details", []))
     row.faq_sections = _sanitize_faq_sections(payload.get("faq_sections", []))
+    row.privacy_notice_paragraphs = _sanitize_paragraphs(payload.get("privacy_notice_paragraphs", []))
+    row.media_upload_policy_paragraphs = _sanitize_paragraphs(payload.get("media_upload_policy_paragraphs", []))
+    row.contributor_agreement_paragraphs = _sanitize_paragraphs(payload.get("contributor_agreement_paragraphs", []))
     row.maintenance_enabled = _payload_bool(payload.get("maintenance_enabled"))
     row.maintenance_message = (
         str(payload.get("maintenance_message", "")).strip()
@@ -1014,6 +1387,60 @@ def site_content_faq_media_view(request):
     if extension not in {"jpg", "jpeg", "png", "webp", "gif"}:
         extension = "jpg"
     stored_path = default_storage.save(f"site/faq/{uuid.uuid4()}.{extension}", uploaded)
+    return JsonResponse(
+        {
+            "url": request.build_absolute_uri(default_storage.url(stored_path)),
+            "path": stored_path,
+        },
+        status=201,
+    )
+
+
+@require_http_methods(["POST"])
+def site_content_partner_media_view(request):
+    auth_error = _require_authenticated(request)
+    if auth_error:
+        return auth_error
+    if not is_admin(request.user):
+        return JsonResponse({"detail": "Admin access required."}, status=403)
+
+    uploaded = request.FILES.get("image")
+    if not uploaded:
+        return JsonResponse({"detail": "Logo image is required."}, status=400)
+    if not (uploaded.content_type or "").startswith("image/"):
+        return JsonResponse({"detail": "Please upload an image file."}, status=400)
+
+    extension = uploaded.name.rsplit(".", 1)[-1].lower() if "." in uploaded.name else "png"
+    if extension not in {"jpg", "jpeg", "png", "webp", "gif"}:
+        extension = "png"
+    stored_path = default_storage.save(f"site/partners/{uuid.uuid4()}.{extension}", uploaded)
+    return JsonResponse(
+        {
+            "url": request.build_absolute_uri(default_storage.url(stored_path)),
+            "path": stored_path,
+        },
+        status=201,
+    )
+
+
+@require_http_methods(["POST"])
+def site_content_brand_media_view(request):
+    auth_error = _require_authenticated(request)
+    if auth_error:
+        return auth_error
+    if not is_admin(request.user):
+        return JsonResponse({"detail": "Admin access required."}, status=403)
+
+    uploaded = request.FILES.get("image")
+    if not uploaded:
+        return JsonResponse({"detail": "Brand logo image is required."}, status=400)
+    if not (uploaded.content_type or "").startswith("image/"):
+        return JsonResponse({"detail": "Please upload an image file."}, status=400)
+
+    extension = uploaded.name.rsplit(".", 1)[-1].lower() if "." in uploaded.name else "png"
+    if extension not in {"jpg", "jpeg", "png", "webp", "gif"}:
+        extension = "png"
+    stored_path = default_storage.save(f"site/brand/{uuid.uuid4()}.{extension}", uploaded)
     return JsonResponse(
         {
             "url": request.build_absolute_uri(default_storage.url(stored_path)),
@@ -1161,6 +1588,43 @@ def _parse_json_body(request):
         return json.loads(request.body or "{}"), None
     except json.JSONDecodeError:
         return None, JsonResponse({"detail": "Invalid JSON body."}, status=400)
+
+
+def _captcha_challenge_payload():
+    first = random.randint(2, 9)
+    second = random.randint(2, 9)
+    token = signing.dumps(
+        {"answer": first + second},
+        salt=CAPTCHA_SALT,
+    )
+    return {
+        "question": f"What is {first} + {second}?",
+        "token": token,
+        "expires_in_seconds": CAPTCHA_MAX_AGE_SECONDS,
+    }
+
+
+def _validate_captcha_payload(payload):
+    token = str(payload.get("captcha_token", "") or "").strip()
+    answer = str(payload.get("captcha_answer", "") or "").strip()
+    if not token or not answer:
+        raise ValidationError("CAPTCHA answer is required.")
+    try:
+        signed = signing.loads(
+            token,
+            salt=CAPTCHA_SALT,
+            max_age=CAPTCHA_MAX_AGE_SECONDS,
+        )
+    except signing.SignatureExpired:
+        raise ValidationError("CAPTCHA expired. Please try again.")
+    except signing.BadSignature:
+        raise ValidationError("CAPTCHA could not be verified. Please try again.")
+    try:
+        parsed_answer = int(answer)
+    except ValueError:
+        raise ValidationError("CAPTCHA answer must be a number.")
+    if parsed_answer != int(signed.get("answer")):
+        raise ValidationError("CAPTCHA answer is incorrect.")
 
 
 def _payload_bool(value):
@@ -1511,6 +1975,7 @@ def create_role_application_view(request):
 
     target_role = str(payload.get("target_role", "")).strip().lower()
     try:
+        _validate_captcha_payload(payload)
         if request.user.is_authenticated:
             applicant = request.user
             created_applicant = False
@@ -1706,9 +2171,23 @@ def admin_role_applications_view(request):
         "applicant__groups",
         "decisions__decided_by",
     )
-    if status:
-        rows = rows.filter(status=status)
-    rows = rows.order_by("-created_at")
+    if status == RoleApplication.Status.PENDING:
+        rows = rows.filter(status=RoleApplication.Status.PENDING).exclude(
+            decisions__decided_by=request.user
+        )
+    elif status == "awaiting_quorum":
+        rows = rows.filter(
+            status=RoleApplication.Status.PENDING,
+            decisions__decided_by=request.user,
+            decisions__decision=RoleApplicationDecision.Decision.APPROVE,
+        )
+    elif status == RoleApplication.Status.APPROVED:
+        rows = rows.filter(status=RoleApplication.Status.APPROVED)
+    elif status == RoleApplication.Status.REJECTED:
+        rows = rows.filter(status=RoleApplication.Status.REJECTED)
+    elif status and status != "all":
+        rows = rows.none()
+    rows = rows.order_by("-created_at").distinct()
 
     return JsonResponse({"rows": [_serialize_role_application(request, row) for row in rows]})
 
@@ -1724,7 +2203,22 @@ def admin_users_view(request):
     query = (request.GET.get("q") or "").strip()
     group = (request.GET.get("group") or "").strip()
 
-    rows = User.objects.select_related("profile", "contribution_stats").prefetch_related("groups")
+    approved_roles = [
+        RoleOnboardingRecord.Role.ADMIN,
+        RoleOnboardingRecord.Role.CONSULTANT,
+        RoleOnboardingRecord.Role.REVIEWER,
+        RoleOnboardingRecord.Role.CONTRIBUTOR,
+    ]
+    approved_groups = ["Admin", "Consultant", "Reviewer", "Contributor"]
+    rows = (
+        User.objects.select_related("profile", "contribution_stats")
+        .prefetch_related("groups")
+        .filter(
+            Q(is_superuser=True)
+            | Q(groups__name__in=approved_groups)
+            | Q(role_onboarding_records__role__in=approved_roles)
+        )
+    )
     if query:
         rows = rows.filter(
             Q(username__icontains=query)
@@ -1736,9 +2230,16 @@ def admin_users_view(request):
             | Q(profile__affiliation__icontains=query)
         )
     if group == "Admin":
-        rows = rows.filter(Q(groups__name="Admin") | Q(is_superuser=True))
+        rows = rows.filter(
+            Q(groups__name="Admin")
+            | Q(is_superuser=True)
+            | Q(role_onboarding_records__role=RoleOnboardingRecord.Role.ADMIN)
+        )
     elif group and group != "all":
-        rows = rows.filter(groups__name=group)
+        rows = rows.filter(
+            Q(groups__name=group)
+            | Q(role_onboarding_records__role=group.lower())
+        )
 
     rows = rows.order_by("username").distinct()
     return JsonResponse({"rows": [_serialize_admin_user(request, row) for row in rows]})
@@ -1752,11 +2253,26 @@ def admin_consultant_profile_view(request):
     if not is_admin(request.user):
         return JsonResponse({"detail": "Admin access required."}, status=403)
 
-    payload, parse_error = _parse_json_body(request)
-    if parse_error:
-        return parse_error
+    if request.content_type and request.content_type.startswith("multipart/form-data"):
+        payload = request.POST
+        uploaded_photo = request.FILES.get("profile_photo")
+    else:
+        payload, parse_error = _parse_json_body(request)
+        if parse_error:
+            return parse_error
+        uploaded_photo = None
 
     try:
+        cultural_affiliations = _sanitize_affiliation_rows(
+            payload.get("cultural_affiliations", []),
+            "role",
+            "organization",
+        )
+        other_affiliations = _sanitize_affiliation_rows(
+            payload.get("other_affiliations", []),
+            "designation",
+            "institution",
+        )
         user, record = create_consultant_profile(
             created_by=request.user,
             first_name=payload.get("first_name", ""),
@@ -1766,7 +2282,10 @@ def admin_consultant_profile_view(request):
             post_nominals=payload.get("post_nominals", ""),
             affiliation=payload.get("affiliation", ""),
             occupation=payload.get("occupation", ""),
+            cultural_affiliations=cultural_affiliations,
+            other_affiliations=other_affiliations,
             bio=payload.get("bio", ""),
+            profile_photo=uploaded_photo,
             notes=payload.get("notes", ""),
         )
     except ValidationError as exc:
@@ -1779,6 +2298,66 @@ def admin_consultant_profile_view(request):
             "accountability_label": format_accountability_label(record),
         },
         status=201,
+    )
+
+
+@require_http_methods(["POST"])
+def admin_consultant_profile_detail_view(request, username):
+    auth_error = _require_authenticated(request)
+    if auth_error:
+        return auth_error
+    if not is_admin(request.user):
+        return JsonResponse({"detail": "Admin access required."}, status=403)
+
+    user = User.objects.filter(username=username).first()
+    if not user:
+        return JsonResponse({"detail": "Consultant profile not found."}, status=404)
+
+    if request.content_type and request.content_type.startswith("multipart/form-data"):
+        payload = request.POST
+        uploaded_photo = request.FILES.get("profile_photo")
+    else:
+        payload, parse_error = _parse_json_body(request)
+        if parse_error:
+            return parse_error
+        uploaded_photo = None
+
+    try:
+        cultural_affiliations = _sanitize_affiliation_rows(
+            payload.get("cultural_affiliations", []),
+            "role",
+            "organization",
+        )
+        other_affiliations = _sanitize_affiliation_rows(
+            payload.get("other_affiliations", []),
+            "designation",
+            "institution",
+        )
+        user, record = update_managed_consultant_profile(
+            updated_by=request.user,
+            user=user,
+            first_name=payload.get("first_name", ""),
+            last_name=payload.get("last_name", ""),
+            email=payload.get("email", ""),
+            municipality=payload.get("municipality", ""),
+            post_nominals=payload.get("post_nominals", ""),
+            affiliation=payload.get("affiliation", ""),
+            occupation=payload.get("occupation", ""),
+            cultural_affiliations=cultural_affiliations,
+            other_affiliations=other_affiliations,
+            bio=payload.get("bio", ""),
+            profile_photo=uploaded_photo,
+            notes=payload.get("notes") if "notes" in payload else None,
+        )
+    except ValidationError as exc:
+        return JsonResponse({"detail": _validation_detail(exc)}, status=400)
+
+    return JsonResponse(
+        {
+            "user": _serialize_admin_user(request, user),
+            "onboarding_record_id": str(record.id),
+            "accountability_label": format_accountability_label(record),
+        }
     )
 
 
@@ -1800,6 +2379,296 @@ def admin_user_activity_view(request, username):
             "username": user.username,
             "limit": ADMIN_ACTIVITY_LIMIT,
             "rows": [_serialize_admin_activity_row(row) for row in rows],
+        }
+    )
+
+
+@require_http_methods(["POST"])
+def admin_user_status_view(request, username):
+    auth_error = _require_authenticated(request)
+    if auth_error:
+        return auth_error
+    if not is_admin(request.user):
+        return JsonResponse({"detail": "Admin access required."}, status=403)
+
+    target_user = User.objects.filter(username=username).first()
+    if not target_user:
+        return JsonResponse({"detail": "User not found."}, status=404)
+
+    payload, parse_error = _parse_json_body(request)
+    if parse_error:
+        return parse_error
+    if "is_active" not in payload:
+        return JsonResponse({"detail": "is_active is required."}, status=400)
+
+    next_active = _payload_bool(payload.get("is_active"))
+    notes = str(payload.get("notes", "") or "").strip()
+    if not next_active and not notes:
+        return JsonResponse({"detail": "Deactivation requires notes."}, status=400)
+    if target_user.id == request.user.id and not next_active:
+        return JsonResponse({"detail": "You cannot deactivate your own account."}, status=400)
+    if not next_active and is_admin(target_user) and _active_admin_count() <= 1:
+        return JsonResponse({"detail": "Cannot deactivate the final active admin."}, status=400)
+
+    before = "active" if target_user.is_active else "inactive"
+    target_user.is_active = next_active
+    target_user.save(update_fields=["is_active"])
+    after = "active" if target_user.is_active else "inactive"
+    action = (
+        AdminAccountAction.Action.REACTIVATE
+        if next_active
+        else AdminAccountAction.Action.DEACTIVATE
+    )
+    _record_admin_account_action(
+        target_user=target_user,
+        admin=request.user,
+        action=action,
+        notes=notes,
+        status_before=before,
+        status_after=after,
+    )
+    return JsonResponse({"user": _serialize_admin_user(request, target_user)})
+
+
+@require_http_methods(["POST"])
+def admin_user_password_reset_view(request, username):
+    auth_error = _require_authenticated(request)
+    if auth_error:
+        return auth_error
+    if not is_admin(request.user):
+        return JsonResponse({"detail": "Admin access required."}, status=403)
+
+    target_user = User.objects.filter(username=username).first()
+    if not target_user:
+        return JsonResponse({"detail": "User not found."}, status=404)
+    if not target_user.email:
+        return JsonResponse({"detail": "This account has no email address for password reset."}, status=400)
+    if not target_user.is_active:
+        return JsonResponse({"detail": "Reactivate the account before sending a password reset."}, status=400)
+
+    payload, parse_error = _parse_json_body(request)
+    if parse_error:
+        return parse_error
+    notes = str(payload.get("notes", "") or "").strip()
+
+    form = PasswordResetForm({"email": target_user.email})
+    if not form.is_valid():
+        return JsonResponse({"detail": "Password reset email could not be prepared."}, status=400)
+    try:
+        form.save(
+            request=request,
+            use_https=request.is_secure(),
+            from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
+            email_template_name="registration/password_reset_email.html",
+            subject_template_name="registration/password_reset_subject.txt",
+        )
+    except Exception as exc:
+        return JsonResponse(
+            {
+                "detail": (
+                    "Password reset action was not sent. "
+                    f"{type(exc).__name__}: {exc}"
+                )
+            },
+            status=500,
+        )
+
+    _record_admin_account_action(
+        target_user=target_user,
+        admin=request.user,
+        action=AdminAccountAction.Action.SEND_PASSWORD_RESET,
+        notes=notes,
+        status_before="email_available",
+        status_after="reset_link_sent",
+    )
+    return JsonResponse({"detail": f"Password reset link sent to {target_user.email}."})
+
+
+@require_http_methods(["POST"])
+def admin_user_revoke_role_view(request, username):
+    auth_error = _require_authenticated(request)
+    if auth_error:
+        return auth_error
+    if not is_admin(request.user):
+        return JsonResponse({"detail": "Admin access required."}, status=403)
+
+    target_user = User.objects.filter(username=username).prefetch_related("groups").first()
+    if not target_user:
+        return JsonResponse({"detail": "User not found."}, status=404)
+
+    payload, parse_error = _parse_json_body(request)
+    if parse_error:
+        return parse_error
+    role = str(payload.get("role", "") or "").strip().lower()
+    notes = str(payload.get("notes", "") or "").strip()
+    if not notes:
+        return JsonResponse({"detail": "Role revocation requires notes."}, status=400)
+    if target_user.id == request.user.id and role == "admin":
+        return JsonResponse({"detail": "You cannot revoke your own admin access."}, status=400)
+
+    before_groups = ", ".join(target_user.groups.order_by("name").values_list("name", flat=True)) or "none"
+    try:
+        removed_groups = _apply_role_revocation(target_user, role)
+    except ValidationError as exc:
+        return JsonResponse({"detail": _validation_detail(exc)}, status=400)
+    target_user.refresh_from_db()
+    after_groups = ", ".join(target_user.groups.order_by("name").values_list("name", flat=True)) or "none"
+    _record_admin_account_action(
+        target_user=target_user,
+        admin=request.user,
+        action=AdminAccountAction.Action.REVOKE_ROLE,
+        notes=notes,
+        role=role,
+        status_before=before_groups,
+        status_after=after_groups,
+    )
+    return JsonResponse(
+        {
+            "user": _serialize_admin_user(request, target_user),
+            "removed_groups": removed_groups,
+        }
+    )
+
+
+@require_http_methods(["POST"])
+def admin_user_suspicious_flag_view(request, username):
+    auth_error = _require_authenticated(request)
+    if auth_error:
+        return auth_error
+    if not is_admin(request.user):
+        return JsonResponse({"detail": "Admin access required."}, status=403)
+
+    target_user = User.objects.filter(username=username).first()
+    if not target_user:
+        return JsonResponse({"detail": "User not found."}, status=404)
+
+    payload, parse_error = _parse_json_body(request)
+    if parse_error:
+        return parse_error
+    notes = str(payload.get("notes", "") or "").strip()
+    if not notes:
+        return JsonResponse({"detail": "Suspicious-account flag requires notes."}, status=400)
+    if _pending_account_flags_for_user(target_user).exists():
+        return JsonResponse({"detail": "This account already has a pending suspicious-account flag."}, status=400)
+
+    action = _record_admin_account_action(
+        target_user=target_user,
+        admin=request.user,
+        action=AdminAccountAction.Action.FLAG_SUSPICIOUS,
+        notes=notes,
+        status_before="normal",
+        status_after="flagged_for_review",
+        flag_status=AdminAccountAction.FlagStatus.PENDING,
+    )
+    return JsonResponse(
+        {
+            "flag": _admin_account_action_payload(action),
+            "user": _serialize_admin_user(request, target_user),
+        },
+        status=201,
+    )
+
+
+@require_http_methods(["POST"])
+def public_user_suspicious_flag_view(request, username):
+    auth_error = _require_authenticated(request)
+    if auth_error:
+        return auth_error
+
+    target_user = User.objects.filter(username=username).first()
+    if not target_user:
+        return JsonResponse({"detail": "User not found."}, status=404)
+    if target_user.pk == request.user.pk:
+        return JsonResponse({"detail": "You cannot flag your own account."}, status=400)
+
+    payload, parse_error = _parse_json_body(request)
+    if parse_error:
+        return parse_error
+    try:
+        _validate_captcha_payload(payload)
+    except ValidationError as error:
+        return JsonResponse({"detail": error.messages[0]}, status=400)
+
+    notes = str(payload.get("notes", "") or "").strip()
+    if not notes:
+        return JsonResponse({"detail": "Suspicious-account flag requires a reason."}, status=400)
+    if _pending_account_flags_for_user(target_user).exists():
+        return JsonResponse({"detail": "This account already has a pending suspicious-account flag."}, status=400)
+
+    action = _record_admin_account_action(
+        target_user=target_user,
+        admin=request.user,
+        action=AdminAccountAction.Action.FLAG_SUSPICIOUS,
+        notes=notes,
+        status_before="normal",
+        status_after="flagged_for_review",
+        flag_status=AdminAccountAction.FlagStatus.PENDING,
+    )
+    return JsonResponse(
+        {
+            "detail": "Account flag sent for admin review.",
+            "flag": _admin_account_action_payload(action),
+        },
+        status=201,
+    )
+
+
+@require_http_methods(["POST"])
+def admin_account_flag_resolution_view(request, action_id):
+    auth_error = _require_authenticated(request)
+    if auth_error:
+        return auth_error
+    if not is_admin(request.user):
+        return JsonResponse({"detail": "Admin access required."}, status=403)
+
+    flag = (
+        AdminAccountAction.objects.select_related("target_user", "admin", "resolved_by")
+        .filter(
+            id=action_id,
+            action=AdminAccountAction.Action.FLAG_SUSPICIOUS,
+        )
+        .first()
+    )
+    if not flag:
+        return JsonResponse({"detail": "Suspicious-account flag not found."}, status=404)
+    if flag.flag_status != AdminAccountAction.FlagStatus.PENDING:
+        return JsonResponse({"detail": "This flag has already been resolved."}, status=400)
+
+    payload, parse_error = _parse_json_body(request)
+    if parse_error:
+        return parse_error
+    decision = str(payload.get("decision", "") or "").strip().lower()
+    notes = str(payload.get("notes", "") or "").strip()
+    if decision not in ["clear", "confirm"]:
+        return JsonResponse({"detail": "decision must be clear or confirm."}, status=400)
+    if not notes:
+        return JsonResponse({"detail": "Flag resolution requires notes."}, status=400)
+
+    if decision == "clear":
+        flag.flag_status = AdminAccountAction.FlagStatus.CLEARED
+        resolution_action = AdminAccountAction.Action.CLEAR_SUSPICIOUS_FLAG
+        status_after = "flag_cleared"
+    else:
+        flag.flag_status = AdminAccountAction.FlagStatus.CONFIRMED
+        resolution_action = AdminAccountAction.Action.CONFIRM_SUSPICIOUS_FLAG
+        status_after = "flag_confirmed"
+    flag.resolved_by = request.user
+    flag.resolved_at = timezone.now()
+    flag.resolution_notes = notes
+    flag.save(update_fields=["flag_status", "resolved_by", "resolved_at", "resolution_notes"])
+
+    _record_admin_account_action(
+        target_user=flag.target_user,
+        admin=request.user,
+        action=resolution_action,
+        notes=notes,
+        status_before="flagged_for_review",
+        status_after=status_after,
+    )
+    return JsonResponse(
+        {
+            "flag": _admin_account_action_payload(flag),
+            "user": _serialize_admin_user(request, flag.target_user),
         }
     )
 
@@ -1914,7 +2783,11 @@ def admin_email_role_invitation_view(request):
         return JsonResponse({"detail": "Reviewer or admin access required."}, status=403)
 
     if request.method == "GET":
-        rows = RoleInvitation.objects.select_related("invited_by", "accepted_by").order_by("-created_at")[:50]
+        rows = (
+            RoleInvitation.objects.select_related("invited_by", "accepted_by")
+            .filter(invited_by=request.user)
+            .order_by("-created_at")[:50]
+        )
         return JsonResponse({"rows": [_serialize_role_invitation(row) for row in rows]})
 
     payload, parse_error = _parse_json_body(request)
@@ -1922,6 +2795,7 @@ def admin_email_role_invitation_view(request):
         return parse_error
 
     try:
+        _validate_captcha_payload(payload)
         email = _clean_email(payload.get("email", ""))
     except ValidationError as exc:
         return JsonResponse({"detail": _validation_detail(exc)}, status=400)
@@ -1995,6 +2869,9 @@ def public_accept_role_invitation_view(request, token):
     if parse_error:
         return parse_error
 
+    first_name = str(payload.get("first_name", "") or "").strip()
+    last_name = str(payload.get("last_name", "") or "").strip()
+    municipality = str(payload.get("municipality", "") or "").strip()
     username = str(payload.get("username", "")).strip()
     password = str(payload.get("password", ""))
     password_confirm = str(payload.get("password_confirm", ""))
@@ -2019,6 +2896,9 @@ def public_accept_role_invitation_view(request, token):
         validate_password(password)
         invitation, record = accept_email_role_invitation(
             token=token,
+            first_name=first_name,
+            last_name=last_name,
+            municipality=municipality,
             username=username,
             password=password,
         )

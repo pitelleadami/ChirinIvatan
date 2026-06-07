@@ -3,6 +3,7 @@ URL configuration for backend project.
 """
 
 from django.contrib import admin
+from django.contrib.auth import views as auth_views
 from django.urls import include, path
 from django.conf import settings
 from django.conf.urls.static import static
@@ -38,6 +39,16 @@ urlpatterns = [
     path("", include("dictionary.urls")),
     path("", include("folklore.urls")),
     path("", include("reviews.urls")),
+    path(
+        "accounts/reset/<uidb64>/<token>/",
+        auth_views.PasswordResetConfirmView.as_view(),
+        name="password_reset_confirm",
+    ),
+    path(
+        "accounts/reset/done/",
+        auth_views.PasswordResetCompleteView.as_view(),
+        name="password_reset_complete",
+    ),
     path('admin/', admin.site.urls),
 ]
 

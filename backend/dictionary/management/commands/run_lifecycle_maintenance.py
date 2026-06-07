@@ -3,7 +3,7 @@ Management command: run_lifecycle_maintenance
 
 Applies lifecycle automation for dictionary and folklore entries:
 - auto-archive old rejected entries
-- auto-delete old archived entries
+- preserve archived entries until an explicitly approved manual deletion workflow exists
 """
 
 from datetime import timedelta
@@ -25,34 +25,20 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         now = timezone.now()
         archive_cutoff = now - timedelta(days=365)
-        # "Archived entries after 1 additional year are auto-deleted."
-        delete_cutoff = now - timedelta(days=365)
-
         archived_dictionary = self._archive_rejected_dictionary_entries(
             cutoff=archive_cutoff,
             now=now,
         )
-        deleted_dictionary = self._delete_old_archived_dictionary_entries(
-            cutoff=delete_cutoff,
-        )
-        deleted_rejected_revisions = self._delete_stale_rejected_dictionary_revisions(
-            cutoff=delete_cutoff,
-        )
         archived_folklore = self._archive_rejected_folklore_entries(
             cutoff=archive_cutoff,
-        )
-        deleted_folklore = self._delete_old_archived_folklore_entries(
-            cutoff=delete_cutoff,
         )
 
         self.stdout.write(
             self.style.SUCCESS(
                 "Lifecycle maintenance complete: "
                 f"dictionary_archived={archived_dictionary}, "
-                f"dictionary_deleted={deleted_dictionary}, "
-                f"dictionary_rejected_revisions_deleted={deleted_rejected_revisions}, "
                 f"folklore_archived={archived_folklore}, "
-                f"folklore_deleted={deleted_folklore}"
+                "automatic_deletion=disabled"
             )
         )
 

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 
+import ArchiveEntryDialog from '../components/ArchiveEntryDialog'
 import { apiRequest } from '../lib/api'
 import { ROUTES, navigate } from '../lib/router'
 
@@ -115,6 +116,11 @@ function canModerateLiveEntries(user) {
   return Boolean(user?.is_superuser || groups.includes('Admin') || groups.includes('Reviewer'))
 }
 
+function isAdminUser(user) {
+  const groups = user?.groups || []
+  return Boolean(user?.is_superuser || groups.includes('Admin'))
+}
+
 export default function DictionaryViewerPage({ currentUser }) {
   const [searchTerm, setSearchTerm] = useState('')
   const [letter, setLetter] = useState('All')
@@ -140,6 +146,10 @@ export default function DictionaryViewerPage({ currentUser }) {
   const [flagNotes, setFlagNotes] = useState('')
   const [flagBusy, setFlagBusy] = useState(false)
   const [flagMessage, setFlagMessage] = useState('')
+  const [archiveDialogOpen, setArchiveDialogOpen] = useState(false)
+  const [archiveNotes, setArchiveNotes] = useState('')
+  const [archiveBusy, setArchiveBusy] = useState(false)
+  const [archiveMessage, setArchiveMessage] = useState('')
 
   const wordOfDay = useMemo(() => {
     const sourceRows = wordOfDayRows.length ? wordOfDayRows : latestRows
@@ -264,6 +274,9 @@ export default function DictionaryViewerPage({ currentUser }) {
     setFlagPanelOpen(false)
     setFlagNotes('')
     setFlagMessage('')
+    setArchiveMessage('')
+    setArchiveDialogOpen(false)
+    setArchiveNotes('')
     try {
       const payload = await apiRequest(`/api/dictionary/entries/${entryId}`)
       setDetail(payload)
@@ -308,6 +321,42 @@ export default function DictionaryViewerPage({ currentUser }) {
       setError(requestError.message)
     } finally {
       setFlagBusy(false)
+    }
+  }
+
+  async function archiveEntry(event) {
+    event.preventDefault()
+    const entryId = detail?.header?.entry_id
+    const notes = archiveNotes.trim()
+    if (!entryId || !notes) {
+      setError('Admin notes are required to archive this entry.')
+      return
+    }
+
+    setArchiveBusy(true)
+    setError('')
+    try {
+      await apiRequest('/api/auth/csrf')
+      await apiRequest('/api/reviews/admin/override', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          target_type: 'dictionary',
+          target_id: entryId,
+          action: 'archive',
+          notes,
+        }),
+      })
+      setArchiveDialogOpen(false)
+      setArchiveNotes('')
+      setDetail(null)
+      setShowRevisionHistory(false)
+      setArchiveMessage(`${detail.header?.term || 'Entry'} was archived and removed from public use.`)
+      await Promise.all([loadList({ q: searchTerm, startsWith: letter }), loadLatest()])
+    } catch (requestError) {
+      setError(requestError.message)
+    } finally {
+      setArchiveBusy(false)
     }
   }
 
@@ -386,6 +435,7 @@ export default function DictionaryViewerPage({ currentUser }) {
       )}
 
       {error && <section className="alert error">{error}</section>}
+      {archiveMessage && <section className="alert ok">{archiveMessage}</section>}
 
       <section
         className={
@@ -754,6 +804,19 @@ export default function DictionaryViewerPage({ currentUser }) {
 
                   {flagMessage && <section className="alert ok">{flagMessage}</section>}
 
+                  {isAdminUser(currentUser) && (
+                    <button
+                      type="button"
+                      className="live-review-archive-trigger"
+                      onClick={() => {
+                        setArchiveMessage('')
+                        setArchiveDialogOpen(true)
+                      }}
+                    >
+                      Archive entry
+                    </button>
+                  )}
+
                   {canModerateLiveEntries(currentUser) && detail.review_action?.can_flag_for_rereview && (
                     <>
                       {!flagPanelOpen && (
@@ -858,6 +921,18 @@ export default function DictionaryViewerPage({ currentUser }) {
           )}
         </aside>
       </section>
+      <ArchiveEntryDialog
+        open={archiveDialogOpen}
+        title={detail?.header?.term || 'Dictionary entry'}
+        notes={archiveNotes}
+        busy={archiveBusy}
+        onNotesChange={setArchiveNotes}
+        onCancel={() => {
+          setArchiveDialogOpen(false)
+          setArchiveNotes('')
+        }}
+        onConfirm={archiveEntry}
+      />
     </div>
   )
 }

@@ -57,6 +57,9 @@ export default function YaruPage({ currentUser = {} }) {
   const groups = currentUser.groups || []
   const isAdminUser = currentUser.is_superuser || groups.includes('Admin')
   const canShowJoinNow = !currentUser.is_authenticated || isAdminUser
+  const visiblePartnerDetails = content.partner_details.filter((partner) => (
+    partner?.name || partner?.logo_url || partner?.url
+  ))
 
   useEffect(() => {
     let ignore = false
@@ -184,11 +187,11 @@ export default function YaruPage({ currentUser = {} }) {
         )}
       </section>
 
-      <section className="yaru-partner-section">
-        <h2>Partners</h2>
-        {content.partner_details.length > 0 ? (
+      {visiblePartnerDetails.length > 0 && (
+        <section className="yaru-partner-section">
+          <h2>Partners</h2>
           <div className="partner-grid">
-            {content.partner_details.map((partner, index) => (
+            {visiblePartnerDetails.map((partner, index) => (
               <a
                 key={`yaru-partner-${index}`}
                 className="partner-logo"
@@ -196,18 +199,19 @@ export default function YaruPage({ currentUser = {} }) {
                 target={partner.url ? '_blank' : undefined}
                 rel={partner.url ? 'noreferrer' : undefined}
               >
-                <span className="partner-logo-mark" aria-hidden="true">
-                  {partnerInitials(partner.name)}
-                </span>
+                {partner.logo_url ? (
+                  <img className="partner-logo-image" src={partner.logo_url} alt="" />
+                ) : (
+                  <span className="partner-logo-mark" aria-hidden="true">
+                    {partnerInitials(partner.name)}
+                  </span>
+                )}
                 <span className="partner-agency-name">{partner.name || 'Partner'}</span>
-                {partner.description && <span className="meta">{partner.description}</span>}
               </a>
             ))}
           </div>
-        ) : (
-          <p className="yaru-empty-note">Partner details will appear here once listed by the project admins.</p>
-        )}
-      </section>
+        </section>
+      )}
     </>
   )
 }

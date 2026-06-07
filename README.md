@@ -9,4 +9,12 @@ language resources by providing a centralized, interactive platform that support
 documentation, learning, and cultural participation—particularly for younger
 generations, educators, and cultural advocates.
 
+## Deployment status
+
+As of June 7, 2026, Chirin Ivatan is deployed onsite for controlled alpha
+testing. The current release is being evaluated through guided role-based
+workflows, content review, and usability feedback before wider beta testing.
+
+This is an active test deployment, not a general public production release.
+
 *IS295B implementation starting 2026-02*

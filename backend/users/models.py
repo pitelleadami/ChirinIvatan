@@ -71,6 +71,13 @@ class SiteContentSettings(models.Model):
     """
 
     key = models.CharField(max_length=32, unique=True, default="default")
+    brand_name = models.CharField(max_length=160, blank=True, default="Chirin Ivatan")
+    brand_logo_url = models.URLField(blank=True, default="")
+    landing_intro_text = models.TextField(blank=True, default="")
+    landing_body_text = models.TextField(blank=True, default="")
+    footer_left_text = models.CharField(max_length=255, blank=True, default="")
+    footer_center_text = models.CharField(max_length=255, blank=True, default="")
+    footer_right_text = models.CharField(max_length=255, blank=True, default="")
     about_heading = models.CharField(max_length=160, blank=True, default="")
     about_intro_paragraphs = models.JSONField(default=list, blank=True)
     about_body_paragraphs = models.JSONField(default=list, blank=True)
@@ -84,6 +91,9 @@ class SiteContentSettings(models.Model):
     support_statements = models.JSONField(default=list, blank=True)
     partner_details = models.JSONField(default=list, blank=True)
     faq_sections = models.JSONField(default=list, blank=True)
+    privacy_notice_paragraphs = models.JSONField(default=list, blank=True)
+    media_upload_policy_paragraphs = models.JSONField(default=list, blank=True)
+    contributor_agreement_paragraphs = models.JSONField(default=list, blank=True)
     maintenance_enabled = models.BooleanField(default=False)
     maintenance_message = models.TextField(
         blank=True,
@@ -240,6 +250,73 @@ class UserSessionEvent(models.Model):
         return f"{self.user_id}:{self.event_type}:{self.created_at}"
 
 
+class AdminAccountAction(models.Model):
+    """
+    Audit trail for high-impact account administration.
+
+    Suspicious-account flags intentionally stay as rows with a review status,
+    mirroring content re-review: the account is not forgotten after the first
+    flag, and another admin can later clear or confirm the concern with notes.
+    """
+
+    class Action(models.TextChoices):
+        DEACTIVATE = "deactivate", "Deactivate"
+        REACTIVATE = "reactivate", "Reactivate"
+        SEND_PASSWORD_RESET = "send_password_reset", "Send Password Reset"
+        REVOKE_ROLE = "revoke_role", "Revoke Role"
+        FLAG_SUSPICIOUS = "flag_suspicious", "Flag Suspicious"
+        CLEAR_SUSPICIOUS_FLAG = "clear_suspicious_flag", "Clear Suspicious Flag"
+        CONFIRM_SUSPICIOUS_FLAG = "confirm_suspicious_flag", "Confirm Suspicious Flag"
+
+    class FlagStatus(models.TextChoices):
+        NONE = "none", "None"
+        PENDING = "pending", "Pending"
+        CLEARED = "cleared", "Cleared"
+        CONFIRMED = "confirmed", "Confirmed"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    target_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="admin_account_actions",
+    )
+    admin = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="admin_account_actions_taken",
+    )
+    action = models.CharField(max_length=32, choices=Action.choices)
+    role = models.CharField(max_length=24, blank=True, default="")
+    notes = models.TextField(blank=True, default="")
+    status_before = models.CharField(max_length=80, blank=True, default="")
+    status_after = models.CharField(max_length=80, blank=True, default="")
+    flag_status = models.CharField(
+        max_length=16,
+        choices=FlagStatus.choices,
+        default=FlagStatus.NONE,
+    )
+    resolved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="admin_account_flags_resolved",
+    )
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolution_notes = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["target_user", "created_at"]),
+            models.Index(fields=["action", "flag_status", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.target_user_id}:{self.action}:{self.created_at}"
+
+
 class RoleApplication(models.Model):
     """
     Pending request from user to become contributor or reviewer.
@@ -394,6 +471,7 @@ class RoleInvitation(models.Model):
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
         ACCEPTED = "accepted", "Accepted"
+        REPLACED = "replaced", "Replaced"
         REVOKED = "revoked", "Revoked"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
