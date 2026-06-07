@@ -11,6 +11,7 @@ Design intent:
 import json
 
 from django.core.exceptions import ValidationError
+from django.db.models import Q
 from django.http import JsonResponse
 from django.views.decorators.http import require_GET, require_POST
 
@@ -40,6 +41,18 @@ def _active_rereview_round(revision: EntryRevision):
     return latest_flag.review_round if latest_flag else None
 
 
+def _active_folklore_rereview_round(revision: FolkloreRevision):
+    latest_flag = (
+        FolkloreReview.objects.filter(
+            folklore_revision=revision,
+            decision=FolkloreReview.Decision.FLAG,
+        )
+        .order_by("-review_round", "-created_at")
+        .first()
+    )
+    return latest_flag.review_round if latest_flag else None
+
+
 def _approval_sets_for_round(revision: EntryRevision, round_number: int):
     # Quorum depends on reviewer/admin composition, so we split sets by role.
     approvals = Review.objects.filter(
@@ -57,13 +70,39 @@ def _approval_sets_for_round(revision: EntryRevision, round_number: int):
     return reviewer_ids, admin_ids
 
 
-def _quorum_met(reviewer_ids, admin_ids):
-    # SPEC quorum:
-    # - 2 reviewers OR
-    # - 1 reviewer + 1 admin
-    return len(reviewer_ids) >= 2 or (
-        len(reviewer_ids) >= 1 and len(admin_ids) >= 1
+def _folklore_approval_sets_for_round(
+    revision: FolkloreRevision,
+    round_number: int,
+):
+    approvals = FolkloreReview.objects.filter(
+        folklore_revision=revision,
+        review_round=round_number,
+        decision=FolkloreReview.Decision.APPROVE,
     )
+    reviewer_ids = set()
+    admin_ids = set()
+    for row in approvals:
+        if is_admin(row.reviewer):
+            admin_ids.add(row.reviewer_id)
+        elif is_reviewer(row.reviewer):
+            reviewer_ids.add(row.reviewer_id)
+    return reviewer_ids, admin_ids
+
+
+def _quorum_met(reviewer_ids, admin_ids):
+    # Any two distinct qualified approvers satisfy quorum.
+    return len(reviewer_ids) + len(admin_ids) >= 2
+
+
+def _quorum_progress(reviewer_ids, admin_ids):
+    reviewer_count = len(reviewer_ids)
+    admin_count = len(admin_ids)
+    requirement = "Needs 1 more reviewer/admin approval"
+    return {
+        "reviewer_approvals": reviewer_count,
+        "admin_approvals": admin_count,
+        "quorum_requirement": requirement,
+    }
 
 
 def _serialize_pending_revision(revision: EntryRevision):
@@ -346,28 +385,28 @@ def reviewer_dashboard_view(request):
     ).order_by("-created_at")
     my_reviews = [_serialize_review(r) for r in my_reviews_qs]
 
-    # 4) Awaiting quorum after my approval
-    awaiting_quorum = []
+    # 4) Read-only status rows after this user approved but quorum is still open.
+    awaiting_dictionary_quorum = []
     for review in my_reviews_qs.filter(decision=Review.Decision.APPROVE):
         rev = review.revision
         if not rev:
             continue
 
         if review.review_round == 0:
-            # Initial workflow: still waiting if revision is still pending.
-            if rev.status == EntryRevision.Status.PENDING:
-                awaiting_quorum.append(
-                    {
-                        "revision_id": str(rev.id),
-                        "entry_id": str(rev.entry_id) if rev.entry_id else None,
-                        "review_round": 0,
-                        "context": "initial_review",
-                    }
-                )
+            if rev.status != EntryRevision.Status.PENDING:
+                continue
+            reviewer_ids, admin_ids = _approval_sets_for_round(rev, 0)
+            item = _serialize_pending_revision(rev)
+            item.update(
+                {
+                    "review_round": 0,
+                    "context": "initial_review",
+                    **_quorum_progress(reviewer_ids, admin_ids),
+                }
+            )
+            awaiting_dictionary_quorum.append(item)
             continue
 
-        # Re-review workflow:
-        # waiting means this round is still active and quorum is not yet met.
         active_round = _active_rereview_round(rev)
         if not active_round or review.review_round != active_round:
             continue
@@ -384,14 +423,86 @@ def reviewer_dashboard_view(request):
         if _quorum_met(reviewer_ids, admin_ids):
             continue
 
-        awaiting_quorum.append(
+        item = _serialize_pending_revision(rev)
+        item.update(
             {
-                "revision_id": str(rev.id),
-                "entry_id": str(rev.entry_id) if rev.entry_id else None,
                 "review_round": active_round,
                 "context": "rereview",
+                **_quorum_progress(reviewer_ids, admin_ids),
             }
         )
+        awaiting_dictionary_quorum.append(item)
+
+    my_folklore_reviews_qs = FolkloreReview.objects.filter(
+        reviewer=user,
+    ).select_related(
+        "folklore_revision",
+        "folklore_revision__entry",
+        "folklore_revision__contributor",
+    ).order_by("-created_at")
+    awaiting_folklore_quorum = []
+    for review in my_folklore_reviews_qs.filter(
+        decision=FolkloreReview.Decision.APPROVE,
+    ):
+        revision = review.folklore_revision
+
+        if review.review_round == 0:
+            if revision.status != FolkloreRevision.Status.PENDING:
+                continue
+            reviewer_ids, admin_ids = _folklore_approval_sets_for_round(
+                revision,
+                0,
+            )
+            item = _serialize_pending_folklore(revision)
+            item.update(
+                {
+                    "review_round": 0,
+                    "context": "initial_review",
+                    **_quorum_progress(reviewer_ids, admin_ids),
+                }
+            )
+            awaiting_folklore_quorum.append(item)
+            continue
+
+        active_round = _active_folklore_rereview_round(revision)
+        if not active_round or review.review_round != active_round:
+            continue
+        if (
+            not revision.entry
+            or revision.entry.status != FolkloreEntry.Status.APPROVED_UNDER_REVIEW
+        ):
+            continue
+        if FolkloreReview.objects.filter(
+            folklore_revision=revision,
+            review_round=active_round,
+            decision=FolkloreReview.Decision.REJECT,
+        ).exists():
+            continue
+
+        reviewer_ids, admin_ids = _folklore_approval_sets_for_round(
+            revision,
+            active_round,
+        )
+        if _quorum_met(reviewer_ids, admin_ids):
+            continue
+
+        item = _serialize_pending_folklore(revision)
+        item.update(
+            {
+                "review_round": active_round,
+                "context": "rereview",
+                **_quorum_progress(reviewer_ids, admin_ids),
+            }
+        )
+        awaiting_folklore_quorum.append(item)
+
+    awaiting_quorum = [
+        *(
+            {"kind": "dictionary", **item}
+            for item in awaiting_dictionary_quorum
+        ),
+        *({"kind": "folklore", **item} for item in awaiting_folklore_quorum),
+    ]
 
     return JsonResponse(
         {
@@ -399,11 +510,13 @@ def reviewer_dashboard_view(request):
                 "pending_submissions": pending_initial,
                 "pending_rereview": pending_rereview,
                 "published_entries": dictionary_published,
+                "awaiting_quorum_after_my_approval": awaiting_dictionary_quorum,
             },
             "folklore": {
                 "pending_submissions": pending_folklore,
                 "pending_rereview": pending_folklore_rereview,
                 "published_entries": folklore_published,
+                "awaiting_quorum_after_my_approval": awaiting_folklore_quorum,
             },
             "reviews": {
                 "my_reviews": my_reviews,
@@ -418,6 +531,57 @@ def reviewer_dashboard_view(request):
             "published_folklore_entries": folklore_published,
             "my_reviews": my_reviews,
             "awaiting_quorum_after_my_approval": awaiting_quorum,
+        }
+    )
+
+
+def _serialize_archive_entry(entry, target_type):
+    contributor = entry.initial_contributor if target_type == "dictionary" else entry.contributor
+    return {
+        "target_type": target_type,
+        "target_id": str(entry.id),
+        "title": entry.term if target_type == "dictionary" else entry.title,
+        "status": entry.status,
+        "contributor_username": contributor.username if contributor else "",
+        "created_at": entry.created_at.isoformat() if entry.created_at else None,
+        "archived_at": entry.archived_at.isoformat() if entry.archived_at else None,
+    }
+
+
+@require_GET
+def admin_archive_entries_view(request):
+    user = request.user
+    if not user.is_authenticated:
+        return JsonResponse({"detail": "Authentication required."}, status=401)
+    if not is_admin(user):
+        return JsonResponse({"detail": "Admin access required."}, status=403)
+
+    search = str(request.GET.get("q", "") or "").strip()
+    dictionary_archived = Entry.objects.filter(status=EntryStatus.ARCHIVED).select_related(
+        "initial_contributor"
+    )
+    folklore_archived = FolkloreEntry.objects.filter(
+        status=FolkloreEntry.Status.ARCHIVED
+    ).select_related("contributor")
+
+    if search:
+        dictionary_filter = Q(term__icontains=search) | Q(initial_contributor__username__icontains=search)
+        folklore_filter = Q(title__icontains=search) | Q(contributor__username__icontains=search)
+        dictionary_archived = dictionary_archived.filter(dictionary_filter)
+        folklore_archived = folklore_archived.filter(folklore_filter)
+
+    archived = [
+        *[_serialize_archive_entry(row, "dictionary") for row in dictionary_archived.order_by("-archived_at")[:200]],
+        *[_serialize_archive_entry(row, "folklore") for row in folklore_archived.order_by("-archived_at")[:200]],
+    ]
+    archived.sort(key=lambda row: row.get("archived_at") or "", reverse=True)
+
+    return JsonResponse(
+        {
+            "archived": archived[:200],
+            "counts": {
+                "archived": len(archived[:200]),
+            },
         }
     )
 

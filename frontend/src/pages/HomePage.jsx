@@ -68,17 +68,19 @@ function openFolkloreEntry(row) {
   navigate(ROUTES.folkloreView)
 }
 
-function LandingFooter() {
+function LandingFooter({ content }) {
   return (
     <footer className="site-footer landing-site-footer">
       <div className="site-footer-inner">
-        <span className="site-footer-left">© 2026 Chirin Ivatan.</span>
+        <span className="site-footer-left">{content.footer_left_text}</span>
         <span className="site-footer-center">
-          <em>Developed for the preservation and continuity of the Ivatan language and heritage.</em>
+          <em>{content.footer_center_text}</em>
         </span>
-        <span className="site-footer-right">Contact: chirinivatan@gmail.com</span>
+        <span className="site-footer-right">{content.footer_right_text}</span>
         <span className="site-footer-mobile">
-          © 2026 Chirin Ivatan. Preserving Ivatan language and heritage. Contact: chirinivatan@gmail.com
+          {[content.footer_left_text, content.footer_center_text, content.footer_right_text]
+            .filter(Boolean)
+            .join(' ')}
         </span>
       </div>
     </footer>
@@ -192,7 +194,7 @@ export default function HomePage({ currentUser = {} }) {
     statement?.quote || statement?.name || statement?.role
   ))
   const visiblePartnerDetails = siteContent.partner_details.filter((partner) => (
-    partner?.name || partner?.description || partner?.url
+    partner?.name || partner?.logo_url || partner?.url
   ))
   const hasClosingContent = visibleSupportStatements.length > 0 || visiblePartnerDetails.length > 0
   const currentUserGroups = currentUser.groups || []
@@ -210,18 +212,14 @@ export default function HomePage({ currentUser = {} }) {
     <div className="home-seamless">
       <section className="visitor-hero" style={{ '--visitor-hero-image': `url(${heroVillageImage})` }}>
         <div className="visitor-hero-overlay">
-          <img className="visitor-hero-logo" src={brandLogo} alt="Chirin Ivatan logo" />
-          <h1>Chirin Ivatan</h1>
-          <p className="visitor-lead">
-            — from <em>"Chirin"</em>, meaning language, and <em>"nu Ivatan,"</em> referring to the people and culture of
-            Batanes — is an online dictionary and folklore archive dedicated to preserving the Ivatan language, stories,
-            and cultural heritage in the digital age.
-          </p>
-          <p className="visitor-copy">
-            Developed as a community-centered initiative for cultural preservation, it welcomes Ivatans and all who wish
-            to contribute or learn about the language and heritage to take part in safeguarding the words, stories, and
-            living traditions that continue to shape the identity of the Ivatans.
-          </p>
+          <img
+            className="visitor-hero-logo"
+            src={siteContent.brand_logo_url || brandLogo}
+            alt={`${siteContent.brand_name} logo`}
+          />
+          <h1>{siteContent.brand_name}</h1>
+          <p className="visitor-lead">{siteContent.landing_intro_text}</p>
+          <p className="visitor-copy">{siteContent.landing_body_text}</p>
           <div className="hero-actions">
             {!isMember && <button onClick={() => navigate(ROUTES.roleCenter)}>Join the Digital Yaru</button>}
             <button className="ghost" onClick={() => navigate(ROUTES.dictionaryView)}>
@@ -420,7 +418,7 @@ export default function HomePage({ currentUser = {} }) {
             </article>
           </aside>
         </div>
-        {!hasClosingContent && <LandingFooter />}
+        {!hasClosingContent && <LandingFooter content={siteContent} />}
       </section>
 
       {hasClosingContent && (
@@ -459,18 +457,21 @@ export default function HomePage({ currentUser = {} }) {
                     target={partner.url ? '_blank' : undefined}
                     rel={partner.url ? 'noreferrer' : undefined}
                   >
-                    <span className="partner-logo-mark" aria-hidden="true">
-                      {(partner.name || 'Partner').slice(0, 2).toUpperCase()}
-                    </span>
+                    {partner.logo_url ? (
+                      <img className="partner-logo-image" src={partner.logo_url} alt="" />
+                    ) : (
+                      <span className="partner-logo-mark" aria-hidden="true">
+                        {(partner.name || 'Partner').slice(0, 2).toUpperCase()}
+                      </span>
+                    )}
                     <span className="partner-agency-name">{partner.name || 'Partner'}</span>
-                    {partner.description && <span className="meta">{partner.description}</span>}
                   </a>
                 ))}
               </div>
             </section>
           )}
 
-          <LandingFooter />
+          <LandingFooter content={siteContent} />
         </section>
       )}
     </div>

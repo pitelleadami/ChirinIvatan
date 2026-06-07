@@ -33,32 +33,35 @@ export default function ReviewerDashboardPage({ currentUser, refreshToken = 0 })
   const [actionBusyId, setActionBusyId] = useState('')
   const [rowResultByRevisionId, setRowResultByRevisionId] = useState({})
   const [rowErrorByRevisionId, setRowErrorByRevisionId] = useState({})
-  const [actionMessage, setActionMessage] = useState('')
   const [reviewToast, setReviewToast] = useState(null)
 
   const currentUsername = currentUser?.username || ''
   const dictionaryRows = excludeOwnSubmissions(dashboard?.dictionary?.pending_submissions || [], currentUsername)
   const dictionaryRereviewRows = excludeOwnSubmissions(dashboard?.dictionary?.pending_rereview || [], currentUsername)
+  const dictionaryAwaitingRows = dashboard?.dictionary?.awaiting_quorum_after_my_approval || []
   const folkloreRows = excludeOwnSubmissions(dashboard?.folklore?.pending_submissions || [], currentUsername)
   const folkloreRereviewRows = excludeOwnSubmissions(dashboard?.folklore?.pending_rereview || [], currentUsername)
+  const folkloreAwaitingRows = dashboard?.folklore?.awaiting_quorum_after_my_approval || []
 
   const queueSummary = [
     { label: 'Dictionary Pending', value: dictionaryRows.length },
     { label: 'Dictionary Re-review', value: dictionaryRereviewRows.length },
     { label: 'Folklore Pending', value: folkloreRows.length },
     { label: 'Folklore Re-review', value: folkloreRereviewRows.length },
+    { label: 'Awaiting Quorum', value: dictionaryAwaitingRows.length + folkloreAwaitingRows.length },
   ]
 
   const hasRows =
     dictionaryRows.length ||
     dictionaryRereviewRows.length ||
+    dictionaryAwaitingRows.length ||
     folkloreRows.length ||
-    folkloreRereviewRows.length
+    folkloreRereviewRows.length ||
+    folkloreAwaitingRows.length
 
   async function loadDashboard() {
     setLoading(true)
     setError('')
-    setActionMessage('')
     try {
       const data = await apiRequest('/api/reviews/dashboard')
       setDashboard(data)
@@ -116,7 +119,6 @@ export default function ReviewerDashboardPage({ currentUser, refreshToken = 0 })
 
     setActionBusyId(revisionId)
     setError('')
-    setActionMessage('')
     try {
       const payload = await apiRequest(path, {
         method: 'POST',
@@ -139,7 +141,6 @@ export default function ReviewerDashboardPage({ currentUser, refreshToken = 0 })
       await loadDashboard()
       const label = DECISION_LABELS[decision] || 'Saved'
       const entryStatus = payload.entry_status ? ` Entry status: ${payload.entry_status}.` : ''
-      setActionMessage(`${label} ${targetTitle || 'entry'}.${entryStatus}`)
       setReviewToast({
         decision,
         title: `${label}`,
@@ -162,14 +163,10 @@ export default function ReviewerDashboardPage({ currentUser, refreshToken = 0 })
           <div>
             <h2>Reviewer Dashboard</h2>
           </div>
-          <button disabled={loading} onClick={() => loadDashboard()}>
-            {loading ? 'Loading...' : 'Refresh Dashboard'}
-          </button>
         </div>
       </section>
 
       {error && <div className="alert error">{error}</div>}
-      {actionMessage && <div className="alert ok">{actionMessage}</div>}
       {reviewToast && (
         <div className={`review-action-toast ${reviewToast.decision}`} role="status" aria-live="polite">
           <div className="review-action-toast-mark" aria-hidden="true" />
@@ -231,6 +228,18 @@ export default function ReviewerDashboardPage({ currentUser, refreshToken = 0 })
                 rowErrorByRevisionId={rowErrorByRevisionId}
                 rowResultByRevisionId={rowResultByRevisionId}
               />
+              <QueueSection
+                title="Awaiting Quorum"
+                rows={dictionaryAwaitingRows}
+                kind="dictionary"
+                mode="awaiting"
+                actionBusyId={actionBusyId}
+                getNotes={getNotes}
+                setNotes={setNotes}
+                submitDecision={submitDecision}
+                rowErrorByRevisionId={rowErrorByRevisionId}
+                rowResultByRevisionId={rowResultByRevisionId}
+              />
             </div>
 
             <div className="review-queue-group">
@@ -254,6 +263,18 @@ export default function ReviewerDashboardPage({ currentUser, refreshToken = 0 })
                 rows={folkloreRereviewRows}
                 kind="folklore"
                 mode="rereview"
+                actionBusyId={actionBusyId}
+                getNotes={getNotes}
+                setNotes={setNotes}
+                submitDecision={submitDecision}
+                rowErrorByRevisionId={rowErrorByRevisionId}
+                rowResultByRevisionId={rowResultByRevisionId}
+              />
+              <QueueSection
+                title="Awaiting Quorum"
+                rows={folkloreAwaitingRows}
+                kind="folklore"
+                mode="awaiting"
                 actionBusyId={actionBusyId}
                 getNotes={getNotes}
                 setNotes={setNotes}

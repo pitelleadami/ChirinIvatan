@@ -1,4 +1,11 @@
 export const DEFAULT_SITE_CONTENT = {
+  brand_name: 'Chirin Ivatan',
+  brand_logo_url: '',
+  landing_intro_text: '— from "Chirin", meaning language, and "nu Ivatan," referring to the people and culture of Batanes — is an online dictionary and folklore archive dedicated to preserving the Ivatan language, stories, and cultural heritage in the digital age.',
+  landing_body_text: 'Developed as a community-centered initiative for cultural preservation, it welcomes Ivatans and all who wish to contribute or learn about the language and heritage to take part in safeguarding the words, stories, and living traditions that continue to shape the identity of the Ivatans.',
+  footer_left_text: '© 2026 Chirin Ivatan.',
+  footer_center_text: 'Developed for the preservation and continuity of the Ivatan language and heritage.',
+  footer_right_text: 'Contact: chirinivatan@gmail.com',
   about_heading: 'About the project',
   about_intro_paragraphs: [
     'Chirin Ivatan is a community-built digital archive and dictionary dedicated to safeguarding the Ivatan language and folklore for future generations.',
@@ -26,6 +33,18 @@ export const DEFAULT_SITE_CONTENT = {
   support_statements: [],
   partner_details: [],
   faq_sections: [],
+  privacy_notice_paragraphs: [
+    'Chirin Ivatan collects account and contribution details only to manage role access, review submissions, credit contributors, and protect the integrity of the archive.',
+    'Submitted names, contact details, affiliation notes, and contribution history may be reviewed by authorized stewards for moderation, accountability, and support.',
+  ],
+  media_upload_policy_paragraphs: [
+    'Upload only media you created, have permission to share, or can clearly cite from a lawful source. Photos, audio, and video should respect people, places, cultural context, and community sensitivities.',
+    'Media attached to approved entries may become visible on public archive pages. Reviewers may request source details, remove unsuitable media, or return a submission for clarification.',
+  ],
+  contributor_agreement_paragraphs: [
+    'By applying for a role or submitting content, contributors agree to share accurate, respectful information and to provide source details when material is not personally known, created, or recorded.',
+    'Contributors understand that submissions may be reviewed, edited for clarity, returned for changes, or declined when they do not meet archive standards.',
+  ],
   maintenance_enabled: false,
   maintenance_message: 'Chirin Ivatan is temporarily paused for maintenance. Please check back soon.',
 }
@@ -36,6 +55,9 @@ const PARAGRAPH_KEYS = [
   'about_rationale_paragraphs',
   'about_future_paragraphs',
   'yaru_intro_paragraphs',
+  'privacy_notice_paragraphs',
+  'media_upload_policy_paragraphs',
+  'contributor_agreement_paragraphs',
 ]
 
 export function normalizeParagraphs(value, fallback = []) {
@@ -46,6 +68,23 @@ export function normalizeParagraphs(value, fallback = []) {
 
 export function normalizeSiteContent(payload = {}) {
   const normalized = { ...DEFAULT_SITE_CONTENT, ...(payload || {}) }
+  normalized.brand_name = String(payload?.brand_name || DEFAULT_SITE_CONTENT.brand_name).trim()
+  normalized.brand_logo_url = String(payload?.brand_logo_url || '').trim()
+  normalized.landing_intro_text = String(
+    payload?.landing_intro_text || DEFAULT_SITE_CONTENT.landing_intro_text,
+  ).trim()
+  normalized.landing_body_text = String(
+    payload?.landing_body_text || DEFAULT_SITE_CONTENT.landing_body_text,
+  ).trim()
+  normalized.footer_left_text = String(
+    payload?.footer_left_text || DEFAULT_SITE_CONTENT.footer_left_text,
+  ).trim()
+  normalized.footer_center_text = String(
+    payload?.footer_center_text || DEFAULT_SITE_CONTENT.footer_center_text,
+  ).trim()
+  normalized.footer_right_text = String(
+    payload?.footer_right_text || DEFAULT_SITE_CONTENT.footer_right_text,
+  ).trim()
   PARAGRAPH_KEYS.forEach((key) => {
     normalized[key] = normalizeParagraphs(payload?.[key], DEFAULT_SITE_CONTENT[key])
   })

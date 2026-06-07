@@ -17,6 +17,7 @@ import { apiRequest } from '../lib/api'
 import { useContributionCelebration } from '../lib/contributionCelebration'
 import { prepareImageUpload } from '../lib/imageUpload'
 import { ROUTES, navigate } from '../lib/router'
+import { DEFAULT_SITE_CONTENT, normalizeSiteContent } from '../lib/siteContent'
 
 const INITIAL_FORM = {
   term: '',
@@ -76,6 +77,7 @@ const PART_OF_SPEECH_OPTIONS = [
 ]
 
 const SOURCE_OWNER_LABEL = 'K. Adami'
+const SOURCE_REMARKS_KEY = 'source_remarks'
 const DICTIONARY_MUNICIPALITY_OPTIONS = ['Basco', 'Mahatao', 'Ivana', 'Uyugan', 'Sabtang', 'Itbayat']
 
 const DICTIONARY_TERM_SOURCE_TYPES = [
@@ -111,6 +113,11 @@ function resolveSourceConfig(config, type) {
 
 function isConfigComplete(config, values) {
   if (!config) return false
+  if (String(values?.[SOURCE_REMARKS_KEY] || '').trim()) {
+    return config.fields.every((field) => (
+      field.type !== 'date' || !isFutureDateValue(values?.[field.key])
+    ))
+  }
   return config.fields.every((field) => String(values?.[field.key] || '').trim())
 }
 
@@ -127,10 +134,11 @@ function isFutureDateValue(value) {
 
 function sourceFieldErrors(config, values, idPrefix) {
   const nextErrors = {}
+  const hasRemarks = Boolean(String(values?.[SOURCE_REMARKS_KEY] || '').trim())
   ;(config?.fields || []).forEach((field) => {
     const value = String(values?.[field.key] || '').trim()
     const errorKey = `${idPrefix}.${field.key}`
-    if (!value) {
+    if (!value && !hasRemarks) {
       nextErrors[errorKey] = `${field.label} is required.`
     } else if (field.type === 'date' && isFutureDateValue(value)) {
       nextErrors[errorKey] = `${field.label} must be today or a past date.`
@@ -141,7 +149,18 @@ function sourceFieldErrors(config, values, idPrefix) {
 
 function buildSourceLine(label, config, values, fallback = '') {
   if (!config) return fallback
-  const text = String(config.build(values || {}) || '').trim()
+  const remarks = String(values?.[SOURCE_REMARKS_KEY] || '').trim()
+  const hasAllStructuredFields = config.fields.every((field) => String(values?.[field.key] || '').trim())
+  const partialDetails = config.fields
+    .map((field) => {
+      const value = String(values?.[field.key] || '').trim()
+      return value ? `${field.label}: ${value}` : ''
+    })
+    .filter(Boolean)
+    .join('; ')
+  const text = hasAllStructuredFields ? String(config.build(values || {}) || '').trim() : ''
+  if (text && remarks) return `${label}: ${text}; Remarks: ${remarks}`
+  if (remarks) return `${label}: ${config.label}${partialDetails ? ` (${partialDetails})` : ''}; Remarks: ${remarks}`
   return text ? `${label}: ${text}` : fallback
 }
 
@@ -573,6 +592,7 @@ export default function DictionaryDraftBuilderPage() {
   const [photoSourceType, setPhotoSourceType] = useState('')
   const [photoSourceValues, setPhotoSourceValues] = useState({})
   const [confirmDeleteDraft, setConfirmDeleteDraft] = useState(false)
+  const [siteContent, setSiteContent] = useState(DEFAULT_SITE_CONTENT)
   const { celebration, celebrateContribution, celebrateDraftSaved, closeCelebration } = useContributionCelebration()
   const isRevisionMode = Boolean(entryId)
   const isSavedDraft = Boolean(revisionId)
@@ -580,6 +600,20 @@ export default function DictionaryDraftBuilderPage() {
   const isEditableDraft = !isSavedDraft || ['draft', 'rejected'].includes(normalizedRevisionStatus)
   const isRejectedSubmissionMode = isSavedDraft && normalizedRevisionStatus === 'rejected'
   const isSnapshotEditMode = isRevisionMode || isRejectedSubmissionMode
+
+  useEffect(() => {
+    let ignore = false
+    apiRequest('/api/site-content')
+      .then((payload) => {
+        if (!ignore) setSiteContent(normalizeSiteContent(payload))
+      })
+      .catch(() => {
+        if (!ignore) setSiteContent(DEFAULT_SITE_CONTENT)
+      })
+    return () => {
+      ignore = true
+    }
+  }, [])
 
   useEffect(() => {
     const query = new URLSearchParams(window.location.search)
@@ -984,9 +1018,9 @@ export default function DictionaryDraftBuilderPage() {
       if (selectedTermSourceConfig) {
         const nextSourceErrors = sourceFieldErrors(selectedTermSourceConfig, termSourceValues, 'dictionary-term-source')
         if (Object.keys(nextSourceErrors).length > 0) {
-        setFieldErrors((current) => ({ ...current, ...nextSourceErrors }))
-        setError('Please complete all required source fields. Dates must be today or in the past.')
-        return false
+          setFieldErrors((current) => ({ ...current, ...nextSourceErrors }))
+          setError('Please complete the source fields, or add remarks explaining what source details you can provide.')
+          return false
         }
       }
     }
@@ -1018,9 +1052,13 @@ export default function DictionaryDraftBuilderPage() {
         setError('Please choose an audio source type.')
         return false
       }
-      if (selectedAudioSourceConfig && !isConfigComplete(selectedAudioSourceConfig, audioSourceValues)) {
-        setError('Please complete all required fields for the selected audio source type.')
-        return false
+      if (selectedAudioSourceConfig) {
+        const nextSourceErrors = sourceFieldErrors(selectedAudioSourceConfig, audioSourceValues, 'dictionary-audio-source')
+        if (Object.keys(nextSourceErrors).length > 0) {
+          setFieldErrors((current) => ({ ...current, ...nextSourceErrors }))
+          setError('Please complete the audio source fields, or add remarks explaining what source details you can provide.')
+          return false
+        }
       }
     }
 
@@ -1034,9 +1072,13 @@ export default function DictionaryDraftBuilderPage() {
         setError('Please choose a photo source type.')
         return false
       }
-      if (selectedPhotoSourceConfig && !isConfigComplete(selectedPhotoSourceConfig, photoSourceValues)) {
-        setError('Please complete all required fields for the selected photo source type.')
-        return false
+      if (selectedPhotoSourceConfig) {
+        const nextSourceErrors = sourceFieldErrors(selectedPhotoSourceConfig, photoSourceValues, 'dictionary-photo-source')
+        if (Object.keys(nextSourceErrors).length > 0) {
+          setFieldErrors((current) => ({ ...current, ...nextSourceErrors }))
+          setError('Please complete the photo source fields, or add remarks explaining what source details you can provide.')
+          return false
+        }
       }
     }
 
@@ -1358,7 +1400,6 @@ export default function DictionaryDraftBuilderPage() {
                 <select
                   id={`${idPrefix}-${field.key}`}
                   value={values[field.key] || ''}
-                  required
                   aria-invalid={Boolean(fieldErrors[errorKey])}
                   aria-describedby={fieldErrors[errorKey] ? `${idPrefix}-${field.key}-error` : undefined}
                   disabled={isFieldLocked(errorKey, values[field.key])}
@@ -1376,7 +1417,6 @@ export default function DictionaryDraftBuilderPage() {
                   id={`${idPrefix}-${field.key}`}
                   type={field.type || 'text'}
                   value={values[field.key] || ''}
-                  required
                   max={field.type === 'date' ? todayInputValue() : undefined}
                   aria-invalid={Boolean(fieldErrors[errorKey])}
                   aria-describedby={fieldErrors[errorKey] ? `${idPrefix}-${field.key}-error` : undefined}
@@ -1392,6 +1432,22 @@ export default function DictionaryDraftBuilderPage() {
             </div>
           )
         })}
+        <div className="field source-remarks-field">
+          <label htmlFor={`${idPrefix}-${SOURCE_REMARKS_KEY}`}>Remarks / additional info</label>
+          <textarea
+            id={`${idPrefix}-${SOURCE_REMARKS_KEY}`}
+            rows={3}
+            value={values[SOURCE_REMARKS_KEY] || ''}
+            onChange={(event) => {
+              updateSourceValues(setter, SOURCE_REMARKS_KEY, event.target.value)
+              config.fields.forEach((field) => clearFieldError(`${idPrefix}.${field.key}`))
+            }}
+            placeholder="Use this if you cannot fill one of the source fields. Add whatever context reviewers should know."
+          />
+          <p className="hint">
+            If some exact details are unavailable, this note can satisfy the source details for review.
+          </p>
+        </div>
       </div>
     )
   }
@@ -2085,6 +2141,18 @@ export default function DictionaryDraftBuilderPage() {
             )}
           </div>
           )}
+        </div>
+        )}
+
+        {showMediaSourceFields && (
+        <div className="policy-consent-panel media-upload-policy-panel">
+          <div>
+            <p className="profile-kicker">Media Upload Policy</p>
+            <h4>Before you attach audio or photos</h4>
+            {siteContent.media_upload_policy_paragraphs.map((paragraph) => (
+              <p key={paragraph}>{paragraph}</p>
+            ))}
+          </div>
         </div>
         )}
 

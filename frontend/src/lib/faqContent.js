@@ -1,5 +1,73 @@
 export const ALL_FAQ_ROLES = ['visitor', 'contributor', 'reviewer', 'admin']
 
+export const REVIEW_PROCESS_FAQ_SECTION = {
+  id: 'how-review-works',
+  title: 'How Review Works',
+  roles: ALL_FAQ_ROLES,
+  intro:
+    'A public trust guide explaining how dictionary and folklore contributions move from private draft to reviewed archive entry.',
+  items: [
+    {
+      q: 'Who can submit words, stories, corrections, and media?',
+      a: 'Approved contributors can submit new dictionary entries, folklore records, media attachments, and revisions to existing public entries. Visitors can browse the archive and apply for contributor access through the Role Center.',
+      bullets: [
+        'Contributor access is granted through application review or direct invitation.',
+        'Reviewers and admins may also contribute, but their own submissions still need independent review.',
+        'Consultant profiles can be credited for cultural knowledge without needing a login account.',
+      ],
+    },
+    {
+      q: 'Who reviews submissions before they become public?',
+      a: 'Submissions are reviewed by approved reviewers and admins who are responsible for language accuracy, source clarity, cultural care, and public readiness.',
+      bullets: [
+        'Dictionary and folklore drafts remain private while they are pending.',
+        'A reviewer or admin should not approve their own submission.',
+        'Admins can help resolve unusual cases, role issues, and re-review concerns.',
+      ],
+    },
+    {
+      q: 'What do reviewers check?',
+      bullets: [
+        'Accuracy of spelling, meaning, translation, category, and municipality or variant context.',
+        'Whether the source is clear enough for future readers, reviewers, and researchers.',
+        'Whether uploaded photos, audio, or video are owned, permitted, or properly attributed.',
+        'Whether the entry duplicates existing content or adds a meaningful correction or variant.',
+        'Whether the wording is understandable, respectful, and useful to public visitors.',
+      ],
+    },
+    {
+      q: 'Why might an entry be returned or rejected?',
+      a: 'Returned or rejected entries are not treated as failure. They usually mean the submission needs clearer information before it can become part of the public archive.',
+      bullets: [
+        'Required fields are missing or too vague.',
+        'The translation, category, source, or media attribution needs correction.',
+        'The entry duplicates existing content without adding new value.',
+        'The content may be inaccurate, culturally sensitive, private, restricted, or unsafe for public release.',
+      ],
+    },
+    {
+      q: 'How do disputes, corrections, or concerns work?',
+      a: 'The archive is designed to keep learning. Published entries can be revised, flagged for re-review, or corrected when better information becomes available.',
+      bullets: [
+        'Contributors can submit revisions to approved public entries.',
+        'Reviewers and admins can flag approved entries for re-review when concerns arise.',
+        'Entries under re-review can be checked again without losing the original audit trail.',
+        'Admins can use notes and audit logs to preserve why a decision was made.',
+      ],
+    },
+    {
+      q: 'How is cultural sensitivity handled?',
+      a: 'Reviewers are expected to treat Ivatan cultural knowledge with care, especially when submissions involve oral tradition, living people, ritual life, sacred places, family-specific knowledge, or restricted community material.',
+      bullets: [
+        'Sensitive material may be returned for more context or permission.',
+        'Some content may be declined if public display would be disrespectful or unsafe.',
+        'Source notes, consent, and community context matter as much as technical completeness.',
+        'When in doubt, reviewers and admins should choose care over speed.',
+      ],
+    },
+  ],
+}
+
 export const DEFAULT_FAQ_SECTIONS = [
   {
     id: 'visitors',
@@ -29,6 +97,7 @@ export const DEFAULT_FAQ_SECTIONS = [
       },
     ],
   },
+  REVIEW_PROCESS_FAQ_SECTION,
   {
     id: 'public-dictionary',
     title: 'Dictionary',
@@ -308,6 +377,20 @@ export const DEFAULT_FAQ_SECTIONS = [
     ],
   },
 ]
+
+export function ensureCoreFaqSections(sections = []) {
+  const rows = Array.isArray(sections) && sections.length ? sections : DEFAULT_FAQ_SECTIONS
+  const hasReviewProcess = rows.some((section) => section?.id === REVIEW_PROCESS_FAQ_SECTION.id)
+  if (hasReviewProcess) return rows
+
+  const visitorIndex = rows.findIndex((section) => section?.id === 'visitors')
+  const insertAt = visitorIndex >= 0 ? visitorIndex + 1 : 0
+  return [
+    ...rows.slice(0, insertAt),
+    REVIEW_PROCESS_FAQ_SECTION,
+    ...rows.slice(insertAt),
+  ]
+}
 
 export const DICTIONARY_FIELD_GUIDES = [
   {

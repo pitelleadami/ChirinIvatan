@@ -12,17 +12,19 @@ import { useEffect, useState } from 'react'
 import { apiRequest } from '../lib/api'
 import { emailValidationMessage } from '../lib/emailValidation'
 import { ROUTES, navigate } from '../lib/router'
+import { DEFAULT_SITE_CONTENT, normalizeSiteContent } from '../lib/siteContent'
 
 const MUNICIPALITIES = ['Basco', 'Mahatao', 'Ivana', 'Uyugan', 'Sabtang', 'Itbayat']
 const EMPTY_CULTURAL_AFFILIATION = { role: '', organization: '' }
 const EMPTY_OTHER_AFFILIATION = { designation: '', institution: '' }
+const EMPTY_CAPTCHA = { question: '', token: '', expires_in_seconds: 0 }
 
 const ROLE_OPTIONS = [
   {
     value: 'contributor',
     title: 'Contributor',
     summary: 'Share words, stories, and media that help preserve Ivatan language and heritage.',
-    approval: 'Review flow: approved by one reviewer or admin.',
+    approval: 'Review flow: approved by any two reviewers/admins.',
     whoCanJoin: 'Anyone who cares to contribute and learn.',
     details: [
       'Add Ivatan words, meanings, pronunciations, and usage notes',
@@ -34,7 +36,7 @@ const ROLE_OPTIONS = [
     value: 'reviewer',
     title: 'Reviewer',
     summary: 'Help keep published entries accurate, respectful, and culturally grounded.',
-    approval: 'Review flow: approved by two reviewers, or one reviewer plus one admin.',
+    approval: 'Review flow: approved by any two reviewers/admins.',
     whoCanJoin: 'Language stewards, educators, and cultural advocates.',
     details: [
       'Review dictionary terms, folklore entries, and revisions',
@@ -59,13 +61,9 @@ function roleLabel(value) {
 function applicationHelp(row) {
   if (row.status === 'pending') {
     if (row.approval_count > 0) {
-      return row.target_role === 'reviewer'
-        ? 'One approval has been recorded. Reviewer access is waiting for the remaining approval.'
-        : 'One approval has been recorded. Final access is being updated.'
+      return 'One approval has been recorded. One more reviewer/admin approval is required.'
     }
-    return row.target_role === 'reviewer'
-      ? 'Waiting for reviewer quorum. Reviewer access needs two reviewers, or one reviewer plus one admin.'
-      : 'Waiting for one reviewer or admin to approve contributor access.'
+    return 'Waiting for two reviewer/admin approvals.'
   }
   if (row.status === 'approved') {
     if (row.can_claim_credentials) {
@@ -99,6 +97,9 @@ export default function RoleCenterPage({ currentUser = {} }) {
   const [invitationToken, setInvitationToken] = useState('')
   const [invitationDetails, setInvitationDetails] = useState(null)
   const [invitationClaimForm, setInvitationClaimForm] = useState({
+    first_name: '',
+    last_name: '',
+    municipality: '',
     username: '',
     password: '',
     passwordConfirm: '',
@@ -114,6 +115,12 @@ export default function RoleCenterPage({ currentUser = {} }) {
     bio: '',
     reviewer_reason: '',
   })
+  const [captchaChallenge, setCaptchaChallenge] = useState(EMPTY_CAPTCHA)
+  const [captchaAnswer, setCaptchaAnswer] = useState('')
+  const [loadingCaptcha, setLoadingCaptcha] = useState(false)
+  const [siteContent, setSiteContent] = useState(DEFAULT_SITE_CONTENT)
+  const [applicantPolicyAccepted, setApplicantPolicyAccepted] = useState(false)
+  const [invitationPolicyAccepted, setInvitationPolicyAccepted] = useState(false)
 
   // Shared request/feedback state used across all sections.
   const [loading, setLoading] = useState(false)
@@ -150,6 +157,37 @@ export default function RoleCenterPage({ currentUser = {} }) {
     if (applicantFormError) {
       setApplicantFormError('')
     }
+  }
+
+  function renderApplicationPolicyConsent() {
+    if (!applyRole) return null
+    return (
+      <div className="policy-consent-panel compact-policy-consent">
+        <div className="policy-consent-copy">
+          <p className="profile-kicker">Policy & Consent</p>
+          <h4>Contributor Agreement</h4>
+          {siteContent.contributor_agreement_paragraphs.map((paragraph) => (
+            <p key={paragraph}>{paragraph}</p>
+          ))}
+          <h4>Privacy Notice</h4>
+          {siteContent.privacy_notice_paragraphs.map((paragraph) => (
+            <p key={paragraph}>{paragraph}</p>
+          ))}
+        </div>
+        <label className="checkbox-inline policy-consent-check" htmlFor="role-application-policy-consent">
+          <input
+            id="role-application-policy-consent"
+            type="checkbox"
+            checked={applicantPolicyAccepted}
+            onChange={(event) => {
+              setApplicantPolicyAccepted(event.target.checked)
+              if (event.target.checked && applicantFormError.includes('policy')) setApplicantFormError('')
+            }}
+          />
+          <span>I have read and accept these terms before submitting my application.</span>
+        </label>
+      </div>
+    )
   }
 
   function updateApplicantAffiliation(group, index, field, value) {
@@ -229,6 +267,23 @@ export default function RoleCenterPage({ currentUser = {} }) {
     }
   }
 
+  async function loadCaptchaChallenge() {
+    setLoadingCaptcha(true)
+    try {
+      const payload = await apiRequest('/api/captcha/challenge')
+      setCaptchaChallenge({
+        question: payload.question || '',
+        token: payload.token || '',
+        expires_in_seconds: payload.expires_in_seconds || 0,
+      })
+      setCaptchaAnswer('')
+    } catch (requestError) {
+      setError(requestError.message)
+    } finally {
+      setLoadingCaptcha(false)
+    }
+  }
+
   async function fetchMyApplications() {
     if (!isAuthenticated) {
       throw new Error('Log in first so your application can be attached to your account.')
@@ -255,6 +310,16 @@ export default function RoleCenterPage({ currentUser = {} }) {
     }
     if (applyRole === 'reviewer' && !applicantForm.reviewer_reason.trim()) {
       setApplicantFormError('Please share why you want to become a reviewer.')
+      setError('')
+      return
+    }
+    if (!applicantPolicyAccepted) {
+      setApplicantFormError('Review and accept the policy and contributor agreement before submitting your application.')
+      setError('')
+      return
+    }
+    if (!captchaChallenge.token || !captchaAnswer.trim()) {
+      setApplicantFormError('Complete the CAPTCHA before submitting your application.')
       setError('')
       return
     }
@@ -285,7 +350,12 @@ export default function RoleCenterPage({ currentUser = {} }) {
         const payload = await apiRequest('/api/users/role-applications', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ target_role: applyRole, ...applicantForm }),
+          body: JSON.stringify({
+            target_role: applyRole,
+            ...applicantForm,
+            captcha_token: captchaChallenge.token,
+            captcha_answer: captchaAnswer,
+          }),
         })
         setStatusEmail(applicantForm.email)
         setPublicApplications([payload])
@@ -294,6 +364,8 @@ export default function RoleCenterPage({ currentUser = {} }) {
         const detail = requestError.message || 'Application could not be submitted.'
         setApplicantFormError(detail)
         setApplicantMissingFields(detail.toLowerCase().includes('email') ? ['email'] : [])
+        setError('')
+        loadCaptchaChallenge()
       } finally {
         setLoading(false)
       }
@@ -303,8 +375,18 @@ export default function RoleCenterPage({ currentUser = {} }) {
     // Applicant sends target role; backend enforces role validity + pending state.
     await run(async () => {
       const requestBody = isAuthenticated
-        ? { target_role: applyRole, reviewer_reason: applicantForm.reviewer_reason }
-        : { target_role: applyRole, ...applicantForm }
+        ? {
+            target_role: applyRole,
+            reviewer_reason: applicantForm.reviewer_reason,
+            captcha_token: captchaChallenge.token,
+            captcha_answer: captchaAnswer,
+          }
+        : {
+            target_role: applyRole,
+            ...applicantForm,
+            captcha_token: captchaChallenge.token,
+            captcha_answer: captchaAnswer,
+          }
       const payload = await apiRequest('/api/users/role-applications', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -323,6 +405,7 @@ export default function RoleCenterPage({ currentUser = {} }) {
         setShowAuthenticatedApplicationSubmitted(true)
       }
       setMessage(isAuthenticated ? 'Application submitted.' : '')
+      loadCaptchaChallenge()
     })
   }
 
@@ -397,6 +480,10 @@ export default function RoleCenterPage({ currentUser = {} }) {
       setError('Password confirmation does not match.')
       return
     }
+    if (!invitationPolicyAccepted) {
+      setError('Review and accept the contributor agreement before activating this invitation.')
+      return
+    }
 
     await run(async () => {
       await apiRequest('/api/auth/csrf')
@@ -442,6 +529,9 @@ export default function RoleCenterPage({ currentUser = {} }) {
       setStatusEmail(payload.email || '')
       setInvitationClaimForm((current) => ({
         ...current,
+        first_name: current.first_name || payload.first_name || '',
+        last_name: current.last_name || payload.last_name || '',
+        municipality: current.municipality || payload.municipality || '',
         username: current.username || (payload.email ? payload.email.split('@')[0] : ''),
       }))
     } catch (requestError) {
@@ -458,10 +548,13 @@ export default function RoleCenterPage({ currentUser = {} }) {
       return
     }
     const username = invitationClaimForm.username.trim()
+    const firstName = invitationClaimForm.first_name.trim()
+    const lastName = invitationClaimForm.last_name.trim()
+    const municipality = invitationClaimForm.municipality.trim()
     const password = invitationClaimForm.password || ''
     const passwordConfirm = invitationClaimForm.passwordConfirm || ''
-    if (!username || !password || !passwordConfirm) {
-      setError('Username, password, and confirmation are required.')
+    if (!firstName || !lastName || !municipality || !username || !password || !passwordConfirm) {
+      setError('First name, last name, municipality, username, password, and confirmation are required.')
       return
     }
     if (password !== passwordConfirm) {
@@ -475,13 +568,23 @@ export default function RoleCenterPage({ currentUser = {} }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          first_name: firstName,
+          last_name: lastName,
+          municipality,
           username,
           password,
           password_confirm: passwordConfirm,
         }),
       })
       setInvitationDetails((current) => current ? { ...current, status: 'accepted' } : current)
-      setInvitationClaimForm({ username: '', password: '', passwordConfirm: '' })
+      setInvitationClaimForm({
+        first_name: '',
+        last_name: '',
+        municipality: '',
+        username: '',
+        password: '',
+        passwordConfirm: '',
+      })
       setInviteCelebration({
         username: payload.username,
         role: invitationDetails?.role || payload.role,
@@ -510,6 +613,20 @@ export default function RoleCenterPage({ currentUser = {} }) {
   }
 
   useEffect(() => {
+    let ignore = false
+    apiRequest('/api/site-content')
+      .then((payload) => {
+        if (!ignore) setSiteContent(normalizeSiteContent(payload))
+      })
+      .catch(() => {
+        if (!ignore) setSiteContent(DEFAULT_SITE_CONTENT)
+      })
+    return () => {
+      ignore = true
+    }
+  }, [])
+
+  useEffect(() => {
     const token = new URLSearchParams(window.location.search).get('invite') || ''
     if (!token) return
     setInvitationToken(token)
@@ -522,6 +639,17 @@ export default function RoleCenterPage({ currentUser = {} }) {
       setApplyRole(requestedRole)
     }
   }, [])
+
+  useEffect(() => {
+    setApplicantPolicyAccepted(false)
+  }, [applyRole])
+
+  useEffect(() => {
+    if (!applyRole) return
+    if (!captchaChallenge.token) loadCaptchaChallenge()
+    // Fetch a fresh CAPTCHA when the application form becomes actionable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applyRole])
 
   useEffect(() => {
     if (!isAuthenticated || !currentUserApplicationKey || invitationToken) return
@@ -682,7 +810,64 @@ export default function RoleCenterPage({ currentUser = {} }) {
                   </p>
                 </div>
               )}
+              <div className="policy-consent-panel">
+                <div>
+                  <p className="profile-kicker">Before You Accept</p>
+                  <h4>Contributor Agreement</h4>
+                  {siteContent.contributor_agreement_paragraphs.map((paragraph) => (
+                    <p key={paragraph}>{paragraph}</p>
+                  ))}
+                </div>
+                <div>
+                  <h4>Privacy Notice</h4>
+                  {siteContent.privacy_notice_paragraphs.map((paragraph) => (
+                    <p key={paragraph}>{paragraph}</p>
+                  ))}
+                </div>
+                <label className="checkbox-inline policy-consent-check" htmlFor="invitation-policy-consent">
+                  <input
+                    id="invitation-policy-consent"
+                    type="checkbox"
+                    checked={invitationPolicyAccepted}
+                    onChange={(event) => setInvitationPolicyAccepted(event.target.checked)}
+                  />
+                  <span>I have read and accept these terms before activating this role.</span>
+                </label>
+              </div>
               <div className="field-grid">
+                <label className="field" htmlFor="invite-claim-first-name">
+                  <span>First Name</span>
+                  <input
+                    id="invite-claim-first-name"
+                    autoComplete="given-name"
+                    value={invitationClaimForm.first_name}
+                    onChange={(event) => updateInvitationClaimField('first_name', event.target.value)}
+                  />
+                </label>
+                <label className="field" htmlFor="invite-claim-last-name">
+                  <span>Last Name</span>
+                  <input
+                    id="invite-claim-last-name"
+                    autoComplete="family-name"
+                    value={invitationClaimForm.last_name}
+                    onChange={(event) => updateInvitationClaimField('last_name', event.target.value)}
+                  />
+                </label>
+                <label className="field" htmlFor="invite-claim-municipality">
+                  <span>Municipality</span>
+                  <select
+                    id="invite-claim-municipality"
+                    value={invitationClaimForm.municipality}
+                    onChange={(event) => updateInvitationClaimField('municipality', event.target.value)}
+                  >
+                    <option value="">Select municipality</option>
+                    {MUNICIPALITIES.map((municipality) => (
+                      <option key={municipality} value={municipality}>
+                        {municipality}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <label className="field" htmlFor="invite-claim-username">
                   <span>Create Username</span>
                   <input
@@ -717,7 +902,7 @@ export default function RoleCenterPage({ currentUser = {} }) {
                 </label>
               </div>
               <div className="actions">
-                <button disabled={loading} onClick={() => acceptInvitation()}>
+                <button disabled={loading || !invitationPolicyAccepted} onClick={() => acceptInvitation()}>
                   {loading ? 'Activating...' : 'Accept Invitation'}
                 </button>
                 <button className="ghost" disabled={loading} onClick={() => navigate(ROUTES.login)}>
@@ -933,9 +1118,32 @@ export default function RoleCenterPage({ currentUser = {} }) {
                 ))}
               </div>
 
+              {renderApplicationPolicyConsent()}
+
+              <div className="captcha-panel">
+                <div>
+                  <p className="profile-kicker">Verification</p>
+                  <strong>{captchaChallenge.question || 'Loading CAPTCHA...'}</strong>
+                  <p className="muted">Answer this before submitting your role application.</p>
+                </div>
+                <label className="field" htmlFor="role-application-captcha-public">
+                  <span>CAPTCHA answer</span>
+                  <input
+                    id="role-application-captcha-public"
+                    inputMode="numeric"
+                    value={captchaAnswer}
+                    onChange={(event) => setCaptchaAnswer(event.target.value)}
+                    placeholder="Your answer"
+                  />
+                </label>
+                <button type="button" className="ghost compact-button" disabled={loadingCaptcha} onClick={loadCaptchaChallenge}>
+                  {loadingCaptcha ? 'Refreshing...' : 'New CAPTCHA'}
+                </button>
+              </div>
+
               {applicantFormError && <p className="inline-error role-public-form-error">{applicantFormError}</p>}
               <div className="actions role-public-form-actions">
-                <button disabled={loading || alreadyHasSelectedRole || hasPendingSelectedRole} onClick={() => createApplication()}>
+                <button disabled={loading || alreadyHasSelectedRole || hasPendingSelectedRole || !captchaAnswer.trim() || !applicantPolicyAccepted} onClick={() => createApplication()}>
                   {hasPendingSelectedRole
                     ? 'Application Pending'
                     : alreadyHasSelectedRole
@@ -946,9 +1154,36 @@ export default function RoleCenterPage({ currentUser = {} }) {
             </div>
           )}
 
+          {isAuthenticated && applyRole && !alreadyHasSelectedRole && !hasPendingSelectedRole && (
+            <>
+              {renderApplicationPolicyConsent()}
+              <div className="captcha-panel">
+                <div>
+                  <p className="profile-kicker">Verification</p>
+                  <strong>{captchaChallenge.question || 'Loading CAPTCHA...'}</strong>
+                  <p className="muted">Answer this before submitting your role application.</p>
+                </div>
+                <label className="field" htmlFor="role-application-captcha">
+                  <span>CAPTCHA answer</span>
+                  <input
+                    id="role-application-captcha"
+                    inputMode="numeric"
+                    value={captchaAnswer}
+                    onChange={(event) => setCaptchaAnswer(event.target.value)}
+                    placeholder="Your answer"
+                  />
+                </label>
+                <button type="button" className="ghost compact-button" disabled={loadingCaptcha} onClick={loadCaptchaChallenge}>
+                  {loadingCaptcha ? 'Refreshing...' : 'New CAPTCHA'}
+                </button>
+              </div>
+              {applicantFormError && <p className="inline-error role-public-form-error">{applicantFormError}</p>}
+            </>
+          )}
+
           <div className="actions">
             {isAuthenticated && applyRole && (
-              <button disabled={loading || alreadyHasSelectedRole || hasPendingSelectedRole} onClick={() => createApplication()}>
+              <button disabled={loading || alreadyHasSelectedRole || hasPendingSelectedRole || !captchaAnswer.trim() || !applicantPolicyAccepted} onClick={() => createApplication()}>
                 {hasPendingSelectedRole
                   ? 'Application Pending'
                   : alreadyHasSelectedRole

@@ -3,21 +3,71 @@ import { useEffect, useMemo, useState } from 'react'
 import ConfirmDialog from '../components/ConfirmDialog'
 import { apiRequest } from '../lib/api'
 import { emailValidationMessage } from '../lib/emailValidation'
-import { DEFAULT_FAQ_SECTIONS } from '../lib/faqContent'
+import { DEFAULT_FAQ_SECTIONS, ensureCoreFaqSections } from '../lib/faqContent'
 import { folkloreTaxonomyLabel } from '../lib/folkloreTaxonomy'
+import { prepareImageUpload } from '../lib/imageUpload'
 import { ROUTES, navigate } from '../lib/router'
 import { DEFAULT_SITE_CONTENT, normalizeSiteContent, paragraphsToText, textToParagraphs } from '../lib/siteContent'
 import ReviewerDashboardPage from './ReviewerDashboardPage'
 
-const STATUSES = ['pending', 'approved', 'rejected', 'all']
+const STATUSES = ['pending', 'awaiting_quorum', 'approved', 'rejected', 'all']
+const STATUS_LABELS = {
+  pending: 'Pending',
+  awaiting_quorum: 'Awaiting Quorum',
+  approved: 'Approved',
+  rejected: 'Rejected',
+  all: 'All',
+}
 const USER_GROUPS = ['all', 'Admin', 'Consultant', 'Reviewer', 'Contributor']
 const INVITE_ROLES = ['contributor', 'reviewer', 'consultant', 'admin']
+const INVITE_ENDORSEMENTS = {
+  contributor:
+    'I understand that inviting someone to Chirin Ivatan is an act of trust and accountability. I believe this person will contribute respectfully, honestly, and in good faith toward the preservation of Ivatan language and folklore.',
+  reviewer:
+    'I believe this individual possesses the judgment, integrity, and cultural sensitivity necessary to help review and safeguard community knowledge.',
+  consultant:
+    'I understand that inviting someone to Chirin Ivatan is an act of trust and accountability. I believe this person will contribute respectfully, honestly, and in good faith toward the preservation of Ivatan language and folklore.',
+  admin:
+    'I understand that inviting someone to Chirin Ivatan is an act of trust and accountability. I believe this person will contribute respectfully, honestly, and in good faith toward the preservation of Ivatan language and folklore.',
+}
+const REVOKABLE_ROLES = ['contributor', 'reviewer', 'consultant', 'admin']
 const CONTRIBUTIONS_PER_PAGE = 5
 const APPLICATIONS_PER_PAGE = 5
 const INVITATIONS_PER_PAGE = 8
-const DESK_TABS = ['reviews', 'applications', 'people', 'site', 'contributions']
+const DESK_TABS = ['overview', 'reviews', 'applications', 'people', 'archive', 'site', 'contributions']
+const EMPTY_ARCHIVE_INVENTORY = {
+  archived: [],
+  counts: { archived: 0 },
+}
+const EMPTY_ADMIN_OVERVIEW = {
+  counts: {
+    users: 0,
+    contributors: 0,
+    reviewers: 0,
+    approved_entries: 0,
+    pending_entries: 0,
+  },
+  queues: {
+    pending_role_applications: 0,
+    pending_dictionary_reviews: 0,
+    pending_folklore_reviews: 0,
+    entries_under_re_review: 0,
+    dictionary_under_re_review: 0,
+    folklore_under_re_review: 0,
+    pending_account_flags: 0,
+  },
+  maintenance: {
+    enabled: false,
+    message: '',
+    updated_at: null,
+    updated_by: '',
+  },
+  latest_submissions: [],
+  latest_media_uploads: [],
+  recent_admin_overrides: [],
+}
 const EMPTY_SUPPORT_STATEMENT = { quote: '', name: '', role: '' }
-const EMPTY_PARTNER_DETAIL = { name: '', description: '', url: '' }
+const EMPTY_PARTNER_DETAIL = { name: '', url: '', logo_url: '' }
 const FAQ_ROLE_OPTIONS = [
   { value: 'visitor', label: 'Visitor' },
   { value: 'contributor', label: 'Contributor' },
@@ -38,6 +88,56 @@ const CONTRIBUTION_STATUS_LABELS = {
   approved: 'Approved',
   rejected: 'Needs changes',
 }
+const SITE_CONTENT_SECTIONS = [
+  {
+    id: 'brand',
+    eyebrow: 'Site Identity',
+    title: 'Brand & Landing',
+    description: 'Update the logo, brand name, landing introduction, and footer text.',
+  },
+  {
+    id: 'maintenance',
+    eyebrow: 'Operations',
+    title: 'Maintenance Mode',
+    description: 'Pause public access and edit the visitor message.',
+  },
+  {
+    id: 'about',
+    eyebrow: 'Public Page',
+    title: 'About Page',
+    description: 'Edit the project introduction, rationale, future direction, and closing quote.',
+  },
+  {
+    id: 'yaru',
+    eyebrow: 'Public Page',
+    title: 'Digital Yaru',
+    description: 'Change the heading and introduction shown on the Digital Yaru page.',
+  },
+  {
+    id: 'support',
+    eyebrow: 'About Page',
+    title: 'Support Statements',
+    description: 'Manage public statements from supporters and community partners.',
+  },
+  {
+    id: 'partners',
+    eyebrow: 'About Page',
+    title: 'Partner Details',
+    description: 'Update partner names, logos, and links.',
+  },
+  {
+    id: 'faq',
+    eyebrow: 'Help Center',
+    title: 'FAQs and Guides',
+    description: 'Edit role-specific help sections, questions, answers, and images.',
+  },
+  {
+    id: 'policies',
+    eyebrow: 'Governance',
+    title: 'Policies & Consent',
+    description: 'Edit the privacy notice, media upload policy, and contributor agreement text.',
+  },
+]
 
 function displayName(applicant) {
   const fullName = [applicant.first_name, applicant.last_name].filter(Boolean).join(' ').trim()
@@ -147,19 +247,18 @@ function roleLabel(value) {
 const EMPTY_EMAIL_INVITE = {
   email: '',
   role: 'contributor',
-  first_name: '',
-  last_name: '',
-  municipality: '',
   notes: '',
 }
+const EMPTY_CAPTCHA = { question: '', token: '', expires_in_seconds: 0 }
 const EMPTY_CONSULTANT_PROFILE = {
   first_name: '',
   last_name: '',
   email: '',
   municipality: '',
   post_nominals: '',
-  affiliation: '',
   occupation: '',
+  cultural_affiliations: [{ role: '', organization: '' }],
+  other_affiliations: [{ designation: '', institution: '' }],
   bio: '',
   notes: '',
 }
@@ -168,8 +267,17 @@ function rowsForSiteEditor(rows, emptyRow) {
   return Array.isArray(rows) && rows.length ? rows : [{ ...emptyRow }]
 }
 
+function isManagedConsultant(person) {
+  return Boolean(
+    person?.groups?.includes('Consultant')
+    && person?.onboarding_records?.some(
+      (record) => record.role === 'consultant' && record.method === 'admin_created',
+    )
+  )
+}
+
 function faqSectionsForEditor(rows) {
-  const sourceRows = Array.isArray(rows) && rows.length ? rows : DEFAULT_FAQ_SECTIONS
+  const sourceRows = ensureCoreFaqSections(Array.isArray(rows) && rows.length ? rows : DEFAULT_FAQ_SECTIONS)
   return sourceRows.map((section, sectionIndex) => ({
     id: section.id || `faq-section-${sectionIndex + 1}`,
     title: section.title || '',
@@ -190,6 +298,13 @@ function faqSectionsForEditor(rows) {
 function siteContentToForm(payload) {
   const content = normalizeSiteContent(payload)
   return {
+    brand_name: content.brand_name || '',
+    brand_logo_url: content.brand_logo_url || '',
+    landing_intro_text: content.landing_intro_text || '',
+    landing_body_text: content.landing_body_text || '',
+    footer_left_text: content.footer_left_text || '',
+    footer_center_text: content.footer_center_text || '',
+    footer_right_text: content.footer_right_text || '',
     about_heading: content.about_heading || '',
     about_intro_text: paragraphsToText(content.about_intro_paragraphs),
     about_body_text: paragraphsToText(content.about_body_paragraphs),
@@ -198,8 +313,15 @@ function siteContentToForm(payload) {
     about_final_quote: content.about_final_quote || '',
     yaru_heading: content.yaru_heading || '',
     yaru_intro_text: paragraphsToText(content.yaru_intro_paragraphs),
+    privacy_notice_text: paragraphsToText(content.privacy_notice_paragraphs),
+    media_upload_policy_text: paragraphsToText(content.media_upload_policy_paragraphs),
+    contributor_agreement_text: paragraphsToText(content.contributor_agreement_paragraphs),
     support_statements: rowsForSiteEditor(content.support_statements, EMPTY_SUPPORT_STATEMENT),
-    partner_details: rowsForSiteEditor(content.partner_details, EMPTY_PARTNER_DETAIL),
+    partner_details: rowsForSiteEditor(content.partner_details, EMPTY_PARTNER_DETAIL).map((row) => ({
+      name: row.name || '',
+      url: row.url || '',
+      logo_url: row.logo_url || '',
+    })),
     faq_sections: faqSectionsForEditor(content.faq_sections),
     maintenance_enabled: Boolean(content.maintenance_enabled),
     maintenance_message: content.maintenance_message || '',
@@ -208,6 +330,13 @@ function siteContentToForm(payload) {
 
 function siteContentFromForm(form) {
   return {
+    brand_name: form.brand_name,
+    brand_logo_url: form.brand_logo_url,
+    landing_intro_text: form.landing_intro_text,
+    landing_body_text: form.landing_body_text,
+    footer_left_text: form.footer_left_text,
+    footer_center_text: form.footer_center_text,
+    footer_right_text: form.footer_right_text,
     about_heading: form.about_heading,
     about_intro_paragraphs: textToParagraphs(form.about_intro_text),
     about_body_paragraphs: textToParagraphs(form.about_body_text),
@@ -216,6 +345,9 @@ function siteContentFromForm(form) {
     about_final_quote: form.about_final_quote,
     yaru_heading: form.yaru_heading,
     yaru_intro_paragraphs: textToParagraphs(form.yaru_intro_text),
+    privacy_notice_paragraphs: textToParagraphs(form.privacy_notice_text),
+    media_upload_policy_paragraphs: textToParagraphs(form.media_upload_policy_text),
+    contributor_agreement_paragraphs: textToParagraphs(form.contributor_agreement_text),
     maintenance_enabled: Boolean(form.maintenance_enabled),
     maintenance_message: form.maintenance_message,
     support_statements: form.support_statements
@@ -228,10 +360,10 @@ function siteContentFromForm(form) {
     partner_details: form.partner_details
       .map((row) => ({
         name: row.name.trim(),
-        description: row.description.trim(),
         url: row.url.trim(),
+        logo_url: row.logo_url.trim(),
       }))
-      .filter((row) => row.name || row.description || row.url),
+      .filter((row) => row.name || row.url || row.logo_url),
     faq_sections: form.faq_sections
       .map((section, sectionIndex) => ({
         id: (section.id || `faq-section-${sectionIndex + 1}`).trim(),
@@ -252,25 +384,29 @@ function siteContentFromForm(form) {
   }
 }
 
-function applicationRule(targetRole) {
-  return targetRole === 'reviewer'
-    ? 'Needs two reviewers, or one reviewer plus one admin.'
-    : 'Needs one reviewer or admin approval.'
-}
-
 function approvalProgress(application) {
   const approvals = application.decisions.filter((row) => row.decision === 'approve')
   const reviewerApprovals = approvals.filter((row) => row.decider_role === 'reviewer').length
   const adminApprovals = approvals.filter((row) => row.decider_role === 'admin').length
   if (application.status === 'approved') return 'Approved and role access is active.'
   if (application.status === 'rejected') return 'Rejected. Applicant can reapply later with clearer context.'
-  if (application.target_role === 'contributor') {
-    return approvals.length ? 'Approval recorded. Waiting for backend final status refresh.' : 'Needs one approval.'
+  if (approvals.length >= 2) return 'Approval quorum met. Waiting for refresh.'
+  if (reviewerApprovals === 1) return 'One reviewer approval recorded. Needs one more reviewer/admin approval.'
+  if (adminApprovals === 1) return 'One admin approval recorded. Needs one more reviewer/admin approval.'
+  return 'Needs two reviewer/admin approvals.'
+}
+
+function applicationStatusDisplay(application) {
+  if (application.screening_status === 'awaiting_quorum') {
+    return {
+      label: 'Awaiting final approval',
+      className: 'status-awaiting',
+    }
   }
-  if (reviewerApprovals >= 1 && adminApprovals >= 1) return 'Reviewer quorum met. Waiting for refresh.'
-  if (reviewerApprovals >= 1) return 'One reviewer approval recorded. Needs one admin or another reviewer.'
-  if (adminApprovals >= 1) return 'One admin approval recorded. Needs one reviewer.'
-  return 'No approval yet.'
+  return {
+    label: application.status,
+    className: `status-${application.status}`,
+  }
 }
 
 function ApplicantAvatar({ applicant }) {
@@ -309,7 +445,7 @@ export default function AdminApplicationsPage({ currentUser }) {
   }
 
   function normalizeDeskTab(requestedTab) {
-    if (isAdmin) return requestedTab || 'applications'
+    if (isAdmin) return requestedTab || 'overview'
     if (canReviewRoles) {
       return ['applications', 'reviews', 'contributions'].includes(requestedTab) ? requestedTab : 'reviews'
     }
@@ -319,14 +455,20 @@ export default function AdminApplicationsPage({ currentUser }) {
   const initialRequestedTab = tabFromQuery()
   const initialTab = normalizeDeskTab(initialRequestedTab)
   const [activeTab, setActiveTab] = useState(initialTab)
+  const [adminOverview, setAdminOverview] = useState(EMPTY_ADMIN_OVERVIEW)
   const [reviewRefreshToken, setReviewRefreshToken] = useState(0)
   const [statusFilter, setStatusFilter] = useState('pending')
   const [applications, setApplications] = useState([])
   const [applicationPage, setApplicationPage] = useState(1)
   const [people, setPeople] = useState([])
+  const [archiveInventory, setArchiveInventory] = useState(EMPTY_ARCHIVE_INVENTORY)
+  const [archiveSearch, setArchiveSearch] = useState('')
+  const [archiveActionTarget, setArchiveActionTarget] = useState(null)
+  const [archiveActionNotes, setArchiveActionNotes] = useState('')
   const [selectedActivityUser, setSelectedActivityUser] = useState(null)
   const [activityRows, setActivityRows] = useState([])
   const [showActivityLog, setShowActivityLog] = useState(false)
+  const [showAccountControls, setShowAccountControls] = useState(false)
   const [invitations, setInvitations] = useState([])
   const [invitationPage, setInvitationPage] = useState(1)
   const [dictionaryDrafts, setDictionaryDrafts] = useState([])
@@ -334,6 +476,7 @@ export default function AdminApplicationsPage({ currentUser }) {
   const [dictionaryPublished, setDictionaryPublished] = useState([])
   const [folklorePublished, setFolklorePublished] = useState([])
   const [siteContentForm, setSiteContentForm] = useState(() => siteContentToForm(DEFAULT_SITE_CONTENT))
+  const [activeSiteContentSection, setActiveSiteContentSection] = useState('')
   const [publishedContributionTab, setPublishedContributionTab] = useState('dictionary')
   const [dictionaryContributionTab, setDictionaryContributionTab] = useState('drafts')
   const [folkloreContributionTab, setFolkloreContributionTab] = useState('drafts')
@@ -341,29 +484,50 @@ export default function AdminApplicationsPage({ currentUser }) {
   const [folkloreContributionPage, setFolkloreContributionPage] = useState(1)
   const [viewingContribution, setViewingContribution] = useState(null)
   const [confirmingDraftDelete, setConfirmingDraftDelete] = useState(null)
+  const [confirmingSiteContentSave, setConfirmingSiteContentSave] = useState(false)
   const [peopleSearch, setPeopleSearch] = useState('')
   const [peopleGroup, setPeopleGroup] = useState('all')
   const [notesById, setNotesById] = useState({})
   const [rejectNotesOpenById, setRejectNotesOpenById] = useState({})
+  const [applicationOpenById, setApplicationOpenById] = useState({})
+  const [applicationActionErrorById, setApplicationActionErrorById] = useState({})
+  const [applicationDecisionToast, setApplicationDecisionToast] = useState(null)
   const [emailInvite, setEmailInvite] = useState(EMPTY_EMAIL_INVITE)
   const [emailInviteNotice, setEmailInviteNotice] = useState(null)
+  const [inviteErrorTarget, setInviteErrorTarget] = useState('')
+  const [emailInviteCaptcha, setEmailInviteCaptcha] = useState(EMPTY_CAPTCHA)
+  const [emailInviteCaptchaAnswer, setEmailInviteCaptchaAnswer] = useState('')
+  const [inviteEndorsementAccepted, setInviteEndorsementAccepted] = useState(false)
   const [showInviteForm, setShowInviteForm] = useState(false)
   const [consultantProfile, setConsultantProfile] = useState(EMPTY_CONSULTANT_PROFILE)
+  const [consultantPhotoFile, setConsultantPhotoFile] = useState(null)
+  const [consultantPhotoPreview, setConsultantPhotoPreview] = useState('')
+  const [consultantPhotoWarning, setConsultantPhotoWarning] = useState('')
+  const [editingConsultantUsername, setEditingConsultantUsername] = useState('')
   const [showConsultantProfileForm, setShowConsultantProfileForm] = useState(false)
+  const [loadingOverview, setLoadingOverview] = useState(false)
   const [loading, setLoading] = useState(false)
   const [loadingPeople, setLoadingPeople] = useState(false)
+  const [loadingArchive, setLoadingArchive] = useState(false)
+  const [savingArchiveAction, setSavingArchiveAction] = useState(false)
   const [loadingActivity, setLoadingActivity] = useState(false)
   const [loadingInvitations, setLoadingInvitations] = useState(false)
+  const [loadingEmailInviteCaptcha, setLoadingEmailInviteCaptcha] = useState(false)
   const [loadingDrafts, setLoadingDrafts] = useState(false)
   const [loadingSiteContent, setLoadingSiteContent] = useState(false)
   const [sendingInvite, setSendingInvite] = useState(false)
   const [creatingConsultantProfile, setCreatingConsultantProfile] = useState(false)
   const [savingSiteContent, setSavingSiteContent] = useState(false)
   const [uploadingFaqImageKey, setUploadingFaqImageKey] = useState('')
+  const [uploadingPartnerLogoIndex, setUploadingPartnerLogoIndex] = useState(-1)
+  const [uploadingBrandLogo, setUploadingBrandLogo] = useState(false)
   const [updatingLeaderboardUsername, setUpdatingLeaderboardUsername] = useState('')
   const [updatingPublicVisibilityKey, setUpdatingPublicVisibilityKey] = useState('')
   const [deletingDraftId, setDeletingDraftId] = useState('')
   const [actingId, setActingId] = useState('')
+  const [accountActionNotes, setAccountActionNotes] = useState('')
+  const [roleToRevoke, setRoleToRevoke] = useState('contributor')
+  const [accountActionLoading, setAccountActionLoading] = useState('')
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
 
@@ -373,10 +537,19 @@ export default function AdminApplicationsPage({ currentUser }) {
     }
   }, [emailInvite.role, inviteRoleOptions])
 
+  useEffect(() => {
+    if (showInviteForm && !emailInviteCaptcha.token) {
+      loadEmailInviteCaptcha()
+    }
+    // Fetch CAPTCHA only when the invite form opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showInviteForm])
+
   const counts = useMemo(
     () => ({
-      pending: applications.filter((row) => row.status === 'pending').length,
-      approved: applications.filter((row) => row.status === 'approved').length,
+      pending: applications.filter((row) => row.screening_status === 'pending').length,
+      approved: applications.filter((row) => row.screening_status === 'approved').length,
+      awaitingQuorum: applications.filter((row) => row.screening_status === 'awaiting_quorum').length,
       rejected: applications.filter((row) => row.status === 'rejected').length,
       total: applications.length,
     }),
@@ -395,6 +568,20 @@ export default function AdminApplicationsPage({ currentUser }) {
     () => filterContributionsByTab(folkloreDrafts, folkloreContributionTab),
     [folkloreDrafts, folkloreContributionTab],
   )
+  const contributionStats = useMemo(
+    () => ({
+      published: dictionaryPublished.length + folklorePublished.length,
+      dictionary: dictionaryPublished.length,
+      folklore: folklorePublished.length,
+      awaitingReview: dictionarySubmittedRows.length + folkloreSubmittedRows.length,
+    }),
+    [
+      dictionaryPublished.length,
+      folklorePublished.length,
+      dictionarySubmittedRows.length,
+      folkloreSubmittedRows.length,
+    ],
+  )
   const visibleDictionaryContributions = pagedContributions(dictionaryContributionRows, dictionaryContributionPage)
   const visibleFolkloreContributions = pagedContributions(folkloreContributionRows, folkloreContributionPage)
   const visibleApplications = pagedApplications(applications, applicationPage)
@@ -409,6 +596,11 @@ export default function AdminApplicationsPage({ currentUser }) {
     }),
     [people],
   )
+  const flaggedPeople = useMemo(
+    () => people.filter((row) => row.pending_account_flags?.length > 0),
+    [people],
+  )
+  const inviteEndorsementText = INVITE_ENDORSEMENTS[emailInvite.role] || ''
 
   const inviteSidebar = (
     <aside className="admin-people-side-column">
@@ -417,20 +609,47 @@ export default function AdminApplicationsPage({ currentUser }) {
           <div>
             <h2>Email Role Invitation</h2>
           </div>
-          <button className={showInviteForm ? 'ghost' : ''} onClick={() => setShowInviteForm((current) => !current)}>
+          <button
+            className={showInviteForm ? 'ghost' : ''}
+            onClick={() => {
+              setShowInviteForm((current) => {
+                const nextValue = !current
+                if (nextValue) setEmailInviteNotice(null)
+                return nextValue
+              })
+              setInviteEndorsementAccepted(false)
+              setInviteErrorTarget('')
+            }}
+          >
             {showInviteForm ? 'Hide Form' : 'Send Invite'}
           </button>
         </div>
-        <p className="muted admin-invite-description">
-          Invite a trusted individual directly into the platform. Your endorsement is recorded and displayed as part of
-          the user's public accountability record. Once accepted, the assigned role becomes active without the standard
-          two-person approval process.
-        </p>
+
+        {!showInviteForm && (
+          <>
+            <p className="muted admin-invite-intro">
+              Invite a trusted individual directly into the platform. Your endorsement is recorded and displayed as part
+              of the user's public accountability record. Once accepted, the assigned role becomes active without the
+              standard two-person approval process.
+            </p>
+            {emailInviteNotice && emailInviteNotice.type !== 'error' && (
+              <div className={`admin-email-invite-notice ${emailInviteNotice.type}`}>
+                <strong>{emailInviteNotice.title}</strong>
+                <p>{emailInviteNotice.detail}</p>
+                {emailInviteNotice.acceptUrl && (
+                  <a href={emailInviteNotice.acceptUrl} target="_blank" rel="noreferrer">
+                    View invite link
+                  </a>
+                )}
+              </div>
+            )}
+          </>
+        )}
 
         {showInviteForm && (
           <>
             <div className="admin-email-invite-fields">
-              <label className="field" htmlFor="invite-email">
+              <label className={`field${inviteErrorTarget === 'email' ? ' invite-field-error' : ''}`} htmlFor="invite-email">
                 <span>Email *</span>
                 <input
                   id="invite-email"
@@ -441,7 +660,7 @@ export default function AdminApplicationsPage({ currentUser }) {
                 />
               </label>
               <label className="field" htmlFor="invite-email-role">
-                <span>Role</span>
+                <span>Role *</span>
                 <select
                   id="invite-email-role"
                   value={emailInvite.role}
@@ -453,30 +672,7 @@ export default function AdminApplicationsPage({ currentUser }) {
                     </option>
                   ))}
                 </select>
-              </label>
-              <label className="field" htmlFor="invite-first-name">
-                <span>First name</span>
-                <input
-                  id="invite-first-name"
-                  value={emailInvite.first_name}
-                  onChange={(event) => updateEmailInvite('first_name', event.target.value)}
-                />
-              </label>
-              <label className="field" htmlFor="invite-last-name">
-                <span>Last name</span>
-                <input
-                  id="invite-last-name"
-                  value={emailInvite.last_name}
-                  onChange={(event) => updateEmailInvite('last_name', event.target.value)}
-                />
-              </label>
-              <label className="field" htmlFor="invite-municipality">
-                <span>Municipality</span>
-                <input
-                  id="invite-municipality"
-                  value={emailInvite.municipality}
-                  onChange={(event) => updateEmailInvite('municipality', event.target.value)}
-                />
+                <small className="hint">You can only invite roles permitted by your own access level.</small>
               </label>
             </div>
 
@@ -491,12 +687,51 @@ export default function AdminApplicationsPage({ currentUser }) {
               />
             </label>
 
-            <div className="actions">
-              <button disabled={sendingInvite} onClick={() => sendEmailInvitation()}>
-                {sendingInvite ? 'Sending...' : 'Send Email Invitation'}
+            {inviteEndorsementText && (
+              <label
+                className={`admin-invite-endorsement${inviteErrorTarget === 'endorsement' ? ' invite-field-error' : ''}`}
+                htmlFor="invite-endorsement"
+              >
+                <input
+                  id="invite-endorsement"
+                  type="checkbox"
+                  checked={inviteEndorsementAccepted}
+                  onChange={(event) => {
+                    setInviteEndorsementAccepted(event.target.checked)
+                    setEmailInviteNotice(null)
+                    setInviteErrorTarget('')
+                  }}
+                />
+                <span><b>*</b> {inviteEndorsementText}</span>
+              </label>
+            )}
+
+            <div className={`captcha-panel admin-invite-captcha${inviteErrorTarget === 'captcha' ? ' invite-field-error' : ''}`}>
+              <div>
+                <p className="profile-kicker">Verification</p>
+                <strong>{emailInviteCaptcha.question || 'Loading CAPTCHA...'}</strong>
+                <p className="muted">Answer this before sending the email invitation.</p>
+              </div>
+              <label className="field" htmlFor="invite-email-captcha">
+                <span>CAPTCHA answer *</span>
+                <input
+                  id="invite-email-captcha"
+                  inputMode="numeric"
+                  value={emailInviteCaptchaAnswer}
+                  onChange={(event) => {
+                    setEmailInviteCaptchaAnswer(event.target.value)
+                    setEmailInviteNotice(null)
+                    setInviteErrorTarget('')
+                  }}
+                  placeholder="Your answer"
+                />
+              </label>
+              <button type="button" className="ghost compact-button" disabled={loadingEmailInviteCaptcha} onClick={loadEmailInviteCaptcha}>
+                {loadingEmailInviteCaptcha ? 'Refreshing...' : 'New CAPTCHA'}
               </button>
             </div>
-            {emailInviteNotice && (
+
+            {emailInviteNotice && emailInviteNotice.type === 'error' && (
               <div className={`admin-email-invite-notice ${emailInviteNotice.type}`}>
                 <strong>{emailInviteNotice.title}</strong>
                 <p>{emailInviteNotice.detail}</p>
@@ -507,17 +742,30 @@ export default function AdminApplicationsPage({ currentUser }) {
                 )}
               </div>
             )}
+            <div className="actions">
+              <button
+                disabled={sendingInvite || !emailInviteCaptchaAnswer.trim() || Boolean(inviteEndorsementText && !inviteEndorsementAccepted)}
+                onClick={() => sendEmailInvitation()}
+              >
+                {sendingInvite ? 'Sending...' : 'Send Email Invitation'}
+              </button>
+            </div>
           </>
         )}
       </article>
 
       <article className="admin-app-card">
-        <div className="section-heading">
+        <div className="section-heading admin-invitations-heading">
           <div>
             <p className="profile-kicker">Invite Status</p>
             <h2>Recent Invitations</h2>
           </div>
-          <button className="ghost" disabled={loadingInvitations} onClick={() => loadEmailInvitations()}>
+          <button
+            type="button"
+            className="ghost compact-button admin-invitations-refresh"
+            disabled={loadingInvitations}
+            onClick={() => loadEmailInvitations()}
+          >
             {loadingInvitations ? 'Loading...' : 'Refresh'}
           </button>
         </div>
@@ -549,6 +797,30 @@ export default function AdminApplicationsPage({ currentUser }) {
   function changeTab(nextTab) {
     setActiveTab(nextTab)
     window.history.replaceState({}, '', `${ROUTES.adminApplications}?tab=${nextTab}`)
+  }
+
+  async function loadAdminOverview() {
+    if (!isAdmin) return
+    setLoadingOverview(true)
+    setError('')
+    setMessage('')
+    try {
+      const payload = await apiRequest('/api/admin/overview')
+      setAdminOverview({
+        ...EMPTY_ADMIN_OVERVIEW,
+        ...payload,
+        counts: { ...EMPTY_ADMIN_OVERVIEW.counts, ...(payload.counts || {}) },
+        queues: { ...EMPTY_ADMIN_OVERVIEW.queues, ...(payload.queues || {}) },
+        maintenance: { ...EMPTY_ADMIN_OVERVIEW.maintenance, ...(payload.maintenance || {}) },
+        latest_submissions: payload.latest_submissions || [],
+        latest_media_uploads: payload.latest_media_uploads || [],
+        recent_admin_overrides: payload.recent_admin_overrides || [],
+      })
+    } catch (requestError) {
+      setError(requestError.message)
+    } finally {
+      setLoadingOverview(false)
+    }
   }
 
   async function loadApplications(nextFilter = statusFilter) {
@@ -586,6 +858,69 @@ export default function AdminApplicationsPage({ currentUser }) {
     }
   }
 
+  async function loadArchiveInventory(searchValue = archiveSearch) {
+    if (!isAdmin) return
+    setLoadingArchive(true)
+    setError('')
+    try {
+      const query = String(searchValue || '').trim()
+      const suffix = query ? `?q=${encodeURIComponent(query)}` : ''
+      const payload = await apiRequest(`/api/reviews/admin/archive${suffix}`)
+      setArchiveInventory({
+        ...EMPTY_ARCHIVE_INVENTORY,
+        ...payload,
+        counts: { ...EMPTY_ARCHIVE_INVENTORY.counts, ...(payload.counts || {}) },
+        archived: payload.archived || [],
+      })
+    } catch (requestError) {
+      setError(requestError.message)
+    } finally {
+      setLoadingArchive(false)
+    }
+  }
+
+  function beginArchiveAction(row, action) {
+    setArchiveActionTarget({ ...row, action })
+    setArchiveActionNotes('')
+    setError('')
+    setMessage('')
+  }
+
+  async function submitArchiveAction(event) {
+    event.preventDefault()
+    if (!archiveActionTarget) return
+    const notes = archiveActionNotes.trim()
+    if (!notes) {
+      setError('Archive and restore actions require notes.')
+      return
+    }
+
+    setSavingArchiveAction(true)
+    setError('')
+    setMessage('')
+    try {
+      await apiRequest('/api/reviews/admin/override', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          target_type: archiveActionTarget.target_type,
+          target_id: archiveActionTarget.target_id,
+          action: archiveActionTarget.action,
+          notes,
+        }),
+      })
+      const actionLabel = archiveActionTarget.action === 'archive' ? 'archived' : 'restored'
+      setMessage(`${archiveActionTarget.title} was ${actionLabel}.`)
+      setArchiveActionTarget(null)
+      setArchiveActionNotes('')
+      await loadArchiveInventory()
+    } catch (requestError) {
+      setError(requestError.message)
+    } finally {
+      setSavingArchiveAction(false)
+    }
+  }
+
   async function loadPersonActivity(person) {
     if (!person?.username) return
     setSelectedActivityUser(person)
@@ -607,6 +942,9 @@ export default function AdminApplicationsPage({ currentUser }) {
     setSelectedActivityUser(person)
     setActivityRows([])
     setShowActivityLog(false)
+    setShowAccountControls(false)
+    setAccountActionNotes('')
+    setRoleToRevoke('contributor')
     setError('')
   }
 
@@ -614,6 +952,15 @@ export default function AdminApplicationsPage({ currentUser }) {
     setSelectedActivityUser(null)
     setActivityRows([])
     setShowActivityLog(false)
+    setShowAccountControls(false)
+    setAccountActionNotes('')
+    setRoleToRevoke('contributor')
+  }
+
+  function applyUpdatedPerson(person) {
+    if (!person?.username) return
+    setPeople((current) => current.map((row) => (row.username === person.username ? person : row)))
+    setSelectedActivityUser((current) => (current?.username === person.username ? person : current))
   }
 
   async function updatePersonLeaderboardVisibility(person, nextValue) {
@@ -684,6 +1031,65 @@ export default function AdminApplicationsPage({ currentUser }) {
     }
   }
 
+  async function runAccountAction(person, action, options = {}) {
+    if (!person?.username) return
+    const notes = accountActionNotes.trim()
+    const actionsNeedingNotes = ['deactivate', 'revoke-role', 'flag-suspicious', 'clear-flag', 'confirm-flag']
+    if (actionsNeedingNotes.includes(action) && !notes) {
+      setError('Add account action notes before continuing.')
+      return
+    }
+
+    setAccountActionLoading(action)
+    setError('')
+    setMessage('')
+    try {
+      await apiRequest('/api/auth/csrf')
+      let endpoint = ''
+      let body = {}
+      if (action === 'activate' || action === 'deactivate') {
+        endpoint = `/api/admin/users/${encodeURIComponent(person.username)}/status`
+        body = { is_active: action === 'activate', notes }
+      } else if (action === 'password-reset') {
+        endpoint = `/api/admin/users/${encodeURIComponent(person.username)}/password-reset`
+        body = { notes }
+      } else if (action === 'revoke-role') {
+        endpoint = `/api/admin/users/${encodeURIComponent(person.username)}/roles/revoke`
+        body = { role: roleToRevoke, notes }
+      } else if (action === 'flag-suspicious') {
+        endpoint = `/api/admin/users/${encodeURIComponent(person.username)}/suspicious-flag`
+        body = { notes }
+      } else if (action === 'clear-flag' || action === 'confirm-flag') {
+        endpoint = `/api/admin/account-flags/${options.flagId}/resolve`
+        body = { decision: action === 'clear-flag' ? 'clear' : 'confirm', notes }
+      }
+      const payload = await apiRequest(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (payload.user) applyUpdatedPerson(payload.user)
+      if (showActivityLog) await loadPersonActivity(payload.user || person)
+      if (action !== 'password-reset') setAccountActionNotes('')
+      const successMessages = {
+        activate: 'Account reactivated.',
+        deactivate: 'Account deactivated.',
+        'password-reset': payload.detail || 'Password reset link sent.',
+        'revoke-role': `${roleLabel(roleToRevoke)} access revoked.`,
+        'flag-suspicious': 'Account flagged for review.',
+        'clear-flag': 'Suspicious-account flag cleared.',
+        'confirm-flag': 'Suspicious-account flag confirmed.',
+      }
+      setMessage(successMessages[action] || 'Account action completed.')
+      if (action === 'revoke-role') setRoleToRevoke('contributor')
+      if (activeTab === 'overview') loadAdminOverview()
+    } catch (requestError) {
+      setError(requestError.message)
+    } finally {
+      setAccountActionLoading('')
+    }
+  }
+
   function profileAffiliationLines(rows, firstKey, secondKey) {
     const items = (rows || []).filter((row) => row?.[firstKey] || row?.[secondKey])
     return items.map((item) => [item[firstKey], item[secondKey]].filter(Boolean).join(', '))
@@ -748,6 +1154,23 @@ export default function AdminApplicationsPage({ currentUser }) {
       setError(requestError.message)
     } finally {
       setLoadingInvitations(false)
+    }
+  }
+
+  async function loadEmailInviteCaptcha() {
+    setLoadingEmailInviteCaptcha(true)
+    try {
+      const payload = await apiRequest('/api/captcha/challenge')
+      setEmailInviteCaptcha({
+        question: payload.question || '',
+        token: payload.token || '',
+        expires_in_seconds: payload.expires_in_seconds || 0,
+      })
+      setEmailInviteCaptchaAnswer('')
+    } catch (requestError) {
+      setError(requestError.message)
+    } finally {
+      setLoadingEmailInviteCaptcha(false)
     }
   }
 
@@ -936,8 +1359,51 @@ export default function AdminApplicationsPage({ currentUser }) {
     }
   }
 
-  async function saveSiteContent(event) {
-    event.preventDefault()
+  async function uploadPartnerLogo(index, file) {
+    if (!file) return
+    setUploadingPartnerLogoIndex(index)
+    setError('')
+    setMessage('')
+    try {
+      await apiRequest('/api/auth/csrf')
+      const body = new FormData()
+      body.append('image', file)
+      const payload = await apiRequest('/api/site-content/partner-media', {
+        method: 'POST',
+        body,
+      })
+      updateSiteContentRow('partner_details', index, 'logo_url', payload.url || '')
+      setMessage('Partner logo uploaded. Save Site Content to publish it.')
+    } catch (requestError) {
+      setError(requestError.message)
+    } finally {
+      setUploadingPartnerLogoIndex(-1)
+    }
+  }
+
+  async function uploadBrandLogo(file) {
+    if (!file) return
+    setUploadingBrandLogo(true)
+    setError('')
+    setMessage('')
+    try {
+      await apiRequest('/api/auth/csrf')
+      const body = new FormData()
+      body.append('image', file)
+      const payload = await apiRequest('/api/site-content/brand-media', {
+        method: 'POST',
+        body,
+      })
+      setSiteContentField('brand_logo_url', payload.url || '')
+      setMessage('Brand logo uploaded. Save Site Content to publish it.')
+    } catch (requestError) {
+      setError(requestError.message)
+    } finally {
+      setUploadingBrandLogo(false)
+    }
+  }
+
+  async function performSiteContentSave() {
     if (!isAdmin) return
 
     setSavingSiteContent(true)
@@ -952,11 +1418,20 @@ export default function AdminApplicationsPage({ currentUser }) {
       })
       setSiteContentForm(siteContentToForm(payload))
       setMessage('Site content saved.')
+      setConfirmingSiteContentSave(false)
     } catch (requestError) {
       setError(requestError.message)
     } finally {
       setSavingSiteContent(false)
     }
+  }
+
+  function saveSiteContent(event) {
+    event.preventDefault()
+    if (!isAdmin) return
+    setError('')
+    setMessage('')
+    setConfirmingSiteContentSave(true)
   }
 
   function renderContributionPagination(rows, page, setPage, label) {
@@ -1062,12 +1537,19 @@ export default function AdminApplicationsPage({ currentUser }) {
   async function decide(applicationId, decision) {
     const notes = notesById[applicationId] || ''
     if (decision === 'reject' && !notes.trim()) {
-      setError('Rejection requires notes so the applicant has clear feedback.')
+      setApplicationActionErrorById((current) => ({
+        ...current,
+        [applicationId]: 'Rejection requires notes so the applicant has clear feedback.',
+      }))
       return
     }
+    const application = applications.find((row) => row.application_id === applicationId)
+    const applicantName = application?.applicant ? displayName(application.applicant) : 'Applicant'
     setActingId(applicationId)
     setError('')
     setMessage('')
+    setApplicationDecisionToast(null)
+    setApplicationActionErrorById((current) => ({ ...current, [applicationId]: '' }))
     try {
       await apiRequest('/api/auth/csrf')
       const payload = await apiRequest(`/api/users/role-applications/${applicationId}/decide`, {
@@ -1078,13 +1560,24 @@ export default function AdminApplicationsPage({ currentUser }) {
           notes: decision === 'reject' ? notes : '',
         }),
       })
-      setMessage(
-        payload.application_status === 'pending'
-          ? 'Approval saved. This application is still waiting for quorum.'
-          : `Application ${payload.application_status}.`,
-      )
       await loadApplications()
       await loadPeople()
+      if (decision === 'approve') {
+        setApplicationDecisionToast({
+          decision,
+          title: 'Successfully approved',
+          detail:
+            payload.application_status === 'pending'
+              ? `${applicantName}'s approval was recorded. Another required approver must still decide.`
+              : `${applicantName}'s application was approved and access is now active.`,
+        })
+      } else {
+        setApplicationDecisionToast({
+          decision,
+          title: 'Application was rejected',
+          detail: `${applicantName}'s application was rejected.`,
+        })
+      }
       setRejectNotesOpenById((current) => ({ ...current, [applicationId]: false }))
     } catch (requestError) {
       setError(requestError.message)
@@ -1096,6 +1589,7 @@ export default function AdminApplicationsPage({ currentUser }) {
   function handleRejectApplication(applicationId) {
     if (!rejectNotesOpenById[applicationId]) {
       setRejectNotesOpenById((current) => ({ ...current, [applicationId]: true }))
+      setApplicationActionErrorById((current) => ({ ...current, [applicationId]: '' }))
       setError('')
       return
     }
@@ -1375,17 +1869,114 @@ export default function AdminApplicationsPage({ currentUser }) {
 
   function updateEmailInvite(field, value) {
     setEmailInvite((current) => ({ ...current, [field]: value }))
+    if (field === 'role') {
+      setInviteEndorsementAccepted(false)
+    }
     setEmailInviteNotice(null)
+    setInviteErrorTarget('')
   }
 
   function updateConsultantProfile(field, value) {
     setConsultantProfile((current) => ({ ...current, [field]: value }))
   }
 
+  function resetConsultantProfileForm() {
+    setConsultantProfile(EMPTY_CONSULTANT_PROFILE)
+    setConsultantPhotoFile(null)
+    setConsultantPhotoPreview('')
+    setConsultantPhotoWarning('')
+    setEditingConsultantUsername('')
+  }
+
+  function beginManagedConsultantEdit(person) {
+    const profile = person.profile || {}
+    const consultantRecord = person.onboarding_records?.find(
+      (record) => record.role === 'consultant' && record.method === 'admin_created',
+    )
+    setConsultantProfile({
+      first_name: person.first_name || '',
+      last_name: person.last_name || '',
+      email: person.email || '',
+      municipality: profile.municipality || '',
+      post_nominals: profile.post_nominals || '',
+      occupation: profile.occupation || '',
+      cultural_affiliations: rowsForSiteEditor(
+        profile.cultural_affiliations,
+        { role: '', organization: '' },
+      ),
+      other_affiliations: rowsForSiteEditor(
+        profile.other_affiliations,
+        { designation: '', institution: '' },
+      ),
+      bio: profile.bio || '',
+      notes: consultantRecord?.accountability_notes || '',
+    })
+    setConsultantPhotoFile(null)
+    setConsultantPhotoPreview(profile.profile_photo || '')
+    setConsultantPhotoWarning('')
+    setEditingConsultantUsername(person.username)
+    setShowConsultantProfileForm(true)
+    closePersonProfile()
+    window.setTimeout(() => {
+      document.getElementById('managed-consultant-profile')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 0)
+  }
+
+  function updateConsultantAffiliation(group, index, field, value) {
+    setConsultantProfile((current) => ({
+      ...current,
+      [group]: current[group].map((row, rowIndex) => (
+        rowIndex === index ? { ...row, [field]: value } : row
+      )),
+    }))
+  }
+
+  function addConsultantAffiliation(group) {
+    const emptyRow = group === 'cultural_affiliations'
+      ? { role: '', organization: '' }
+      : { designation: '', institution: '' }
+    setConsultantProfile((current) => ({
+      ...current,
+      [group]: [...current[group], emptyRow],
+    }))
+  }
+
+  function removeConsultantAffiliation(group, index) {
+    const emptyRow = group === 'cultural_affiliations'
+      ? { role: '', organization: '' }
+      : { designation: '', institution: '' }
+    setConsultantProfile((current) => {
+      const rows = current[group].filter((_, rowIndex) => rowIndex !== index)
+      return { ...current, [group]: rows.length ? rows : [emptyRow] }
+    })
+  }
+
+  async function handleConsultantPhotoChange(event) {
+    const file = event.target.files?.[0] || null
+    setConsultantPhotoWarning('')
+    setError('')
+    try {
+      const prepared = await prepareImageUpload(file, {
+        minWidth: 300,
+        minHeight: 300,
+        maxWidth: 900,
+        maxHeight: 900,
+      })
+      setConsultantPhotoFile(prepared.file)
+      setConsultantPhotoPreview(prepared.previewUrl || '')
+      setConsultantPhotoWarning(prepared.warning)
+    } catch (uploadError) {
+      setConsultantPhotoFile(null)
+      setConsultantPhotoPreview('')
+      setError(uploadError.message)
+    }
+  }
+
   async function sendEmailInvitation() {
     const email = emailInvite.email.trim().toLowerCase()
     if (!email) {
-      setError('Email address is required for an invitation.')
+      setError('')
+      setInviteErrorTarget('email')
       setEmailInviteNotice({
         type: 'error',
         title: 'Email required',
@@ -1395,11 +1986,32 @@ export default function AdminApplicationsPage({ currentUser }) {
     }
     const emailError = emailValidationMessage(email)
     if (emailError) {
-      setError(emailError)
+      setError('')
+      setInviteErrorTarget('email')
       setEmailInviteNotice({
         type: 'error',
         title: 'Invalid email address',
         detail: emailError,
+      })
+      return
+    }
+    if (!emailInviteCaptcha.token || !emailInviteCaptchaAnswer.trim()) {
+      setError('')
+      setInviteErrorTarget('captcha')
+      setEmailInviteNotice({
+        type: 'error',
+        title: 'CAPTCHA required',
+        detail: 'Answer the verification question before sending the invitation.',
+      })
+      return
+    }
+    if (inviteEndorsementText && !inviteEndorsementAccepted) {
+      setError('')
+      setInviteErrorTarget('endorsement')
+      setEmailInviteNotice({
+        type: 'error',
+        title: 'Endorsement required',
+        detail: 'Confirm the role-specific accountability statement before sending the invitation.',
       })
       return
     }
@@ -1408,6 +2020,7 @@ export default function AdminApplicationsPage({ currentUser }) {
     setError('')
     setMessage('')
     setEmailInviteNotice(null)
+    setInviteErrorTarget('')
     try {
       await apiRequest('/api/auth/csrf')
       const payload = await apiRequest('/api/admin/role-invitations/email', {
@@ -1416,10 +2029,9 @@ export default function AdminApplicationsPage({ currentUser }) {
         body: JSON.stringify({
           email,
           role: emailInvite.role,
-          first_name: emailInvite.first_name,
-          last_name: emailInvite.last_name,
-          municipality: emailInvite.municipality,
-          notes: emailInvite.notes,
+          notes: emailInvite.notes.trim() || inviteEndorsementText,
+          captcha_token: emailInviteCaptcha.token,
+          captcha_answer: emailInviteCaptchaAnswer,
         }),
       })
       setMessage(payload.email_sent === false ? `Invitation created for ${payload.email}.` : `Invitation sent to ${payload.email}.`)
@@ -1429,16 +2041,23 @@ export default function AdminApplicationsPage({ currentUser }) {
         detail: payload.warning || `${payload.email} can now accept the ${roleLabel(payload.role)} invitation from the email link.`,
         acceptUrl: payload.accept_url,
       })
-      setEmailInvite((current) => ({ ...current, notes: '' }))
+      setEmailInvite((current) => ({ ...current, email: '', notes: '' }))
+      setEmailInviteCaptchaAnswer('')
+      setInviteEndorsementAccepted(false)
+      setInviteErrorTarget('')
+      setShowInviteForm(false)
+      await loadEmailInviteCaptcha()
       await loadPeople()
       await loadEmailInvitations()
     } catch (requestError) {
-      setError(requestError.message)
+      setError('')
+      setInviteErrorTarget(requestError.message?.toLowerCase().includes('captcha') ? 'captcha' : '')
       setEmailInviteNotice({
         type: 'error',
         title: 'Invitation not sent',
         detail: requestError.message,
       })
+      loadEmailInviteCaptcha()
     } finally {
       setSendingInvite(false)
     }
@@ -1461,13 +2080,24 @@ export default function AdminApplicationsPage({ currentUser }) {
     setMessage('')
     try {
       await apiRequest('/api/auth/csrf')
-      const payload = await apiRequest('/api/admin/consultant-profiles', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(consultantProfile),
+      const body = new FormData()
+      Object.entries(consultantProfile).forEach(([key, value]) => {
+        body.append(key, Array.isArray(value) ? JSON.stringify(value) : value)
       })
-      setMessage(`Consultant profile created for ${displayName(payload.user)}.`)
-      setConsultantProfile(EMPTY_CONSULTANT_PROFILE)
+      if (consultantPhotoFile) body.append('profile_photo', consultantPhotoFile)
+      const endpoint = editingConsultantUsername
+        ? `/api/admin/consultant-profiles/${encodeURIComponent(editingConsultantUsername)}`
+        : '/api/admin/consultant-profiles'
+      const payload = await apiRequest(endpoint, {
+        method: 'POST',
+        body,
+      })
+      setMessage(
+        editingConsultantUsername
+          ? `Consultant profile updated for ${displayName(payload.user)}.`
+          : `Consultant profile created for ${displayName(payload.user)}.`,
+      )
+      resetConsultantProfileForm()
       setShowConsultantProfileForm(false)
       setPeople((current) => [payload.user, ...current.filter((row) => row.username !== payload.user.username)])
       setSelectedActivityUser(payload.user)
@@ -1476,6 +2106,129 @@ export default function AdminApplicationsPage({ currentUser }) {
     } finally {
       setCreatingConsultantProfile(false)
     }
+  }
+
+  function formatOverviewType(value) {
+    if (value === 'dictionary') return 'Dictionary'
+    if (value === 'folklore') return 'Folklore'
+    return value || 'Item'
+  }
+
+  function renderOverviewMetric(label, value, detail) {
+    return (
+      <article className="admin-overview-metric">
+        <p className="stat-label">{label}</p>
+        <p className="stat-value">{value}</p>
+        {detail && <p className="meta">{detail}</p>}
+      </article>
+    )
+  }
+
+  function renderOverviewQueue(label, value, detail, targetTab, tone = 'neutral') {
+    return (
+      <button
+        type="button"
+        className={`admin-overview-queue-row ${tone}`}
+        onClick={() => changeTab(targetTab)}
+      >
+        <span>
+          <strong>{label}</strong>
+          <small>{detail}</small>
+        </span>
+        <b>{value}</b>
+      </button>
+    )
+  }
+
+  function renderSubmissionRow(row) {
+    return (
+      <div key={`${row.type}-${row.id}`} className="admin-overview-list-row">
+        <div>
+          <strong>{row.title}</strong>
+          <p className="meta">
+            {formatOverviewType(row.type)} · {contributionStatusLabel(row.status)} · @{row.contributor || 'unknown'}
+          </p>
+          {row.media?.length > 0 && <p className="meta">Media: {row.media.join(', ')}</p>}
+        </div>
+        <time>{formatDate(row.created_at)}</time>
+      </div>
+    )
+  }
+
+  function renderOverviewList(title, rows, emptyText, renderRow, actionLabel, targetTab) {
+    return (
+      <article className="admin-overview-panel">
+        <div className="section-heading">
+          <div>
+            <p className="profile-kicker">Overview</p>
+            <h2>{title}</h2>
+          </div>
+          {targetTab && (
+            <button type="button" className="ghost compact-button" onClick={() => changeTab(targetTab)}>
+              {actionLabel}
+            </button>
+          )}
+        </div>
+        <div className="admin-overview-list">
+          {rows.length === 0 ? <p className="muted">{emptyText}</p> : rows.map(renderRow)}
+        </div>
+      </article>
+    )
+  }
+
+  function renderAdminOverview() {
+    const { counts, queues } = adminOverview
+    return (
+      <section className="admin-overview">
+        <div className="admin-overview-metrics">
+          {renderOverviewMetric('Contributors', counts.contributors, 'Can submit content')}
+          {renderOverviewMetric('Reviewers', counts.reviewers, 'Can validate entries')}
+          {renderOverviewMetric('Approved Entries', counts.approved_entries, 'Dictionary + folklore')}
+          {renderOverviewMetric('Pending Entries', counts.pending_entries, 'Waiting for review')}
+        </div>
+
+        <div className="admin-overview-grid">
+          <article className="admin-overview-panel admin-overview-attention">
+            <div className="section-heading">
+              <div>
+                <p className="profile-kicker">Needs Attention</p>
+                <h2>Queue Health</h2>
+              </div>
+            </div>
+            <div className="admin-overview-queue-list">
+              {renderOverviewQueue('Role Applications', queues.pending_role_applications, 'People waiting for access decisions', 'applications', queues.pending_role_applications ? 'warn' : 'calm')}
+              {renderOverviewQueue('Suspicious Accounts', queues.pending_account_flags, 'Flagged accounts waiting for review', 'people', queues.pending_account_flags ? 'urgent' : 'calm')}
+              {renderOverviewQueue('Dictionary Reviews', queues.pending_dictionary_reviews, 'Submitted terms awaiting validation', 'reviews', queues.pending_dictionary_reviews ? 'warn' : 'calm')}
+              {renderOverviewQueue('Folklore Reviews', queues.pending_folklore_reviews, 'Submitted stories awaiting validation', 'reviews', queues.pending_folklore_reviews ? 'warn' : 'calm')}
+              {renderOverviewQueue(
+                'Entries Under Re-review',
+                queues.entries_under_re_review,
+                `${queues.dictionary_under_re_review} dictionary, ${queues.folklore_under_re_review} folklore`,
+                'reviews',
+                queues.entries_under_re_review ? 'urgent' : 'calm',
+              )}
+            </div>
+          </article>
+
+          {renderOverviewList(
+            'Latest Submissions',
+            adminOverview.latest_submissions,
+            'No submissions yet.',
+            renderSubmissionRow,
+            'Open Reviews',
+            'reviews',
+          )}
+
+          {renderOverviewList(
+            'Media Uploads',
+            adminOverview.latest_media_uploads,
+            'No recent submissions with media.',
+            renderSubmissionRow,
+          )}
+
+        </div>
+      </section>
+    )
   }
 
   useEffect(() => {
@@ -1499,10 +2252,20 @@ export default function AdminApplicationsPage({ currentUser }) {
     syncTabFromUrl()
     window.addEventListener('popstate', syncTabFromUrl)
     return () => window.removeEventListener('popstate', syncTabFromUrl)
+    // Register once; role changes remount the authenticated workspace.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
+    if (!isAdmin || activeTab !== 'overview') return
+    loadAdminOverview()
+    // Load the operations summary when opening Overview.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, isAdmin])
+
+  useEffect(() => {
     if (!canReviewRoles) return
+    if (activeTab !== 'applications') return
     loadApplications(statusFilter)
     if (activeTab === 'applications') loadEmailInvitations()
     // Reload when the current user, selected filter, or active tab changes.
@@ -1524,6 +2287,27 @@ export default function AdminApplicationsPage({ currentUser }) {
       setShowActivityLog(false)
     }
   }, [activeTab])
+
+  useEffect(() => {
+    if (!isAdmin || activeTab !== 'archive') return
+    loadArchiveInventory()
+    // Load archive inventory only when the admin opens this tab.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, isAdmin])
+
+  useEffect(() => {
+    if (!isAdmin || activeTab !== 'archive') return
+    const timeoutId = window.setTimeout(() => loadArchiveInventory(archiveSearch), 300)
+    return () => window.clearTimeout(timeoutId)
+    // Debounce archive search.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [archiveSearch])
+
+  useEffect(() => {
+    if (!applicationDecisionToast) return undefined
+    const timeoutId = window.setTimeout(() => setApplicationDecisionToast(null), 4200)
+    return () => window.clearTimeout(timeoutId)
+  }, [applicationDecisionToast])
 
   useEffect(() => {
     if (!isAdmin) return
@@ -1582,14 +2366,35 @@ export default function AdminApplicationsPage({ currentUser }) {
 
   return (
     <section className="admin-applications-page">
+      {applicationDecisionToast && (
+        <div
+          className={`review-action-toast ${applicationDecisionToast.decision}`}
+          role="status"
+          aria-live="polite"
+        >
+          <div className="review-action-toast-mark" aria-hidden="true" />
+          <div className="review-action-toast-copy">
+            <strong>{applicationDecisionToast.title}</strong>
+            <p>{applicationDecisionToast.detail}</p>
+          </div>
+          <button
+            type="button"
+            className="ghost compact-button"
+            onClick={() => setApplicationDecisionToast(null)}
+          >
+            Close
+          </button>
+        </div>
+      )}
       <div className="admin-applications-header">
         <div>
           <p className="profile-kicker">{isAdmin ? 'Admin' : isConsultant ? 'Consultant' : isReviewer ? 'Reviewer' : 'Contributor'}</p>
           <h1>Steward's Desk</h1>
         </div>
         <button
-          disabled={loading || loadingPeople || loadingInvitations || loadingDrafts || loadingSiteContent}
+          disabled={loadingOverview || loading || loadingPeople || loadingArchive || loadingInvitations || loadingDrafts || loadingSiteContent}
           onClick={() => {
+            if (activeTab === 'overview') loadAdminOverview()
             if (activeTab === 'applications') {
               loadApplications()
               loadEmailInvitations()
@@ -1597,17 +2402,26 @@ export default function AdminApplicationsPage({ currentUser }) {
             if (activeTab === 'people') {
               loadPeople()
             }
+            if (activeTab === 'archive') loadArchiveInventory()
             if (activeTab === 'site') loadSiteContent()
             if (activeTab === 'contributions') loadContributionDrafts()
             if (activeTab === 'reviews') setReviewRefreshToken((current) => current + 1)
           }}
         >
-          {loading || loadingPeople || loadingInvitations || loadingDrafts || loadingSiteContent ? 'Refreshing...' : 'Refresh'}
+          {loadingOverview || loading || loadingPeople || loadingArchive || loadingInvitations || loadingDrafts || loadingSiteContent ? 'Refreshing...' : 'Refresh'}
         </button>
       </div>
 
       {canReviewRoles && (
         <div className="admin-tabs" aria-label="Admin sections">
+          {isAdmin && (
+            <button
+              className={activeTab === 'overview' ? 'admin-tab active' : 'admin-tab'}
+              onClick={() => changeTab('overview')}
+            >
+              Overview
+            </button>
+          )}
           {canReviewRoles && (
             <button
               className={activeTab === 'reviews' ? 'admin-tab active' : 'admin-tab'}
@@ -1634,6 +2448,14 @@ export default function AdminApplicationsPage({ currentUser }) {
           )}
           {isAdmin && (
             <button
+              className={activeTab === 'archive' ? 'admin-tab active' : 'admin-tab'}
+              onClick={() => changeTab('archive')}
+            >
+              Archive
+            </button>
+          )}
+          {isAdmin && (
+            <button
               className={activeTab === 'site' ? 'admin-tab active' : 'admin-tab'}
               onClick={() => changeTab('site')}
             >
@@ -1647,6 +2469,14 @@ export default function AdminApplicationsPage({ currentUser }) {
             Contributions
           </button>
         </div>
+      )}
+
+      {isAdmin && activeTab === 'overview' && (
+        <>
+          {error && <p className="alert error">{error}</p>}
+          {message && <p className="alert ok">{message}</p>}
+          {renderAdminOverview()}
+        </>
       )}
 
       {canReviewRoles && activeTab === 'applications' && (
@@ -1664,6 +2494,10 @@ export default function AdminApplicationsPage({ currentUser }) {
           <p className="stat-label">Rejected</p>
           <p className="stat-value">{counts.rejected}</p>
         </article>
+        <article>
+          <p className="stat-label">Awaiting Quorum</p>
+          <p className="stat-value">{counts.awaitingQuorum}</p>
+        </article>
       </div>
 
           <div className="admin-app-toolbar">
@@ -1676,7 +2510,7 @@ export default function AdminApplicationsPage({ currentUser }) {
           >
             {STATUSES.map((status) => (
               <option key={status} value={status}>
-                {status}
+                {STATUS_LABELS[status]}
               </option>
             ))}
           </select>
@@ -1691,20 +2525,39 @@ export default function AdminApplicationsPage({ currentUser }) {
               {!loading && applications.length === 0 && <p className="muted">No applications found for this filter.</p>}
               {visibleApplications.map((application) => {
                 const applicant = application.applicant
-                const isPending = application.status === 'pending'
+                const canDecide = application.status === 'pending' && !application.current_user_decision
+                const statusDisplay = applicationStatusDisplay(application)
+                const applicationOpen = Boolean(applicationOpenById[application.application_id])
                 return (
-                  <article key={application.application_id} className="admin-app-card">
-                    <div className="admin-app-main">
+                  <article key={application.application_id} className="admin-app-card admin-role-application-card">
+                    <button
+                      type="button"
+                      className="admin-role-application-toggle"
+                      aria-expanded={applicationOpen}
+                      onClick={() => setApplicationOpenById((current) => ({
+                        ...current,
+                        [application.application_id]: !current[application.application_id],
+                      }))}
+                    >
                       <ApplicantAvatar applicant={applicant} />
-                      <div>
-                        <div className="queue-header">
-                          <h2>{displayName(applicant)}</h2>
-                          <span className={`badge status-${application.status}`}>{application.status}</span>
-                        </div>
+                      <span className="admin-role-application-summary">
+                        <span className="admin-role-application-name">{displayName(applicant)}</span>
                         <p className="meta">
                           @{applicant.username} applying as <strong>{roleLabel(application.target_role)}</strong>
                         </p>
-                        <p className="application-rule-text">{applicationRule(application.target_role)}</p>
+                        <small>Submitted {formatDate(application.created_at)}</small>
+                      </span>
+                      <span className="admin-role-application-toggle-end">
+                        <span className={`badge ${statusDisplay.className}`}>{statusDisplay.label}</span>
+                        <span className="queue-awaiting-chevron" aria-hidden="true">
+                          {applicationOpen ? '−' : '+'}
+                        </span>
+                      </span>
+                    </button>
+
+                    {applicationOpen && (
+                      <>
+                        <div className="admin-role-application-body">
                         <p className="meta">
                           {applicant.municipality || 'No municipality yet'}
                           {applicant.affiliation ? ` - ${applicant.affiliation}` : ''}
@@ -1720,36 +2573,34 @@ export default function AdminApplicationsPage({ currentUser }) {
                             Other: {affiliationText(applicant.other_affiliations, 'designation', 'institution')}
                           </p>
                         )}
-                        <p className="meta">Submitted {formatDate(application.created_at)}</p>
-                      </div>
-                    </div>
+                        </div>
 
-                    <div className="admin-app-details">
-                      <div>
-                        <p className="stat-label">Screening Progress</p>
-                        <p className="meta">{approvalProgress(application)}</p>
-                      </div>
-                      <div>
-                        <p className="stat-label">Current Roles</p>
-                        <p className="meta">{applicant.groups.length ? applicant.groups.join(', ') : 'None'}</p>
-                      </div>
-                      <div>
-                        <p className="stat-label">Decision History</p>
-                        {application.decisions.length === 0 ? (
-                          <p className="meta">No decisions yet.</p>
-                        ) : (
-                          application.decisions.map((row) => (
-                            <p key={row.decision_id} className="meta">
-                              {row.decision} by {row.decided_by} ({row.decider_role}) on {formatDate(row.created_at)}
-                              {row.notes ? ` - ${row.notes}` : ''}
-                            </p>
-                          ))
-                        )}
-                      </div>
-                    </div>
+                        <div className="admin-app-details">
+                          <div>
+                            <p className="stat-label">Screening Progress</p>
+                            <p className="meta">{approvalProgress(application)}</p>
+                          </div>
+                          <div>
+                            <p className="stat-label">Current Roles</p>
+                            <p className="meta">{applicant.groups.length ? applicant.groups.join(', ') : 'None'}</p>
+                          </div>
+                          <div>
+                            <p className="stat-label">Decision History</p>
+                            {application.decisions.length === 0 ? (
+                              <p className="meta">No decisions yet.</p>
+                            ) : (
+                              application.decisions.map((row) => (
+                                <p key={row.decision_id} className="meta">
+                                  {row.decision} by {row.decided_by} ({row.decider_role}) on {formatDate(row.created_at)}
+                                  {row.notes ? ` - ${row.notes}` : ''}
+                                </p>
+                              ))
+                            )}
+                          </div>
+                        </div>
 
-                    {isPending && (
-                      <div className="admin-app-actions">
+                        {canDecide && (
+                          <div className="admin-app-actions">
                         {rejectNotesOpenById[application.application_id] && (
                           <label className="field" htmlFor={`notes-${application.application_id}`}>
                             <span>Rejection notes</span>
@@ -1757,15 +2608,24 @@ export default function AdminApplicationsPage({ currentUser }) {
                               id={`notes-${application.application_id}`}
                               rows={2}
                               value={notesById[application.application_id] || ''}
-                              onChange={(event) =>
+                              onChange={(event) => {
                                 setNotesById((current) => ({
                                   ...current,
                                   [application.application_id]: event.target.value,
                                 }))
-                              }
+                                setApplicationActionErrorById((current) => ({
+                                  ...current,
+                                  [application.application_id]: '',
+                                }))
+                              }}
                               placeholder="Required so the applicant has clear feedback."
                             />
                           </label>
+                        )}
+                        {applicationActionErrorById[application.application_id] && (
+                          <p className="inline-error admin-application-action-error">
+                            {applicationActionErrorById[application.application_id]}
+                          </p>
                         )}
                         <div className="actions">
                           <button
@@ -1782,7 +2642,9 @@ export default function AdminApplicationsPage({ currentUser }) {
                             {rejectNotesOpenById[application.application_id] ? 'Submit Reject' : 'Reject'}
                           </button>
                         </div>
-                      </div>
+                          </div>
+                        )}
+                      </>
                     )}
                   </article>
                 )
@@ -1796,6 +2658,7 @@ export default function AdminApplicationsPage({ currentUser }) {
 
       {isAdmin && activeTab === 'people' && (
         <>
+          <div className="admin-people-tab-content">
           <div className="admin-app-summary" aria-label="People summary">
             <article>
               <p className="stat-label">Loaded People</p>
@@ -1844,26 +2707,59 @@ export default function AdminApplicationsPage({ currentUser }) {
             </button>
           </form>
 
-          <section className="admin-app-card admin-consultant-profile-card">
-            <div className="section-heading">
-              <div>
-                <p className="profile-kicker">Consultant Profiles</p>
-                <h2>Managed Consultant Profile</h2>
+          <div className="admin-people-operations-grid">
+            <section id="managed-consultant-profile" className="admin-app-card admin-consultant-profile-card">
+              <div className="section-heading">
+                <div>
+                  <p className="profile-kicker">Consultant Profiles</p>
+                  <h2>Managed Consultant Profile</h2>
+                </div>
+                <button
+                  type="button"
+                  className={showConsultantProfileForm ? 'ghost compact-button' : 'compact-button'}
+                  onClick={() => {
+                    if (showConsultantProfileForm) {
+                      resetConsultantProfileForm()
+                      setShowConsultantProfileForm(false)
+                    } else {
+                      resetConsultantProfileForm()
+                      setShowConsultantProfileForm(true)
+                    }
+                  }}
+                >
+                  {showConsultantProfileForm ? 'Cancel' : 'Create Profile'}
+                </button>
               </div>
-              <button
-                type="button"
-                className={showConsultantProfileForm ? 'ghost compact-button' : 'compact-button'}
-                onClick={() => setShowConsultantProfileForm((current) => !current)}
-              >
-                {showConsultantProfileForm ? 'Hide Form' : 'Create Profile'}
-              </button>
-            </div>
-            <p className="muted">
-              Create a public consultant profile for trusted knowledge holders who should not need to manage an account.
-              The profile receives consultant recognition and reviewer-level access in the audit trail, but no usable password.
-            </p>
-            {showConsultantProfileForm && (
-              <form className="admin-consultant-profile-form" onSubmit={createManagedConsultantProfile}>
+              <p className="muted">
+                Create a public profile for a trusted knowledge holder who will not manage their own account.
+              </p>
+              {showConsultantProfileForm && (
+                <form className="admin-consultant-profile-form" onSubmit={createManagedConsultantProfile}>
+                {editingConsultantUsername && (
+                  <p className="alert ok">
+                    Editing managed profile @{editingConsultantUsername}
+                  </p>
+                )}
+                <aside className="profile-photo-editor admin-consultant-photo-editor">
+                  {consultantPhotoPreview ? (
+                    <img className="profile-photo-preview" src={consultantPhotoPreview} alt="" />
+                  ) : (
+                    <div className="profile-photo-preview profile-photo-placeholder" aria-hidden="true">
+                      {`${consultantProfile.first_name.slice(0, 1)}${consultantProfile.last_name.slice(0, 1)}`.toUpperCase() || 'CI'}
+                    </div>
+                  )}
+                  <label className="photo-upload-button" htmlFor="consultant-profile-photo">
+                    Choose Profile Photo
+                  </label>
+                  <input
+                    id="consultant-profile-photo"
+                    type="file"
+                    accept="image/*"
+                    onChange={handleConsultantPhotoChange}
+                  />
+                  <p className="hint">JPG, PNG, or WebP works best.</p>
+                  {consultantPhotoWarning && <p className="inline-ok">{consultantPhotoWarning}</p>}
+                </aside>
                 <div className="field-grid">
                   <label className="field" htmlFor="consultant-first-name">
                     <span>First name *</span>
@@ -1906,14 +2802,96 @@ export default function AdminApplicationsPage({ currentUser }) {
                       onChange={(event) => updateConsultantProfile('post_nominals', event.target.value)}
                     />
                   </label>
-                  <label className="field" htmlFor="consultant-affiliation">
-                    <span>Affiliation</span>
-                    <input
-                      id="consultant-affiliation"
-                      value={consultantProfile.affiliation}
-                      onChange={(event) => updateConsultantProfile('affiliation', event.target.value)}
-                    />
-                  </label>
+                </div>
+                <div className="affiliation-editor">
+                  <div className="affiliation-editor-heading">
+                    <h4>Cultural / Community Affiliation</h4>
+                    <button
+                      type="button"
+                      className="ghost compact-button"
+                      onClick={() => addConsultantAffiliation('cultural_affiliations')}
+                    >
+                      Add another
+                    </button>
+                  </div>
+                  {consultantProfile.cultural_affiliations.map((row, index) => (
+                    <div className="affiliation-row" key={`consultant-cultural-${index}`}>
+                      <label className="field" htmlFor={`consultant-cultural-role-${index}`}>
+                        {index === 0 && <span>Position / Role</span>}
+                        <input
+                          id={`consultant-cultural-role-${index}`}
+                          aria-label="Position / Role"
+                          placeholder="e.g., Resident, Member etc."
+                          value={row.role}
+                          onChange={(event) => updateConsultantAffiliation('cultural_affiliations', index, 'role', event.target.value)}
+                        />
+                      </label>
+                      <label className="field" htmlFor={`consultant-cultural-organization-${index}`}>
+                        {index === 0 && <span>Agency/ Organization/ Group</span>}
+                        <input
+                          id={`consultant-cultural-organization-${index}`}
+                          aria-label="Agency/ Organization/ Group"
+                          placeholder="e.g., Brgy. San Antonio, Ivatan Cultural Council, etc."
+                          value={row.organization}
+                          onChange={(event) => updateConsultantAffiliation('cultural_affiliations', index, 'organization', event.target.value)}
+                        />
+                      </label>
+                      {consultantProfile.cultural_affiliations.length > 1 && (
+                        <button
+                          type="button"
+                          className="ghost compact-button"
+                          onClick={() => removeConsultantAffiliation('cultural_affiliations', index)}
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <div className="affiliation-editor">
+                  <div className="affiliation-editor-heading">
+                    <h4>Professional / Other Affiliation</h4>
+                    <button
+                      type="button"
+                      className="ghost compact-button"
+                      onClick={() => addConsultantAffiliation('other_affiliations')}
+                    >
+                      Add another
+                    </button>
+                  </div>
+                  {consultantProfile.other_affiliations.map((row, index) => (
+                    <div className="affiliation-row" key={`consultant-other-${index}`}>
+                      <label className="field" htmlFor={`consultant-other-designation-${index}`}>
+                        {index === 0 && <span>Position / Role</span>}
+                        <input
+                          id={`consultant-other-designation-${index}`}
+                          aria-label="Position / Role"
+                          placeholder="e.g., Student, Clerk, etc."
+                          value={row.designation}
+                          onChange={(event) => updateConsultantAffiliation('other_affiliations', index, 'designation', event.target.value)}
+                        />
+                      </label>
+                      <label className="field" htmlFor={`consultant-other-institution-${index}`}>
+                        {index === 0 && <span>Agency/ Organization/ Group</span>}
+                        <input
+                          id={`consultant-other-institution-${index}`}
+                          aria-label="Agency/ Organization/ Group"
+                          placeholder="e.g., Batanes State College, LGU Basco, etc."
+                          value={row.institution}
+                          onChange={(event) => updateConsultantAffiliation('other_affiliations', index, 'institution', event.target.value)}
+                        />
+                      </label>
+                      {consultantProfile.other_affiliations.length > 1 && (
+                        <button
+                          type="button"
+                          className="ghost compact-button"
+                          onClick={() => removeConsultantAffiliation('other_affiliations', index)}
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </div>
+                  ))}
                 </div>
                 <label className="field" htmlFor="consultant-occupation">
                   <span>Role or occupation</span>
@@ -1944,12 +2922,55 @@ export default function AdminApplicationsPage({ currentUser }) {
                 </label>
                 <div className="actions">
                   <button type="submit" disabled={creatingConsultantProfile}>
-                    {creatingConsultantProfile ? 'Creating...' : 'Create Consultant Profile'}
+                    {creatingConsultantProfile
+                      ? editingConsultantUsername ? 'Saving...' : 'Creating...'
+                      : editingConsultantUsername ? 'Save Consultant Profile' : 'Create Consultant Profile'}
                   </button>
                 </div>
-              </form>
-            )}
-          </section>
+                </form>
+              )}
+            </section>
+
+            <section className="admin-app-card admin-flagged-accounts-card">
+              <div className="section-heading">
+                <div>
+                  <p className="profile-kicker">Account Safety</p>
+                  <h2>Flagged Accounts</h2>
+                </div>
+                <span className={flaggedPeople.length ? 'badge status-pending' : 'badge status-approved'}>
+                  {flaggedPeople.length}
+                </span>
+              </div>
+              <p className="muted">
+                Review accounts reported by users or admins. Open a profile to clear or confirm a flag.
+              </p>
+              <div className="admin-flagged-account-list">
+                {flaggedPeople.length === 0 && (
+                  <p className="muted">No pending suspicious-account flags in the current people list.</p>
+                )}
+                {flaggedPeople.map((person) => {
+                  const latestFlag = person.pending_account_flags?.[0]
+                  return (
+                    <button
+                      type="button"
+                      key={person.username}
+                      className="admin-flagged-account-row"
+                      onClick={() => openPersonProfile(person)}
+                    >
+                      <span>
+                        <strong>{displayName(person)}</strong>
+                        <small>@{person.username}</small>
+                      </span>
+                      <span>
+                        <small>Flagged by @{latestFlag?.admin || 'unknown'}</small>
+                        <small>{latestFlag?.created_at ? formatDate(latestFlag.created_at) : 'Pending review'}</small>
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+            </section>
+          </div>
 
           {error && <p className="alert error">{error}</p>}
           {message && <p className="alert ok">{message}</p>}
@@ -2021,14 +3042,32 @@ export default function AdminApplicationsPage({ currentUser }) {
                     <ApplicantAvatar applicant={selectedActivityUser} />
                     <div>
                       <strong>{displayName(selectedActivityUser)}</strong>
-                      <p className="meta">@{selectedActivityUser.username}</p>
-                      <p className="meta">{selectedActivityUser.email || 'No email set'}</p>
+                      <p className="meta admin-person-username">@{selectedActivityUser.username}</p>
+                      <p className="meta admin-person-email">{selectedActivityUser.email || 'No email set'}</p>
                     </div>
                   </div>
                   <dl className="admin-person-profile-grid">
                     <div>
                       <dt>Roles</dt>
                       <dd>{selectedActivityUser.groups?.length ? selectedActivityUser.groups.join(', ') : selectedActivityUser.is_superuser ? 'Superuser' : 'Registered'}</dd>
+                    </div>
+                    <div>
+                      <dt>Account Status</dt>
+                      <dd>
+                        <span className={selectedActivityUser.is_active ? 'badge status-approved' : 'badge status-rejected'}>
+                          {selectedActivityUser.is_active ? 'Active' : 'Inactive'}
+                        </span>
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Suspicious Review</dt>
+                      <dd>
+                        {selectedActivityUser.pending_account_flags?.length ? (
+                          <span className="badge status-pending">Flagged</span>
+                        ) : (
+                          <span className="badge status-approved">Clear</span>
+                        )}
+                      </dd>
                     </div>
                     <div>
                       <dt>Municipality</dt>
@@ -2069,11 +3108,28 @@ export default function AdminApplicationsPage({ currentUser }) {
                   </dl>
                 </div>
                 <div className="admin-person-log-controls">
+                  {isManagedConsultant(selectedActivityUser) && (
+                    <button
+                      className="compact-button"
+                      type="button"
+                      onClick={() => beginManagedConsultantEdit(selectedActivityUser)}
+                    >
+                      Edit Managed Profile
+                    </button>
+                  )}
                   <button
                     className="ghost compact-button"
                     onClick={() => navigate(`${ROUTES.profileView}?username=${encodeURIComponent(selectedActivityUser.username)}`)}
                   >
                     Public Profile
+                  </button>
+                  <button
+                    className={showAccountControls ? 'compact-button' : 'ghost compact-button'}
+                    type="button"
+                    aria-expanded={showAccountControls}
+                    onClick={() => setShowAccountControls((current) => !current)}
+                  >
+                    {showAccountControls ? 'Hide Account Controls' : 'Account Controls'}
                   </button>
                   <button
                     className="ghost compact-button"
@@ -2130,6 +3186,112 @@ export default function AdminApplicationsPage({ currentUser }) {
                   </button>
                   {showActivityLog && <p className="muted">Latest 500 actions are shown. Audit records stay in the system.</p>}
                 </div>
+                {showAccountControls && <div className="admin-account-controls">
+                  <div className="section-heading">
+                    <div>
+                      <p className="profile-kicker">Account Controls</p>
+                      <h3>Access and Review</h3>
+                    </div>
+                  </div>
+                  {selectedActivityUser.username === currentUser.username && (
+                    <p className="alert warning">
+                      Safety check: you cannot deactivate your own admin account or revoke your own admin access.
+                    </p>
+                  )}
+                  {selectedActivityUser.pending_account_flags?.length > 0 && (
+                    <div className="admin-account-flag-list">
+                      {selectedActivityUser.pending_account_flags.map((flag) => (
+                        <article key={flag.action_id} className="admin-account-flag-card">
+                          <div>
+                            <strong>Flagged by @{flag.admin}</strong>
+                            <p className="meta">{flag.notes}</p>
+                            <p className="meta">Created {formatDate(flag.created_at)}</p>
+                          </div>
+                          <div className="actions">
+                            <button
+                              type="button"
+                              className="ghost compact-button"
+                              disabled={Boolean(accountActionLoading)}
+                              onClick={() => runAccountAction(selectedActivityUser, 'clear-flag', { flagId: flag.action_id })}
+                            >
+                              Clear
+                            </button>
+                            <button
+                              type="button"
+                              className="ghost compact-button danger"
+                              disabled={Boolean(accountActionLoading)}
+                              onClick={() => runAccountAction(selectedActivityUser, 'confirm-flag', { flagId: flag.action_id })}
+                            >
+                              Confirm
+                            </button>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  )}
+                  <label className="field" htmlFor="admin-account-action-notes">
+                    <span>Account action notes</span>
+                    <textarea
+                      id="admin-account-action-notes"
+                      rows={3}
+                      value={accountActionNotes}
+                      onChange={(event) => setAccountActionNotes(event.target.value)}
+                      placeholder="Required for deactivation, role revocation, suspicious flags, and flag resolution."
+                    />
+                  </label>
+                  <div className="admin-account-action-grid">
+                    <button
+                      type="button"
+                      className={selectedActivityUser.is_active ? 'ghost compact-button danger' : 'compact-button'}
+                      disabled={Boolean(accountActionLoading) || (selectedActivityUser.username === currentUser.username && selectedActivityUser.is_active)}
+                      onClick={() => runAccountAction(selectedActivityUser, selectedActivityUser.is_active ? 'deactivate' : 'activate')}
+                    >
+                      {accountActionLoading === 'activate' || accountActionLoading === 'deactivate'
+                        ? 'Updating...'
+                        : selectedActivityUser.is_active ? 'Deactivate Account' : 'Reactivate Account'}
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost compact-button"
+                      disabled={Boolean(accountActionLoading) || !selectedActivityUser.email || !selectedActivityUser.is_active}
+                      onClick={() => runAccountAction(selectedActivityUser, 'password-reset')}
+                    >
+                      {accountActionLoading === 'password-reset' ? 'Sending...' : 'Send Password Reset'}
+                    </button>
+                    <button
+                      type="button"
+                      className="ghost compact-button"
+                      disabled={Boolean(accountActionLoading) || selectedActivityUser.pending_account_flags?.length > 0}
+                      onClick={() => runAccountAction(selectedActivityUser, 'flag-suspicious')}
+                    >
+                      {accountActionLoading === 'flag-suspicious' ? 'Flagging...' : 'Flag Suspicious'}
+                    </button>
+                  </div>
+                  <div className="admin-role-revoke-row">
+                    <label className="field" htmlFor="admin-role-revoke-select">
+                      <span>Role to revoke</span>
+                      <select
+                        id="admin-role-revoke-select"
+                        value={roleToRevoke}
+                        onChange={(event) => setRoleToRevoke(event.target.value)}
+                      >
+                        {REVOKABLE_ROLES.map((role) => (
+                          <option key={role} value={role}>
+                            {roleLabel(role)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      className="ghost compact-button danger"
+                      disabled={Boolean(accountActionLoading) || (selectedActivityUser.username === currentUser.username && roleToRevoke === 'admin')}
+                      onClick={() => runAccountAction(selectedActivityUser, 'revoke-role')}
+                    >
+                      {accountActionLoading === 'revoke-role' ? 'Revoking...' : 'Revoke Role Access'}
+                    </button>
+                  </div>
+                </div>}
                 {showActivityLog && loadingActivity && <p className="muted">Loading action log...</p>}
                 {showActivityLog && !loadingActivity && activityRows.length === 0 && (
                   <p className="muted">No recorded activity for this person yet.</p>
@@ -2150,7 +3312,139 @@ export default function AdminApplicationsPage({ currentUser }) {
               </aside>
             </div>
           )}
+          </div>
         </>
+      )}
+
+      {isAdmin && activeTab === 'archive' && (
+        <section className="admin-archive-page">
+          {error && <p className="alert error">{error}</p>}
+          {message && <p className="alert ok">{message}</p>}
+
+          <div className="admin-archive-toolbar">
+            <div>
+              <h2>Entry Archive</h2>
+            </div>
+            <label className="field" htmlFor="archive-search">
+              <span>Search entries</span>
+              <input
+                id="archive-search"
+                value={archiveSearch}
+                onChange={(event) => setArchiveSearch(event.target.value)}
+                placeholder="Title, term, or contributor"
+              />
+            </label>
+          </div>
+
+          <div className="admin-archive-summary" aria-label="Archive summary">
+            <article>
+              <p className="stat-label">Archived</p>
+              <p className="stat-value">{archiveInventory.counts.archived}</p>
+            </article>
+          </div>
+
+          {loadingArchive && <p className="muted">Loading archive records...</p>}
+
+          <div className="admin-archive-grid admin-archive-grid-single">
+            <section className="admin-app-card admin-archive-panel">
+              <div className="section-heading">
+                <div>
+                  <p className="profile-kicker">Preserved Records</p>
+                  <h2>Archived</h2>
+                </div>
+                <span className="badge status-pending">{archiveInventory.archived.length}</span>
+              </div>
+              <p className="muted">Hidden records remain preserved and can be restored to the public archive.</p>
+              <div className="admin-archive-list">
+                {!loadingArchive && archiveInventory.archived.length === 0 && (
+                  <p className="muted">No archived entries match this search.</p>
+                )}
+                {archiveInventory.archived.map((row) => (
+                  <article className="admin-archive-row" key={`${row.target_type}-${row.target_id}`}>
+                    <div>
+                      <strong>{row.title}</strong>
+                      <p className="meta">
+                        {row.target_type === 'dictionary' ? 'Dictionary' : 'Folklore'} · @{row.contributor_username || 'unknown'}
+                      </p>
+                      <p className="meta">Archived {formatDate(row.archived_at)}</p>
+                    </div>
+                    <button
+                      type="button"
+                      className="ghost compact-button"
+                      onClick={() => beginArchiveAction(row, 'restore_approved')}
+                    >
+                      Restore
+                    </button>
+                  </article>
+                ))}
+              </div>
+            </section>
+          </div>
+
+          {archiveActionTarget && (
+            <div
+              className="admin-archive-action-backdrop"
+              role="presentation"
+              onClick={savingArchiveAction ? undefined : () => setArchiveActionTarget(null)}
+            >
+              <section
+                className="admin-archive-action-modal"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="archive-action-title"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="section-heading">
+                  <div>
+                    <p className="profile-kicker">Admin Lifecycle Action</p>
+                    <h2 id="archive-action-title">
+                      {archiveActionTarget.action === 'archive' ? 'Archive entry?' : 'Restore entry?'}
+                    </h2>
+                  </div>
+                  <button
+                    type="button"
+                    className="ghost compact-button"
+                    disabled={savingArchiveAction}
+                    onClick={() => setArchiveActionTarget(null)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+                <p>
+                  <strong>{archiveActionTarget.title}</strong>
+                </p>
+                <p className="muted">
+                  {archiveActionTarget.action === 'archive'
+                    ? 'This removes the entry from public use while preserving its record and contribution history.'
+                    : 'This returns the preserved entry to approved public status.'}
+                </p>
+                <form className="admin-archive-action-form" onSubmit={submitArchiveAction}>
+                  <label className="field" htmlFor="archive-action-notes">
+                    <span>Admin notes *</span>
+                    <textarea
+                      id="archive-action-notes"
+                      rows={4}
+                      value={archiveActionNotes}
+                      onChange={(event) => setArchiveActionNotes(event.target.value)}
+                      placeholder="Explain why this entry is being archived or restored."
+                    />
+                  </label>
+                  <button
+                    type="submit"
+                    className={archiveActionTarget.action === 'archive' ? 'danger' : ''}
+                    disabled={savingArchiveAction}
+                  >
+                    {savingArchiveAction
+                      ? 'Saving...'
+                      : archiveActionTarget.action === 'archive'
+                        ? 'Archive Entry'
+                        : 'Restore Entry'}
+                  </button>
+                </form>
+              </section>
+            </div>
+          )}
+        </section>
       )}
 
       {isAdmin && activeTab === 'site' && (
@@ -2158,8 +3452,153 @@ export default function AdminApplicationsPage({ currentUser }) {
           {error && <p className="alert error">{error}</p>}
           {message && <p className="alert ok">{message}</p>}
           {loadingSiteContent && <p className="muted">Loading site content...</p>}
+          {activeSiteContentSection && (
+            <p className="alert warning">
+              You are editing live public site text. Saving will publish this change for visitors immediately.
+            </p>
+          )}
 
-          <section className="admin-app-card admin-site-content-card admin-maintenance-card">
+          <section
+            className={`admin-site-content-picker${activeSiteContentSection ? ' has-active-editor' : ''}`}
+            aria-labelledby="site-content-picker-title"
+          >
+            <div className="admin-site-content-picker-heading">
+              <div>
+                <p className="profile-kicker">Content Manager</p>
+                <h2 id="site-content-picker-title">What do you want to edit?</h2>
+                <p className="muted">
+                  {activeSiteContentSection
+                    ? 'Switch sections here. Unsaved edits remain until you save or reset.'
+                    : 'Choose a section below. Only its editing fields will open.'}
+                </p>
+              </div>
+              {activeSiteContentSection && (
+                <button
+                  type="button"
+                  className="ghost compact-button"
+                  onClick={() => setActiveSiteContentSection('')}
+                >
+                  Close Editor
+                </button>
+              )}
+            </div>
+            <div className="admin-site-content-menu">
+              {SITE_CONTENT_SECTIONS.map((section) => (
+                <button
+                  type="button"
+                  key={section.id}
+                  className={`admin-site-content-menu-card${activeSiteContentSection === section.id ? ' active' : ''}`}
+                  aria-pressed={activeSiteContentSection === section.id}
+                  onClick={() => setActiveSiteContentSection(section.id)}
+                >
+                  <span className="profile-kicker">{section.eyebrow}</span>
+                  <strong>{section.title}</strong>
+                  <span>{section.description}</span>
+                  <b>{activeSiteContentSection === section.id ? 'Editing now' : 'Edit section'}</b>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          {!activeSiteContentSection && !loadingSiteContent && (
+            <div className="admin-site-content-empty">
+              <p>Select a content section above to open its editor.</p>
+            </div>
+          )}
+
+          {activeSiteContentSection === 'brand' && (
+          <section className="admin-app-card admin-site-content-card admin-site-editor-card">
+            <div className="section-heading">
+              <div>
+                <p className="profile-kicker">Site Identity</p>
+                <h2>Brand & Landing Page</h2>
+              </div>
+            </div>
+            <div className="admin-brand-editor">
+              <div className="admin-brand-logo-editor">
+                {siteContentForm.brand_logo_url ? (
+                  <img src={siteContentForm.brand_logo_url} alt="" />
+                ) : (
+                  <div className="admin-brand-logo-placeholder" aria-hidden="true">
+                    {(siteContentForm.brand_name || 'CI').slice(0, 2).toUpperCase()}
+                  </div>
+                )}
+                <div>
+                  <label className="photo-upload-button" htmlFor="site-brand-logo">
+                    {siteContentForm.brand_logo_url ? 'Replace Brand Logo' : 'Upload Brand Logo'}
+                  </label>
+                  <input
+                    id="site-brand-logo"
+                    type="file"
+                    accept="image/*"
+                    disabled={uploadingBrandLogo}
+                    onChange={(event) => uploadBrandLogo(event.target.files?.[0])}
+                  />
+                  <p className="hint">
+                    {uploadingBrandLogo
+                      ? 'Uploading logo...'
+                      : 'Used in the header, landing page, and About page.'}
+                  </p>
+                </div>
+              </div>
+              <label className="field" htmlFor="site-brand-name">
+                <span>Brand name</span>
+                <input
+                  id="site-brand-name"
+                  value={siteContentForm.brand_name}
+                  onChange={(event) => setSiteContentField('brand_name', event.target.value)}
+                />
+              </label>
+              <label className="field" htmlFor="site-landing-intro">
+                <span>First slide introduction</span>
+                <textarea
+                  id="site-landing-intro"
+                  rows={4}
+                  value={siteContentForm.landing_intro_text}
+                  onChange={(event) => setSiteContentField('landing_intro_text', event.target.value)}
+                />
+              </label>
+              <label className="field" htmlFor="site-landing-body">
+                <span>First slide supporting text</span>
+                <textarea
+                  id="site-landing-body"
+                  rows={4}
+                  value={siteContentForm.landing_body_text}
+                  onChange={(event) => setSiteContentField('landing_body_text', event.target.value)}
+                />
+              </label>
+              <div className="admin-brand-footer-fields">
+                <label className="field" htmlFor="site-footer-left">
+                  <span>Footer left</span>
+                  <input
+                    id="site-footer-left"
+                    value={siteContentForm.footer_left_text}
+                    onChange={(event) => setSiteContentField('footer_left_text', event.target.value)}
+                  />
+                </label>
+                <label className="field" htmlFor="site-footer-center">
+                  <span>Footer center</span>
+                  <input
+                    id="site-footer-center"
+                    value={siteContentForm.footer_center_text}
+                    onChange={(event) => setSiteContentField('footer_center_text', event.target.value)}
+                  />
+                </label>
+                <label className="field" htmlFor="site-footer-right">
+                  <span>Footer right</span>
+                  <input
+                    id="site-footer-right"
+                    value={siteContentForm.footer_right_text}
+                    onChange={(event) => setSiteContentField('footer_right_text', event.target.value)}
+                  />
+                </label>
+              </div>
+            </div>
+          </section>
+          )}
+
+          {activeSiteContentSection === 'maintenance' && (
+          <section className="admin-app-card admin-site-content-card admin-site-editor-card admin-maintenance-card">
             <div className="section-heading">
               <div>
                 <p className="profile-kicker">Operations</p>
@@ -2188,8 +3627,10 @@ export default function AdminApplicationsPage({ currentUser }) {
               />
             </label>
           </section>
+          )}
 
-          <section className="admin-app-card admin-site-content-card">
+          {activeSiteContentSection === 'about' && (
+          <section className="admin-app-card admin-site-content-card admin-site-editor-card">
             <div className="section-heading">
               <div>
                 <p className="profile-kicker">Public Pages</p>
@@ -2250,8 +3691,10 @@ export default function AdminApplicationsPage({ currentUser }) {
               />
             </label>
           </section>
+          )}
 
-          <section className="admin-app-card admin-site-content-card">
+          {activeSiteContentSection === 'yaru' && (
+          <section className="admin-app-card admin-site-content-card admin-site-editor-card">
             <div className="section-heading">
               <div>
                 <p className="profile-kicker">Public Pages</p>
@@ -2276,8 +3719,10 @@ export default function AdminApplicationsPage({ currentUser }) {
               />
             </label>
           </section>
+          )}
 
-          <section className="admin-app-card admin-site-content-card">
+          {activeSiteContentSection === 'support' && (
+          <section className="admin-app-card admin-site-content-card admin-site-editor-card">
             <div className="section-heading">
               <div>
                 <p className="profile-kicker">About Page</p>
@@ -2326,8 +3771,10 @@ export default function AdminApplicationsPage({ currentUser }) {
               ))}
             </div>
           </section>
+          )}
 
-          <section className="admin-app-card admin-site-content-card">
+          {activeSiteContentSection === 'partners' && (
+          <section className="admin-app-card admin-site-content-card admin-site-editor-card">
             <div className="section-heading">
               <div>
                 <p className="profile-kicker">About Page</p>
@@ -2359,15 +3806,32 @@ export default function AdminApplicationsPage({ currentUser }) {
                       />
                     </label>
                   </div>
-                  <label className="field" htmlFor={`site-partner-description-${index}`}>
-                    <span>Short details</span>
-                    <textarea
-                      id={`site-partner-description-${index}`}
-                      rows={3}
-                      value={row.description}
-                      onChange={(event) => updateSiteContentRow('partner_details', index, 'description', event.target.value)}
-                    />
-                  </label>
+                  <div className="admin-partner-logo-editor">
+                    {row.logo_url ? (
+                      <img src={row.logo_url} alt="" />
+                    ) : (
+                      <div className="admin-partner-logo-placeholder" aria-hidden="true">
+                        {(row.name || 'Partner').slice(0, 2).toUpperCase()}
+                      </div>
+                    )}
+                    <div>
+                      <label className="photo-upload-button" htmlFor={`site-partner-logo-${index}`}>
+                        {row.logo_url ? 'Replace Logo' : 'Upload Logo'}
+                      </label>
+                      <input
+                        id={`site-partner-logo-${index}`}
+                        type="file"
+                        accept="image/*"
+                        disabled={uploadingPartnerLogoIndex === index}
+                        onChange={(event) => uploadPartnerLogo(index, event.target.files?.[0])}
+                      />
+                      <p className="hint">
+                        {uploadingPartnerLogoIndex === index
+                          ? 'Uploading logo...'
+                          : 'PNG or WebP with a transparent background works best.'}
+                      </p>
+                    </div>
+                  </div>
                   {siteContentForm.partner_details.length > 1 && (
                     <button type="button" className="ghost compact-button danger" onClick={() => removeSiteContentRow('partner_details', index)}>
                       Remove Partner
@@ -2377,8 +3841,10 @@ export default function AdminApplicationsPage({ currentUser }) {
               ))}
             </div>
           </section>
+          )}
 
-          <section className="admin-app-card admin-site-content-card">
+          {activeSiteContentSection === 'faq' && (
+          <section className="admin-app-card admin-site-content-card admin-site-editor-card">
             <div className="section-heading">
               <div>
                 <p className="profile-kicker">Help Center</p>
@@ -2526,20 +3992,94 @@ export default function AdminApplicationsPage({ currentUser }) {
               ))}
             </div>
           </section>
+          )}
 
-          <div className="admin-site-save-bar">
-            <button type="submit" disabled={savingSiteContent || loadingSiteContent}>
-              {savingSiteContent ? 'Saving...' : 'Save Site Content'}
-            </button>
-            <button type="button" className="ghost" disabled={loadingSiteContent} onClick={() => loadSiteContent()}>
-              Reset Unsaved Edits
-            </button>
-          </div>
+          {activeSiteContentSection === 'policies' && (
+          <section className="admin-app-card admin-site-content-card admin-site-editor-card">
+            <div className="section-heading">
+              <div>
+                <p className="profile-kicker">Governance</p>
+                <h2>Policy & Consent Text</h2>
+                <p className="muted">
+                  Separate paragraphs with a blank line. These appear on role application and media upload screens.
+                </p>
+              </div>
+            </div>
+            <label className="field" htmlFor="site-privacy-notice">
+              <span>Editable privacy notice</span>
+              <textarea
+                id="site-privacy-notice"
+                rows={6}
+                value={siteContentForm.privacy_notice_text}
+                onChange={(event) => setSiteContentField('privacy_notice_text', event.target.value)}
+              />
+            </label>
+            <label className="field" htmlFor="site-media-upload-policy">
+              <span>Media upload policy</span>
+              <textarea
+                id="site-media-upload-policy"
+                rows={6}
+                value={siteContentForm.media_upload_policy_text}
+                onChange={(event) => setSiteContentField('media_upload_policy_text', event.target.value)}
+              />
+            </label>
+            <label className="field" htmlFor="site-contributor-agreement">
+              <span>Contributor agreement text</span>
+              <textarea
+                id="site-contributor-agreement"
+                rows={6}
+                value={siteContentForm.contributor_agreement_text}
+                onChange={(event) => setSiteContentField('contributor_agreement_text', event.target.value)}
+              />
+            </label>
+          </section>
+          )}
+
+          {activeSiteContentSection && (
+            <div className="admin-site-save-bar">
+              <button type="submit" disabled={savingSiteContent || loadingSiteContent}>
+                {savingSiteContent ? 'Saving...' : 'Save Site Content'}
+              </button>
+              <button type="button" className="ghost" disabled={loadingSiteContent} onClick={() => loadSiteContent()}>
+                Reset Unsaved Edits
+              </button>
+            </div>
+          )}
+          <ConfirmDialog
+            open={confirmingSiteContentSave}
+            title="Publish live public text?"
+            message="This saves the current Site Content form and immediately updates public pages for visitors."
+            detail="Review wording, links, images, and maintenance message before confirming. This action affects the live site."
+            confirmLabel="Publish Changes"
+            cancelLabel="Review Again"
+            busyLabel="Publishing..."
+            busy={savingSiteContent}
+            onCancel={() => setConfirmingSiteContentSave(false)}
+            onConfirm={performSiteContentSave}
+          />
         </form>
       )}
 
       {activeTab === 'contributions' && (
 	        <section className="admin-contributions-layout">
+            <div className="admin-app-summary contribution-summary" aria-label="My contribution summary">
+              <article>
+                <p className="stat-label">Published Total</p>
+                <p className="stat-value">{contributionStats.published}</p>
+              </article>
+              <article>
+                <p className="stat-label">Dictionary Published</p>
+                <p className="stat-value">{contributionStats.dictionary}</p>
+              </article>
+              <article>
+                <p className="stat-label">Folklore Published</p>
+                <p className="stat-value">{contributionStats.folklore}</p>
+              </article>
+              <article>
+                <p className="stat-label">Awaiting Review</p>
+                <p className="stat-value">{contributionStats.awaitingReview}</p>
+              </article>
+            </div>
 	          <div className="admin-contribution-grid">
 	            <div className="admin-contribution-column">
 	              <article className="admin-app-card admin-draft-list">

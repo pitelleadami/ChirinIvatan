@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
+from django.core import signing
 from django.core.exceptions import ValidationError
 from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -15,12 +16,14 @@ from reviews.models import Review
 from reviews.services import submit_review
 from users.contributions import contribution_summary_for_user, global_leaderboard
 from users.models import (
+    AdminAccountAction,
     ContributionEvent,
     GamificationConfig,
     MunicipalityMonthlyWinner,
     MunicipalityStats,
     RecognitionEvent,
     RoleApplication,
+    RoleApplicationDecision,
     RoleInvitation,
     RoleOnboardingRecord,
     SiteContentSettings,
@@ -36,6 +39,16 @@ from users.recognition import (
 
 
 User = get_user_model()
+
+
+def valid_captcha_payload(answer=7):
+    return {
+        "captcha_token": signing.dumps(
+            {"answer": answer},
+            salt="chirin-role-onboarding-captcha",
+        ),
+        "captcha_answer": str(answer),
+    }
 
 
 class ContributionLedgerTests(TestCase):
@@ -484,6 +497,9 @@ class SiteContentApiTests(TestCase):
         self.assertEqual(payload["yaru_heading"], "The Digital Yaru")
         self.assertFalse(payload["maintenance_enabled"])
         self.assertIn("temporarily paused", payload["maintenance_message"])
+        self.assertTrue(payload["privacy_notice_paragraphs"])
+        self.assertTrue(payload["media_upload_policy_paragraphs"])
+        self.assertTrue(payload["contributor_agreement_paragraphs"])
 
     def test_admin_can_update_site_content(self):
         self.client.force_login(self.admin_user)
@@ -491,6 +507,13 @@ class SiteContentApiTests(TestCase):
             "/api/site-content",
             data=json.dumps(
                 {
+                    "brand_name": "Chirin Ivatan Archive",
+                    "brand_logo_url": "https://example.com/brand.png",
+                    "landing_intro_text": "Editable landing introduction.",
+                    "landing_body_text": "Editable landing supporting text.",
+                    "footer_left_text": "Left footer",
+                    "footer_center_text": "Center footer",
+                    "footer_right_text": "Right footer",
                     "about_heading": "About Chirin",
                     "about_intro_paragraphs": ["Intro one", ""],
                     "about_body_paragraphs": ["Body"],
@@ -499,6 +522,9 @@ class SiteContentApiTests(TestCase):
                     "about_final_quote": "Closing",
                     "yaru_heading": "Digital Yaru",
                     "yaru_intro_paragraphs": ["Yaru intro"],
+                    "privacy_notice_paragraphs": ["Privacy", ""],
+                    "media_upload_policy_paragraphs": ["Media policy"],
+                    "contributor_agreement_paragraphs": ["Contributor agreement"],
                     "maintenance_enabled": True,
                     "maintenance_message": "We are updating the archive tonight.",
                     "support_statements": [
@@ -506,7 +532,12 @@ class SiteContentApiTests(TestCase):
                         {"quote": "", "name": "", "role": ""},
                     ],
                     "partner_details": [
-                        {"name": "Partner A", "description": "Helps preserve language", "url": "https://example.com"}
+                        {
+                            "name": "Partner A",
+                            "description": "Legacy details should be discarded",
+                            "url": "https://example.com",
+                            "logo_url": "https://example.com/logo.png",
+                        }
                     ],
                     "faq_sections": [
                         {
@@ -534,15 +565,72 @@ class SiteContentApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertFalse(payload["is_default"])
+        self.assertEqual(payload["brand_name"], "Chirin Ivatan Archive")
+        self.assertEqual(payload["brand_logo_url"], "https://example.com/brand.png")
+        self.assertEqual(payload["landing_intro_text"], "Editable landing introduction.")
+        self.assertEqual(payload["footer_center_text"], "Center footer")
         self.assertEqual(payload["about_heading"], "About Chirin")
         self.assertEqual(payload["about_intro_paragraphs"], ["Intro one"])
+        self.assertEqual(payload["privacy_notice_paragraphs"], ["Privacy"])
+        self.assertEqual(payload["media_upload_policy_paragraphs"], ["Media policy"])
+        self.assertEqual(payload["contributor_agreement_paragraphs"], ["Contributor agreement"])
         self.assertTrue(payload["maintenance_enabled"])
         self.assertEqual(payload["maintenance_message"], "We are updating the archive tonight.")
         self.assertEqual(payload["support_statements"][0]["name"], "Supporter")
+        self.assertEqual(
+            payload["partner_details"][0],
+            {
+                "name": "Partner A",
+                "url": "https://example.com",
+                "logo_url": "https://example.com/logo.png",
+            },
+        )
         self.assertEqual(payload["faq_sections"][0]["roles"], ["visitor", "admin"])
         self.assertEqual(payload["faq_sections"][0]["items"][0]["bullets"], ["One"])
         self.assertEqual(payload["faq_sections"][0]["items"][0]["image_alt"], "Sample graph")
         self.assertEqual(SiteContentSettings.objects.get(key="default").updated_by, self.admin_user)
+
+    def test_admin_can_upload_partner_logo(self):
+        with tempfile.TemporaryDirectory() as media_root:
+            with override_settings(MEDIA_ROOT=media_root):
+                self.client.force_login(self.admin_user)
+                logo = SimpleUploadedFile(
+                    "partner.gif",
+                    (
+                        b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00"
+                        b"\xff\xff\xff!\xf9\x04\x01\x00\x00\x00\x00,"
+                        b"\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;"
+                    ),
+                    content_type="image/gif",
+                )
+                response = self.client.post(
+                    "/api/site-content/partner-media",
+                    data={"image": logo},
+                )
+
+                self.assertEqual(response.status_code, 201)
+                self.assertIn("/media/site/partners/", response.json()["url"])
+
+    def test_admin_can_upload_brand_logo(self):
+        with tempfile.TemporaryDirectory() as media_root:
+            with override_settings(MEDIA_ROOT=media_root):
+                self.client.force_login(self.admin_user)
+                logo = SimpleUploadedFile(
+                    "brand.gif",
+                    (
+                        b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00"
+                        b"\xff\xff\xff!\xf9\x04\x01\x00\x00\x00\x00,"
+                        b"\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;"
+                    ),
+                    content_type="image/gif",
+                )
+                response = self.client.post(
+                    "/api/site-content/brand-media",
+                    data={"image": logo},
+                )
+
+                self.assertEqual(response.status_code, 201)
+                self.assertIn("/media/site/brand/", response.json()["url"])
 
     def test_maintenance_mode_blocks_public_api_but_allows_admin(self):
         SiteContentSettings.objects.create(
@@ -716,15 +804,17 @@ class RoleOnboardingFlowTests(TestCase):
 
         self.admin_user = User.objects.create_user(username="admin_user", password="testpass123")
         self.admin_user.groups.add(self.admin_group)
+        self.admin_user_b = User.objects.create_user(username="admin_user_b", password="testpass123")
+        self.admin_user_b.groups.add(self.admin_group)
 
         self.applicant = User.objects.create_user(username="applicant", password="testpass123")
         self.invitee = User.objects.create_user(username="invitee", password="testpass123")
 
-    def test_contributor_application_activates_with_single_reviewer_approval(self):
+    def test_contributor_application_requires_two_approvals(self):
         self.client.force_login(self.applicant)
         create = self.client.post(
             "/api/users/role-applications",
-            data=json.dumps({"target_role": "contributor"}),
+            data=json.dumps({"target_role": "contributor", **valid_captcha_payload()}),
             content_type="application/json",
         )
         self.assertEqual(create.status_code, 201)
@@ -734,6 +824,15 @@ class RoleOnboardingFlowTests(TestCase):
         decide = self.client.post(
             f"/api/users/role-applications/{application_id}/decide",
             data=json.dumps({"decision": "approve", "notes": "looks good"}),
+            content_type="application/json",
+        )
+        self.assertEqual(decide.status_code, 200)
+        self.assertEqual(decide.json()["application_status"], RoleApplication.Status.PENDING)
+
+        self.client.force_login(self.admin_user)
+        decide = self.client.post(
+            f"/api/users/role-applications/{application_id}/decide",
+            data=json.dumps({"decision": "approve", "notes": "second approval"}),
             content_type="application/json",
         )
         self.assertEqual(decide.status_code, 200)
@@ -748,11 +847,42 @@ class RoleOnboardingFlowTests(TestCase):
             profile["header"]["onboarding_accountability"]["contributor"],
         )
 
+    def test_reviewer_application_can_activate_via_two_admins(self):
+        self.client.force_login(self.applicant)
+        create = self.client.post(
+            "/api/users/role-applications",
+            data=json.dumps(
+                {
+                    "target_role": "reviewer",
+                    "reviewer_reason": "I can help validate submissions.",
+                    **valid_captcha_payload(),
+                }
+            ),
+            content_type="application/json",
+        )
+        application_id = create.json()["application_id"]
+
+        self.client.force_login(self.admin_user)
+        decide_1 = self.client.post(
+            f"/api/users/role-applications/{application_id}/decide",
+            data=json.dumps({"decision": "approve", "notes": "admin approval 1"}),
+            content_type="application/json",
+        )
+        self.assertEqual(decide_1.json()["application_status"], RoleApplication.Status.PENDING)
+
+        self.client.force_login(self.admin_user_b)
+        decide_2 = self.client.post(
+            f"/api/users/role-applications/{application_id}/decide",
+            data=json.dumps({"decision": "approve", "notes": "admin approval 2"}),
+            content_type="application/json",
+        )
+        self.assertEqual(decide_2.json()["application_status"], RoleApplication.Status.APPROVED)
+
     def test_reviewer_application_requires_two_reviewers(self):
         self.client.force_login(self.applicant)
         create = self.client.post(
             "/api/users/role-applications",
-            data=json.dumps({"target_role": "reviewer", "reviewer_reason": "I can help validate submissions."}),
+            data=json.dumps({"target_role": "reviewer", "reviewer_reason": "I can help validate submissions.", **valid_captcha_payload()}),
             content_type="application/json",
         )
         self.assertEqual(create.status_code, 201)
@@ -780,11 +910,61 @@ class RoleOnboardingFlowTests(TestCase):
         self.assertTrue(self.applicant.groups.filter(name="Contributor").exists())
         self.assertTrue(self.applicant.groups.filter(name="Reviewer").exists())
 
+    def test_approved_by_current_reviewer_moves_from_pending_to_awaiting_bucket(self):
+        self.client.force_login(self.applicant)
+        create = self.client.post(
+            "/api/users/role-applications",
+            data=json.dumps(
+                {
+                    "target_role": "reviewer",
+                    "reviewer_reason": "I can help validate submissions.",
+                    **valid_captcha_payload(),
+                }
+            ),
+            content_type="application/json",
+        )
+        application_id = create.json()["application_id"]
+
+        self.client.force_login(self.reviewer_a)
+        decide = self.client.post(
+            f"/api/users/role-applications/{application_id}/decide",
+            data=json.dumps({"decision": "approve", "notes": "reviewer approval"}),
+            content_type="application/json",
+        )
+        self.assertEqual(decide.status_code, 200)
+        self.assertEqual(decide.json()["application_status"], RoleApplication.Status.PENDING)
+
+        pending_for_reviewer_a = self.client.get("/api/admin/role-applications?status=pending")
+        self.assertEqual(pending_for_reviewer_a.status_code, 200)
+        self.assertEqual(pending_for_reviewer_a.json()["rows"], [])
+
+        approved_for_reviewer_a = self.client.get("/api/admin/role-applications?status=approved")
+        self.assertEqual(approved_for_reviewer_a.status_code, 200)
+        self.assertEqual(approved_for_reviewer_a.json()["rows"], [])
+
+        awaiting_for_reviewer_a = self.client.get(
+            "/api/admin/role-applications?status=awaiting_quorum"
+        )
+        self.assertEqual(awaiting_for_reviewer_a.status_code, 200)
+        row = awaiting_for_reviewer_a.json()["rows"][0]
+        self.assertEqual(row["application_id"], application_id)
+        self.assertEqual(row["status"], RoleApplication.Status.PENDING)
+        self.assertEqual(row["screening_status"], "awaiting_quorum")
+        self.assertEqual(row["current_user_decision"], RoleApplicationDecision.Decision.APPROVE)
+
+        self.client.force_login(self.reviewer_b)
+        pending_for_reviewer_b = self.client.get("/api/admin/role-applications?status=pending")
+        self.assertEqual(pending_for_reviewer_b.status_code, 200)
+        row = pending_for_reviewer_b.json()["rows"][0]
+        self.assertEqual(row["application_id"], application_id)
+        self.assertEqual(row["screening_status"], RoleApplication.Status.PENDING)
+        self.assertEqual(row["current_user_decision"], "")
+
     def test_reviewer_application_can_activate_via_reviewer_plus_admin(self):
         self.client.force_login(self.applicant)
         create = self.client.post(
             "/api/users/role-applications",
-            data=json.dumps({"target_role": "reviewer", "reviewer_reason": "I can help validate submissions."}),
+            data=json.dumps({"target_role": "reviewer", "reviewer_reason": "I can help validate submissions.", **valid_captcha_payload()}),
             content_type="application/json",
         )
         self.assertEqual(create.status_code, 201)
@@ -810,7 +990,7 @@ class RoleOnboardingFlowTests(TestCase):
         self.client.force_login(self.applicant)
         response = self.client.post(
             "/api/users/role-applications",
-            data=json.dumps({"target_role": "reviewer"}),
+            data=json.dumps({"target_role": "reviewer", **valid_captcha_payload()}),
             content_type="application/json",
         )
 
@@ -833,36 +1013,105 @@ class RoleOnboardingFlowTests(TestCase):
         self.assertTrue(self.invitee.groups.filter(name="Reviewer").exists())
 
     def test_admin_can_create_managed_consultant_profile(self):
-        self.client.force_login(self.admin_user)
-        response = self.client.post(
-            "/api/admin/consultant-profiles",
-            data=json.dumps(
-                {
-                    "first_name": "Apo",
-                    "last_name": "Consultant",
-                    "municipality": "Sabtang",
-                    "post_nominals": "Elder",
-                    "affiliation": "Community knowledge holder",
-                    "occupation": "Cultural consultant",
-                    "bio": "Shares context without managing an account.",
-                    "notes": "Created after verbal consent.",
-                }
-            ),
-            content_type="application/json",
-        )
+        with tempfile.TemporaryDirectory() as media_root:
+            with override_settings(MEDIA_ROOT=media_root):
+                self.client.force_login(self.admin_user)
+                photo = SimpleUploadedFile(
+                    "consultant.gif",
+                    (
+                        b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00"
+                        b"\xff\xff\xff!\xf9\x04\x01\x00\x00\x00\x00,"
+                        b"\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;"
+                    ),
+                    content_type="image/gif",
+                )
+                response = self.client.post(
+                    "/api/admin/consultant-profiles",
+                    data={
+                        "first_name": "Apo",
+                        "last_name": "Consultant",
+                        "municipality": "Sabtang",
+                        "post_nominals": "Elder",
+                        "cultural_affiliations": json.dumps(
+                            [{"role": "Knowledge holder", "organization": "Sabtang community"}]
+                        ),
+                        "other_affiliations": json.dumps(
+                            [{"designation": "Adviser", "institution": "Ivatan Cultural Council"}]
+                        ),
+                        "bio": "Shares context without managing an account.",
+                        "notes": "Created after verbal consent.",
+                        "profile_photo": photo,
+                    },
+                )
 
-        self.assertEqual(response.status_code, 201)
-        payload = response.json()
-        consultant = User.objects.get(username=payload["user"]["username"])
-        self.assertFalse(consultant.has_usable_password())
-        self.assertTrue(consultant.groups.filter(name="Contributor").exists())
-        self.assertTrue(consultant.groups.filter(name="Reviewer").exists())
-        self.assertTrue(consultant.groups.filter(name="Consultant").exists())
-        self.assertFalse(consultant.profile.include_in_leaderboard)
-        self.assertIn("Created as Consultant profile", payload["accountability_label"])
+                self.assertEqual(response.status_code, 201)
+                payload = response.json()
+                consultant = User.objects.get(username=payload["user"]["username"])
+                self.assertFalse(consultant.has_usable_password())
+                self.assertTrue(consultant.groups.filter(name="Contributor").exists())
+                self.assertTrue(consultant.groups.filter(name="Reviewer").exists())
+                self.assertTrue(consultant.groups.filter(name="Consultant").exists())
+                self.assertFalse(consultant.profile.include_in_leaderboard)
+                self.assertEqual(
+                    consultant.profile.cultural_affiliations,
+                    [{"role": "Knowledge holder", "organization": "Sabtang community"}],
+                )
+                self.assertEqual(
+                    consultant.profile.other_affiliations,
+                    [{"designation": "Adviser", "institution": "Ivatan Cultural Council"}],
+                )
+                self.assertEqual(
+                    consultant.profile.affiliation,
+                    "Sabtang community, Ivatan Cultural Council",
+                )
+                self.assertEqual(consultant.profile.occupation, "Knowledge holder, Adviser")
+                self.assertTrue(bool(consultant.profile.profile_photo))
+                self.assertIn("Created as Consultant profile", payload["accountability_label"])
 
-        public_profile = self.client.get(f"/api/users/{consultant.username}").json()
-        self.assertEqual(public_profile["header"]["role"], "Consultant")
+                public_profile = self.client.get(f"/api/users/{consultant.username}").json()
+                self.assertEqual(public_profile["header"]["role"], "Consultant")
+                self.assertTrue(public_profile["header"]["profile_photo"])
+
+                replacement_photo = SimpleUploadedFile(
+                    "consultant-updated.gif",
+                    (
+                        b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00"
+                        b"\xff\xff\xff!\xf9\x04\x01\x00\x00\x00\x00,"
+                        b"\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;"
+                    ),
+                    content_type="image/gif",
+                )
+                update = self.client.post(
+                    f"/api/admin/consultant-profiles/{consultant.username}",
+                    data={
+                        "first_name": "Apo",
+                        "last_name": "Updated",
+                        "email": "apo.updated@example.com",
+                        "municipality": "Ivana",
+                        "post_nominals": "Elder",
+                        "cultural_affiliations": json.dumps(
+                            [{"role": "Elder", "organization": "Ivana community"}]
+                        ),
+                        "other_affiliations": json.dumps([]),
+                        "bio": "Updated public bionote.",
+                        "notes": "Updated with renewed consent.",
+                        "profile_photo": replacement_photo,
+                    },
+                )
+                self.assertEqual(update.status_code, 200)
+                consultant.refresh_from_db()
+                consultant.profile.refresh_from_db()
+                self.assertEqual(consultant.last_name, "Updated")
+                self.assertEqual(consultant.email, "apo.updated@example.com")
+                self.assertEqual(consultant.profile.municipality, "Ivana")
+                self.assertEqual(consultant.profile.affiliation, "Ivana community")
+                self.assertEqual(consultant.profile.occupation, "Elder")
+                self.assertIn("consultant-updated", consultant.profile.profile_photo.name)
+                record = consultant.role_onboarding_records.get(
+                    role=RoleOnboardingRecord.Role.CONSULTANT,
+                    method=RoleOnboardingRecord.Method.ADMIN_CREATED,
+                )
+                self.assertEqual(record.accountability_notes, "Updated with renewed consent.")
 
     @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
     def test_admin_can_invite_by_email_and_invitee_accepts_without_application_quorum(self):
@@ -873,10 +1122,8 @@ class RoleOnboardingFlowTests(TestCase):
                 {
                     "email": "new.invitee@example.com",
                     "role": "reviewer",
-                    "first_name": "New",
-                    "last_name": "Invitee",
-                    "municipality": "Uyugan",
                     "notes": "Vetted by admin.",
+                    **valid_captcha_payload(),
                 }
             ),
             content_type="application/json",
@@ -893,6 +1140,9 @@ class RoleOnboardingFlowTests(TestCase):
             f"/api/users/role-invitations/{invitation.token}/accept",
             data=json.dumps(
                 {
+                    "first_name": "New",
+                    "last_name": "Invitee",
+                    "municipality": "Uyugan",
                     "username": "new.invitee",
                     "password": "StrongInvitePass123!",
                     "password_confirm": "StrongInvitePass123!",
@@ -905,10 +1155,80 @@ class RoleOnboardingFlowTests(TestCase):
         invited_user = User.objects.get(email="new.invitee@example.com")
         self.assertTrue(invited_user.groups.filter(name="Contributor").exists())
         self.assertTrue(invited_user.groups.filter(name="Reviewer").exists())
+        self.assertEqual(invited_user.first_name, "New")
+        self.assertEqual(invited_user.last_name, "Invitee")
         self.assertEqual(invited_user.profile.municipality, "Uyugan")
         self.assertFalse(RoleApplication.objects.filter(applicant=invited_user).exists())
         invitation.refresh_from_db()
         self.assertEqual(invitation.status, RoleInvitation.Status.ACCEPTED)
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_resending_same_email_role_replaces_prior_pending_invitation(self):
+        self.client.force_login(self.admin_user)
+        invite_payload = {
+            "email": "replace.invitee@example.com",
+            "role": "contributor",
+            "notes": "Trusted contributor.",
+            **valid_captcha_payload(),
+        }
+        first = self.client.post(
+            "/api/admin/role-invitations/email",
+            data=json.dumps(invite_payload),
+            content_type="application/json",
+        )
+        self.assertEqual(first.status_code, 201)
+        first_invitation = RoleInvitation.objects.get(email="replace.invitee@example.com")
+
+        second = self.client.post(
+            "/api/admin/role-invitations/email",
+            data=json.dumps(invite_payload),
+            content_type="application/json",
+        )
+
+        self.assertEqual(second.status_code, 201)
+        first_invitation.refresh_from_db()
+        self.assertEqual(first_invitation.status, RoleInvitation.Status.REPLACED)
+        latest_invitation = RoleInvitation.objects.exclude(id=first_invitation.id).get(
+            email="replace.invitee@example.com",
+        )
+        self.assertEqual(latest_invitation.status, RoleInvitation.Status.PENDING)
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_new_email_invitation_requires_profile_details_when_accepted(self):
+        self.client.force_login(self.admin_user)
+        invite = self.client.post(
+            "/api/admin/role-invitations/email",
+            data=json.dumps(
+                {
+                    "email": "profile.required@example.com",
+                    "role": "contributor",
+                    "notes": "Trusted contributor.",
+                    **valid_captcha_payload(),
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(invite.status_code, 201)
+
+        invitation = RoleInvitation.objects.get(email="profile.required@example.com")
+        self.assertEqual(invitation.first_name, "")
+        self.assertEqual(invitation.last_name, "")
+        self.assertEqual(invitation.municipality, "")
+
+        accept = self.client.post(
+            f"/api/users/role-invitations/{invitation.token}/accept",
+            data=json.dumps(
+                {
+                    "username": "profile.required",
+                    "password": "StrongInvitePass123!",
+                    "password_confirm": "StrongInvitePass123!",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(accept.status_code, 400)
+        self.assertIn("First name, last name, and municipality are required", accept.json()["detail"])
 
     @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
     def test_admin_can_invite_consultant_by_email(self):
@@ -923,6 +1243,7 @@ class RoleOnboardingFlowTests(TestCase):
                     "last_name": "Consultant",
                     "municipality": "Basco",
                     "notes": "Recognized domain consultant.",
+                    **valid_captcha_payload(),
                 }
             ),
             content_type="application/json",
@@ -962,6 +1283,7 @@ class RoleOnboardingFlowTests(TestCase):
                     "last_name": "Admin",
                     "municipality": "Basco",
                     "notes": "Trusted to help manage the platform.",
+                    **valid_captcha_payload(),
                 }
             ),
             content_type="application/json",
@@ -994,7 +1316,7 @@ class RoleOnboardingFlowTests(TestCase):
         self.client.force_login(self.reviewer_a)
         invite = self.client.post(
             "/api/admin/role-invitations/email",
-            data=json.dumps({"email": "admin.blocked@example.com", "role": "admin"}),
+            data=json.dumps({"email": "admin.blocked@example.com", "role": "admin", **valid_captcha_payload()}),
             content_type="application/json",
         )
 
@@ -1006,7 +1328,7 @@ class RoleOnboardingFlowTests(TestCase):
         self.client.force_login(self.reviewer_a)
         invite = self.client.post(
             "/api/admin/role-invitations/email",
-            data=json.dumps({"email": "consultant.blocked@example.com", "role": "consultant"}),
+            data=json.dumps({"email": "consultant.blocked@example.com", "role": "consultant", **valid_captcha_payload()}),
             content_type="application/json",
         )
 
@@ -1018,7 +1340,7 @@ class RoleOnboardingFlowTests(TestCase):
         self.client.force_login(self.reviewer_a)
         invite = self.client.post(
             "/api/admin/role-invitations/email",
-            data=json.dumps({"email": "reviewer.invited@example.com", "role": "contributor"}),
+            data=json.dumps({"email": "reviewer.invited@example.com", "role": "contributor", **valid_captcha_payload()}),
             content_type="application/json",
         )
 
@@ -1026,16 +1348,47 @@ class RoleOnboardingFlowTests(TestCase):
         self.assertIn("/roles?invite=", invite.json()["accept_url"])
         self.assertEqual(len(mail.outbox), 1)
 
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_email_invitation_list_only_includes_current_users_invites(self):
+        RoleInvitation.objects.create(
+            email="admin.invited@example.com",
+            role=RoleOnboardingRecord.Role.CONTRIBUTOR,
+            invited_by=self.admin_user,
+        )
+        RoleInvitation.objects.create(
+            email="reviewer.invited@example.com",
+            role=RoleOnboardingRecord.Role.CONTRIBUTOR,
+            invited_by=self.reviewer_a,
+        )
+
+        self.client.force_login(self.reviewer_a)
+        reviewer_response = self.client.get("/api/admin/role-invitations/email")
+
+        self.assertEqual(reviewer_response.status_code, 200)
+        self.assertEqual(
+            [row["email"] for row in reviewer_response.json()["rows"]],
+            ["reviewer.invited@example.com"],
+        )
+
+        self.client.force_login(self.admin_user)
+        admin_response = self.client.get("/api/admin/role-invitations/email")
+
+        self.assertEqual(admin_response.status_code, 200)
+        self.assertEqual(
+            [row["email"] for row in admin_response.json()["rows"]],
+            ["admin.invited@example.com"],
+        )
+
     def test_duplicate_pending_role_application_is_blocked(self):
         self.client.force_login(self.applicant)
         first = self.client.post(
             "/api/users/role-applications",
-            data=json.dumps({"target_role": "contributor"}),
+            data=json.dumps({"target_role": "contributor", **valid_captcha_payload()}),
             content_type="application/json",
         )
         second = self.client.post(
             "/api/users/role-applications",
-            data=json.dumps({"target_role": "contributor"}),
+            data=json.dumps({"target_role": "contributor", **valid_captcha_payload()}),
             content_type="application/json",
         )
 
@@ -1053,6 +1406,7 @@ class RoleOnboardingFlowTests(TestCase):
                     "last_name": "Email",
                     "email": "not-an-email",
                     "municipality": "Basco",
+                    **valid_captcha_payload(),
                 }
             ),
             content_type="application/json",
@@ -1071,12 +1425,12 @@ class RoleOnboardingFlowTests(TestCase):
         }
         first = self.client.post(
             "/api/users/role-applications",
-            data=json.dumps(payload),
+            data=json.dumps({**payload, **valid_captcha_payload()}),
             content_type="application/json",
         )
         second = self.client.post(
             "/api/users/role-applications",
-            data=json.dumps(payload),
+            data=json.dumps({**payload, **valid_captcha_payload()}),
             content_type="application/json",
         )
 
@@ -1089,7 +1443,7 @@ class RoleOnboardingFlowTests(TestCase):
         self.client.force_login(self.admin_user)
         response = self.client.post(
             "/api/admin/role-invitations/email",
-            data=json.dumps({"email": "invalid-address", "role": "contributor"}),
+            data=json.dumps({"email": "invalid-address", "role": "contributor", **valid_captcha_payload()}),
             content_type="application/json",
         )
 
@@ -1118,6 +1472,50 @@ class RoleOnboardingFlowTests(TestCase):
         self.assertEqual(rows[0]["profile"]["municipality"], "Basco")
         self.assertEqual(rows[0]["stats"]["combined_total"], 3)
         self.assertIn("Contributor", rows[0]["groups"])
+
+    def test_admin_users_endpoint_excludes_registered_only_pending_applicants(self):
+        registered_only = User.objects.create_user(
+            username="registered_only",
+            password="testpass123",
+        )
+        RoleApplication.objects.create(
+            applicant=registered_only,
+            target_role=RoleApplication.TargetRole.CONTRIBUTOR,
+            status=RoleApplication.Status.PENDING,
+        )
+
+        contributor_group, _ = Group.objects.get_or_create(name="Contributor")
+        approved_contributor = User.objects.create_user(
+            username="test_contributor",
+            password="testpass123",
+        )
+        approved_contributor.groups.add(contributor_group)
+
+        self.client.force_login(self.admin_user)
+        response = self.client.get("/api/admin/users")
+
+        self.assertEqual(response.status_code, 200)
+        usernames = [row["username"] for row in response.json()["rows"]]
+        self.assertIn(self.admin_user.username, usernames)
+        self.assertIn(approved_contributor.username, usernames)
+        self.assertNotIn(registered_only.username, usernames)
+
+    def test_admin_users_endpoint_keeps_existing_contributor_with_pending_reviewer_application(self):
+        contributor_group, _ = Group.objects.get_or_create(name="Contributor")
+        self.applicant.groups.add(contributor_group)
+        RoleApplication.objects.create(
+            applicant=self.applicant,
+            target_role=RoleApplication.TargetRole.REVIEWER,
+            reviewer_reason="I can help review.",
+            status=RoleApplication.Status.PENDING,
+        )
+
+        self.client.force_login(self.admin_user)
+        response = self.client.get("/api/admin/users")
+
+        self.assertEqual(response.status_code, 200)
+        usernames = [row["username"] for row in response.json()["rows"]]
+        self.assertIn(self.applicant.username, usernames)
 
     def test_admin_users_endpoint_requires_admin_access(self):
         self.client.force_login(self.reviewer_a)
@@ -1316,6 +1714,185 @@ class CulturalStewardshipTests(TestCase):
         self.assertIn("gamification", payload)
         self.assertIn("contributor_level", payload["gamification"])
         self.assertIn("dictionary_badges", payload["gamification"])
+
+
+class AdminAccountControlTests(TestCase):
+    def setUp(self):
+        admin_group, _ = Group.objects.get_or_create(name="Admin")
+        contributor_group, _ = Group.objects.get_or_create(name="Contributor")
+        reviewer_group, _ = Group.objects.get_or_create(name="Reviewer")
+
+        self.admin = User.objects.create_user(
+            username="account_admin",
+            email="admin@example.com",
+            password="testpass123",
+        )
+        self.admin.groups.add(admin_group)
+        self.admin.is_staff = True
+        self.admin.save(update_fields=["is_staff"])
+
+        self.user = User.objects.create_user(
+            username="account_user",
+            email="user@example.com",
+            password="testpass123",
+        )
+        self.user.groups.add(contributor_group, reviewer_group)
+        UserProfile.objects.create(user=self.user, municipality="Basco")
+        self.client.force_login(self.admin)
+
+    def test_admin_can_deactivate_and_reactivate_account_with_audit(self):
+        response = self.client.post(
+            f"/api/admin/users/{self.user.username}/status",
+            data=json.dumps({"is_active": False, "notes": "beta account paused"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.user.refresh_from_db()
+        self.assertFalse(self.user.is_active)
+        self.assertTrue(
+            AdminAccountAction.objects.filter(
+                target_user=self.user,
+                admin=self.admin,
+                action=AdminAccountAction.Action.DEACTIVATE,
+            ).exists()
+        )
+
+        response = self.client.post(
+            f"/api/admin/users/{self.user.username}/status",
+            data=json.dumps({"is_active": True, "notes": "restored"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.is_active)
+
+    def test_admin_cannot_deactivate_self(self):
+        response = self.client.post(
+            f"/api/admin/users/{self.admin.username}/status",
+            data=json.dumps({"is_active": False, "notes": "bad idea"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("cannot deactivate your own account", response.json()["detail"])
+
+    def test_admin_cannot_revoke_own_admin_access(self):
+        response = self.client.post(
+            f"/api/admin/users/{self.admin.username}/roles/revoke",
+            data=json.dumps({"role": "admin", "notes": "bad idea"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("cannot revoke your own admin access", response.json()["detail"])
+
+    def test_admin_can_revoke_role_access_with_notes(self):
+        response = self.client.post(
+            f"/api/admin/users/{self.user.username}/roles/revoke",
+            data=json.dumps({"role": "reviewer", "notes": "reviewer access no longer needed"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.user.refresh_from_db()
+        self.assertFalse(self.user.groups.filter(name="Reviewer").exists())
+        self.assertTrue(self.user.groups.filter(name="Contributor").exists())
+        self.assertTrue(
+            AdminAccountAction.objects.filter(
+                target_user=self.user,
+                action=AdminAccountAction.Action.REVOKE_ROLE,
+                role="reviewer",
+            ).exists()
+        )
+
+    def test_suspicious_flag_requires_review_resolution(self):
+        response = self.client.post(
+            f"/api/admin/users/{self.user.username}/suspicious-flag",
+            data=json.dumps({"notes": "login pattern looked wrong"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 201)
+        flag_id = response.json()["flag"]["action_id"]
+        flag = AdminAccountAction.objects.get(id=flag_id)
+        self.assertEqual(flag.flag_status, AdminAccountAction.FlagStatus.PENDING)
+
+        response = self.client.post(
+            f"/api/admin/account-flags/{flag_id}/resolve",
+            data=json.dumps({"decision": "clear", "notes": "verified with account owner"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        flag.refresh_from_db()
+        self.assertEqual(flag.flag_status, AdminAccountAction.FlagStatus.CLEARED)
+        self.assertEqual(flag.resolved_by, self.admin)
+
+    def test_logged_in_user_can_flag_public_profile_with_captcha(self):
+        reporter = User.objects.create_user(username="profile_reporter", password="testpass123")
+        self.client.force_login(reporter)
+
+        response = self.client.post(
+            f"/api/users/{self.user.username}/suspicious-flag",
+            data=json.dumps(
+                {
+                    "notes": "Profile details look inconsistent with recent activity.",
+                    **valid_captcha_payload(),
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        flag = AdminAccountAction.objects.get(
+            target_user=self.user,
+            action=AdminAccountAction.Action.FLAG_SUSPICIOUS,
+        )
+        self.assertEqual(flag.admin, reporter)
+        self.assertEqual(flag.flag_status, AdminAccountAction.FlagStatus.PENDING)
+
+    def test_public_profile_flag_requires_captcha_and_blocks_self_report(self):
+        reporter = User.objects.create_user(username="profile_reporter", password="testpass123")
+        self.client.force_login(reporter)
+
+        response = self.client.post(
+            f"/api/users/{self.user.username}/suspicious-flag",
+            data=json.dumps({"notes": "Missing captcha"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("CAPTCHA", response.json()["detail"])
+
+        response = self.client.post(
+            f"/api/users/{reporter.username}/suspicious-flag",
+            data=json.dumps({"notes": "self report", **valid_captcha_payload()}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("own account", response.json()["detail"])
+
+    def test_public_profile_flag_requires_login(self):
+        self.client.logout()
+
+        response = self.client.post(
+            f"/api/users/{self.user.username}/suspicious-flag",
+            data=json.dumps({"notes": "anonymous report", **valid_captcha_payload()}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_admin_can_send_password_reset_link(self):
+        response = self.client.post(
+            f"/api/admin/users/{self.user.username}/password-reset",
+            data=json.dumps({"notes": "requested by user"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn(self.user.email, mail.outbox[0].to)
+        self.assertTrue(
+            AdminAccountAction.objects.filter(
+                target_user=self.user,
+                action=AdminAccountAction.Action.SEND_PASSWORD_RESET,
+            ).exists()
+        )
 
 
 class GamificationAdvancedFeaturesTests(TestCase):

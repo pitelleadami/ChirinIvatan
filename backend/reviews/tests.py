@@ -40,6 +40,11 @@ class ReviewServicesTests(TestCase):
             password="testpass123",
         )
         self.admin.groups.add(self.admin_group)
+        self.admin2 = User.objects.create_user(
+            username="admin2",
+            password="testpass123",
+        )
+        self.admin2.groups.add(self.admin_group)
 
     def _approved_entry_with_revision(self):
         entry = Entry.objects.create(
@@ -112,6 +117,31 @@ class ReviewServicesTests(TestCase):
 
         entry.refresh_from_db()
         self.assertEqual(entry.status, EntryStatus.APPROVED)
+
+    def test_dictionary_quorum_accepts_two_admins(self):
+        revision = EntryRevision.objects.create(
+            contributor=self.contributor,
+            proposed_data={"term": "admin-quorum"},
+            status=EntryRevision.Status.PENDING,
+        )
+
+        submit_review(
+            revision=revision,
+            reviewer=self.admin,
+            decision=Review.Decision.APPROVE,
+            notes="Admin approval one.",
+        )
+        revision.refresh_from_db()
+        self.assertEqual(revision.status, EntryRevision.Status.PENDING)
+
+        submit_review(
+            revision=revision,
+            reviewer=self.admin2,
+            decision=Review.Decision.APPROVE,
+            notes="Admin approval two.",
+        )
+        revision.refresh_from_db()
+        self.assertEqual(revision.status, EntryRevision.Status.APPROVED)
 
     def test_flag_requires_notes(self):
         _, revision = self._approved_entry_with_revision()
@@ -283,6 +313,18 @@ class ReviewerDashboardApiTests(TestCase):
             for item in payload["awaiting_quorum_after_my_approval"]
         }
         self.assertIn(str(rev.id), awaiting_ids)
+        awaiting_row = next(
+            item
+            for item in payload["dictionary"]["awaiting_quorum_after_my_approval"]
+            if item["revision_id"] == str(rev.id)
+        )
+        self.assertEqual(awaiting_row["term"], "awaiting")
+        self.assertEqual(awaiting_row["reviewer_approvals"], 1)
+        self.assertEqual(awaiting_row["admin_approvals"], 0)
+        self.assertEqual(
+            awaiting_row["quorum_requirement"],
+            "Needs 1 more reviewer/admin approval",
+        )
 
     def test_dashboard_returns_grouped_sections_with_legacy_keys(self):
         rev = self._pending_revision(contributor=self.contributor, term="grouped")
@@ -298,9 +340,17 @@ class ReviewerDashboardApiTests(TestCase):
         self.assertIn("pending_submissions", payload["dictionary"])
         self.assertIn("pending_rereview", payload["dictionary"])
         self.assertIn("published_entries", payload["dictionary"])
+        self.assertIn(
+            "awaiting_quorum_after_my_approval",
+            payload["dictionary"],
+        )
         self.assertIn("pending_submissions", payload["folklore"])
         self.assertIn("pending_rereview", payload["folklore"])
         self.assertIn("published_entries", payload["folklore"])
+        self.assertIn(
+            "awaiting_quorum_after_my_approval",
+            payload["folklore"],
+        )
         self.assertIn("my_reviews", payload["reviews"])
         self.assertIn("awaiting_quorum_after_my_approval", payload["reviews"])
 
@@ -539,6 +589,73 @@ class AdminOverrideApiTests(TestCase):
         self.assertEqual(entry.status, EntryStatus.ARCHIVED)
         self.assertIsNotNone(entry.archived_at)
 
+    def test_admin_can_archive_and_restore_approved_dictionary(self):
+        entry = Entry.objects.create(
+            term="archive-ready",
+            status=EntryStatus.APPROVED,
+            initial_contributor=self.contributor,
+            last_revised_by=self.contributor,
+        )
+        self.client.force_login(self.admin)
+
+        archive_response = self.client.post(
+            "/api/reviews/admin/override",
+            data=json.dumps(
+                {
+                    "target_type": "dictionary",
+                    "target_id": str(entry.id),
+                    "action": "archive",
+                    "notes": "duplicate public record",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(archive_response.status_code, 200)
+        entry.refresh_from_db()
+        self.assertEqual(entry.status, EntryStatus.ARCHIVED)
+        self.assertIsNotNone(entry.archived_at)
+
+        restore_response = self.client.post(
+            "/api/reviews/admin/override",
+            data=json.dumps(
+                {
+                    "target_type": "dictionary",
+                    "target_id": str(entry.id),
+                    "action": "restore_approved",
+                    "notes": "record verified and restored",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(restore_response.status_code, 200)
+        entry.refresh_from_db()
+        self.assertEqual(entry.status, EntryStatus.APPROVED)
+        self.assertIsNone(entry.archived_at)
+
+    def test_admin_archive_inventory_lists_archived_entries_only(self):
+        archived = FolkloreEntry.objects.create(
+            title="Archived Folklore",
+            content="Sample",
+            category=FolkloreEntry.Category.ORAL_NARRATIVES,
+            subcategory=FolkloreEntry.Subcategory.LEGENDS,
+            source="Oral account",
+            contributor=self.contributor,
+            status=FolkloreEntry.Status.ARCHIVED,
+        )
+        self.client.force_login(self.admin)
+
+        response = self.client.get("/api/reviews/admin/archive")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertNotIn("eligible", payload)
+        self.assertIn(str(archived.id), [row["target_id"] for row in payload["archived"]])
+
+    def test_archive_inventory_requires_admin(self):
+        self.client.force_login(self.regular_user)
+        response = self.client.get("/api/reviews/admin/archive")
+        self.assertEqual(response.status_code, 403)
+
     def test_admin_override_restore_approved_folklore(self):
         entry = self._folklore_entry_under_review()
         self.client.force_login(self.admin)
@@ -600,6 +717,11 @@ class FolkloreReviewFlowTests(TestCase):
             password="testpass123",
         )
         self.admin.groups.add(self.admin_group)
+        self.admin2 = User.objects.create_user(
+            username="folk_admin_2",
+            password="testpass123",
+        )
+        self.admin2.groups.add(self.admin_group)
 
     def _pending_folklore(self):
         return FolkloreRevision.objects.create(
@@ -645,6 +767,26 @@ class FolkloreReviewFlowTests(TestCase):
         entry = revision.entry
         entry.refresh_from_db()
         self.assertEqual(entry.status, FolkloreEntry.Status.APPROVED)
+
+    def test_folklore_quorum_accepts_two_admins(self):
+        revision = self._pending_folklore()
+        submit_folklore_review(
+            revision=revision,
+            reviewer=self.admin,
+            decision=FolkloreReview.Decision.APPROVE,
+            notes="Admin approval one.",
+        )
+        revision.refresh_from_db()
+        self.assertEqual(revision.status, FolkloreRevision.Status.PENDING)
+
+        submit_folklore_review(
+            revision=revision,
+            reviewer=self.admin2,
+            decision=FolkloreReview.Decision.APPROVE,
+            notes="Admin approval two.",
+        )
+        revision.refresh_from_db()
+        self.assertEqual(revision.status, FolkloreRevision.Status.APPROVED)
 
     def test_flag_then_reject_sets_under_review_then_rejected(self):
         revision = self._pending_folklore()
@@ -729,6 +871,33 @@ class FolkloreReviewFlowTests(TestCase):
             row["revision_id"] for row in payload["pending_folklore_submissions"]
         }
         self.assertNotIn(str(revision.id), pending_ids)
+
+    def test_dashboard_lists_my_folklore_approval_awaiting_quorum(self):
+        revision = self._pending_folklore()
+        submit_folklore_review(
+            revision=revision,
+            reviewer=self.reviewer1,
+            decision=FolkloreReview.Decision.APPROVE,
+            notes="First approval",
+        )
+
+        self.client.force_login(self.reviewer1)
+        response = self.client.get("/api/reviews/dashboard")
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+
+        awaiting_row = next(
+            item
+            for item in payload["folklore"]["awaiting_quorum_after_my_approval"]
+            if item["revision_id"] == str(revision.id)
+        )
+        self.assertEqual(awaiting_row["title"], "Folklore Pending")
+        self.assertEqual(awaiting_row["reviewer_approvals"], 1)
+        self.assertEqual(awaiting_row["admin_approvals"], 0)
+        self.assertEqual(
+            awaiting_row["quorum_requirement"],
+            "Needs 1 more reviewer/admin approval",
+        )
 
     def test_submit_endpoint_entry_id_fallback_creates_revision(self):
         entry = FolkloreEntry.objects.create(

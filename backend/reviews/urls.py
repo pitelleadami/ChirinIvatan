@@ -10,6 +10,7 @@ Review governance endpoints:
 from django.urls import path
 
 from reviews.views import (
+    admin_archive_entries_view,
     admin_override_view,
     reviewer_dashboard_view,
     submit_dictionary_review_view,
@@ -19,6 +20,7 @@ from reviews.views import (
 
 urlpatterns = [
     path("api/reviews/dashboard", reviewer_dashboard_view, name="reviewer_dashboard"),
+    path("api/reviews/admin/archive", admin_archive_entries_view, name="admin_archive_entries"),
     path("api/reviews/admin/override", admin_override_view, name="admin_override"),
     path(
         "api/reviews/dictionary/submit",
