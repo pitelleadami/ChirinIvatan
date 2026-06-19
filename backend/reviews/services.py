@@ -11,36 +11,45 @@ This file controls:
 - Re-review logic
 """
 
+from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
-from django.contrib.auth import get_user_model
 from django.utils import timezone
 
-from .models import FolkloreReview, Review, ReviewAdminOverride
 from dictionary.models import EntryRevision, EntryStatus
-from folklore.models import FolkloreEntry, FolkloreRevision
 from dictionary.services import finalize_approved_revision, publish_revision
 from dictionary.state_machine import validate_transition
 from dictionary.variant_services import (
     handle_mother_removed_or_archived,
     recompute_mother_for_group,
 )
+from folklore.models import FolkloreEntry, FolkloreRevision
 from folklore.services import (
     finalize_approved_revision as finalize_folklore_approved_revision,
+)
+from folklore.services import (
     publish_revision as publish_folklore_revision,
+)
+from folklore.services import (
     transition_folklore_status,
 )
 from users.contributions import award_dictionary_term, award_folklore_entry, award_revision
+from users.models import Notification
+from users.notifications import notify
+
+from .models import CorrectionAssignment, FolkloreReview, Review, ReviewAdminOverride
 
 User = get_user_model()
 
 REVIEWER_GROUP = "Reviewer"
 ADMIN_GROUP = "Admin"
+FLAGGER_GROUPS = ("Contributor", "Reviewer", "Consultant", "Admin")
 
 
 # ============================================================
 # ROLE HELPERS
 # ============================================================
+
 
 def is_admin(user):
     """Return True if user is admin (superuser OR Admin group)."""
@@ -48,13 +57,165 @@ def is_admin(user):
 
 
 def is_reviewer(user):
-    """Return True if user belongs to Reviewer group."""
-    return user.groups.filter(name=REVIEWER_GROUP).exists()
+    """Return True for reviewer-level validation roles."""
+    return user.groups.filter(name__in=[REVIEWER_GROUP, "Consultant"]).exists()
+
+
+def can_flag_live_entry(user):
+    return user.is_authenticated and (
+        user.is_superuser or user.groups.filter(name__in=FLAGGER_GROUPS).exists()
+    )
+
+
+def _correction_assignee(username):
+    user = User.objects.filter(username__iexact=str(username or "").strip(), is_active=True).first()
+    if not user or not (
+        user.is_superuser
+        or user.groups.filter(
+            name__in=["Contributor", REVIEWER_GROUP, "Consultant", ADMIN_GROUP]
+        ).exists()
+    ):
+        raise ValidationError("Choose an active approved contributor.")
+    return user
+
+
+def _resolve_dictionary_correction(revision):
+    assignment = getattr(revision, "correction_assignment", None)
+    if assignment and assignment.status != CorrectionAssignment.Status.RESOLVED:
+        assignment.status = CorrectionAssignment.Status.RESOLVED
+        assignment.resolved_at = timezone.now()
+        assignment.save(update_fields=["status", "resolved_at"])
+
+
+def _resolve_folklore_correction(revision):
+    assignment = getattr(revision, "correction_assignment", None)
+    if assignment and assignment.status != CorrectionAssignment.Status.RESOLVED:
+        assignment.status = CorrectionAssignment.Status.RESOLVED
+        assignment.resolved_at = timezone.now()
+        assignment.save(update_fields=["status", "resolved_at"])
+
+
+def _return_dictionary_for_fixing(
+    *, revision, reviewer, notes, assigned_to_username, source_revision_id
+):
+    entry = revision.entry
+    source = EntryRevision.objects.filter(
+        id=source_revision_id,
+        entry=entry,
+        status=EntryRevision.Status.APPROVED,
+    ).first()
+    if not source:
+        raise ValidationError("Choose an approved dictionary snapshot to fix.")
+    assignee = _correction_assignee(assigned_to_username)
+    previous = (
+        EntryRevision.objects.filter(
+            entry=entry,
+            status=EntryRevision.Status.APPROVED,
+            created_at__lt=source.created_at,
+        )
+        .exclude(id=source.id)
+        .order_by("-approved_at", "-created_at")
+        .first()
+    )
+    scope = (
+        CorrectionAssignment.Scope.ORIGINAL
+        if source.is_base_snapshot or previous is None
+        else CorrectionAssignment.Scope.REVISION
+    )
+    correction = EntryRevision.objects.create(
+        entry=entry,
+        contributor=assignee,
+        proposed_data=dict(source.proposed_data or {}),
+        status=EntryRevision.Status.DRAFT,
+        reviewer_notes=notes,
+    )
+    assignment = CorrectionAssignment.objects.create(
+        target_type=CorrectionAssignment.TargetType.DICTIONARY,
+        scope=scope,
+        assigned_to=assignee,
+        returned_by=reviewer,
+        notes=notes,
+        source_snapshot=dict(source.proposed_data or {}),
+        dictionary_source_revision=source,
+        dictionary_correction_revision=correction,
+    )
+
+    if scope == CorrectionAssignment.Scope.ORIGINAL:
+        entry.status = EntryStatus.REJECTED
+        entry.save(update_fields=["status"])
+    else:
+        if previous:
+            publish_revision(
+                revision=previous,
+                approvers=entry.last_approved_by.all(),
+            )
+        else:
+            entry.status = EntryStatus.REJECTED
+            entry.save(update_fields=["status"])
+    return assignment
+
+
+def _return_folklore_for_fixing(
+    *, revision, reviewer, notes, assigned_to_username, source_revision_id
+):
+    entry = revision.entry
+    source = FolkloreRevision.objects.filter(
+        id=source_revision_id,
+        entry=entry,
+        status=FolkloreRevision.Status.APPROVED,
+    ).first()
+    if not source:
+        raise ValidationError("Choose an approved folklore snapshot to fix.")
+    assignee = _correction_assignee(assigned_to_username)
+    previous = (
+        FolkloreRevision.objects.filter(
+            entry=entry,
+            status=FolkloreRevision.Status.APPROVED,
+            created_at__lt=source.created_at,
+        )
+        .exclude(id=source.id)
+        .order_by("-approved_at", "-created_at")
+        .first()
+    )
+    scope = (
+        CorrectionAssignment.Scope.ORIGINAL
+        if source.is_base_snapshot or previous is None
+        else CorrectionAssignment.Scope.REVISION
+    )
+    correction = FolkloreRevision.objects.create(
+        entry=entry,
+        contributor=assignee,
+        proposed_data=dict(source.proposed_data or {}),
+        photo_upload=source.photo_upload,
+        audio_upload=source.audio_upload,
+        status=FolkloreRevision.Status.DRAFT,
+        reviewer_notes=notes,
+    )
+    assignment = CorrectionAssignment.objects.create(
+        target_type=CorrectionAssignment.TargetType.FOLKLORE,
+        scope=scope,
+        assigned_to=assignee,
+        returned_by=reviewer,
+        notes=notes,
+        source_snapshot=dict(source.proposed_data or {}),
+        folklore_source_revision=source,
+        folklore_correction_revision=correction,
+    )
+
+    if scope == CorrectionAssignment.Scope.ORIGINAL:
+        transition_folklore_status(entry=entry, to_status=FolkloreEntry.Status.REJECTED)
+    else:
+        if previous:
+            publish_folklore_revision(revision=previous)
+        else:
+            transition_folklore_status(entry=entry, to_status=FolkloreEntry.Status.REJECTED)
+    return assignment
 
 
 # ============================================================
 # MAIN REVIEW LOGIC
 # ============================================================
+
 
 def _latest_flag_review(revision: EntryRevision):
     # Re-review decisions are scoped to the latest flag round.
@@ -75,6 +236,18 @@ def _latest_folklore_flag_review(revision: FolkloreRevision):
         .order_by("-review_round", "-created_at")
         .first()
     )
+
+
+def _dictionary_revision_title(revision):
+    if revision.entry_id and revision.entry:
+        return revision.entry.term
+    return str((revision.proposed_data or {}).get("term") or "your entry")
+
+
+def _folklore_revision_title(revision):
+    if revision.entry_id and revision.entry:
+        return revision.entry.title
+    return str((revision.proposed_data or {}).get("title") or "your entry")
 
 
 def _require_admin_with_notes(*, admin_user, notes: str):
@@ -104,7 +277,9 @@ def admin_override_dictionary_entry(*, entry, admin_user, action, notes=""):
         entry.save(update_fields=["status"])
     elif action == ReviewAdminOverride.Action.RESTORE_APPROVED:
         if entry.status not in {EntryStatus.APPROVED_UNDER_REVIEW, EntryStatus.ARCHIVED}:
-            raise ValidationError("Only an archived or under-review dictionary entry can be restored.")
+            raise ValidationError(
+                "Only an archived or under-review dictionary entry can be restored."
+            )
         entry.status = EntryStatus.APPROVED
         entry.archived_at = None
         entry.save(update_fields=["status", "archived_at"])
@@ -116,7 +291,9 @@ def admin_override_dictionary_entry(*, entry, admin_user, action, notes=""):
             EntryStatus.APPROVED_UNDER_REVIEW,
             EntryStatus.REJECTED,
         }:
-            raise ValidationError("This dictionary entry cannot be archived from its current status.")
+            raise ValidationError(
+                "This dictionary entry cannot be archived from its current status."
+            )
         entry.status = EntryStatus.ARCHIVED
         entry.archived_at = timezone.now()
         entry.save(update_fields=["status", "archived_at"])
@@ -154,7 +331,9 @@ def admin_override_folklore_entry(*, entry, admin_user, action, notes=""):
             FolkloreEntry.Status.APPROVED_UNDER_REVIEW,
             FolkloreEntry.Status.ARCHIVED,
         }:
-            raise ValidationError("Only an archived or under-review folklore entry can be restored.")
+            raise ValidationError(
+                "Only an archived or under-review folklore entry can be restored."
+            )
         entry.status = FolkloreEntry.Status.APPROVED
         entry.archived_at = None
         entry.save(update_fields=["status", "archived_at"])
@@ -191,6 +370,8 @@ def submit_folklore_review(
     reviewer,
     decision,
     notes="",
+    assigned_to_username="",
+    source_revision_id="",
 ):
     """
     Submit review for folklore entries.
@@ -245,7 +426,8 @@ def submit_folklore_review(
             }:
                 fallback_status = (
                     FolkloreRevision.Status.APPROVED
-                    if entry.status in {
+                    if entry.status
+                    in {
                         FolkloreEntry.Status.APPROVED,
                         FolkloreEntry.Status.APPROVED_UNDER_REVIEW,
                     }
@@ -268,7 +450,11 @@ def submit_folklore_review(
                         "self_produced_media": entry.self_produced_media,
                         "copyright_usage": entry.copyright_usage,
                     },
-                    approved_at=timezone.now() if fallback_status == FolkloreRevision.Status.APPROVED else None,
+                    approved_at=(
+                        timezone.now()
+                        if fallback_status == FolkloreRevision.Status.APPROVED
+                        else None
+                    ),
                 )
             else:
                 raise ValidationError("No folklore revision found for this entry.")
@@ -287,18 +473,22 @@ def submit_folklore_review(
             raise ValidationError("Only approved folklore revisions can be flagged.")
         if not entry or entry.status != FolkloreEntry.Status.APPROVED:
             raise ValidationError("Only approved folklore entries can be flagged.")
-    elif not (
-        revision.status == FolkloreRevision.Status.PENDING or is_rereview
-    ):
+    elif not (revision.status == FolkloreRevision.Status.PENDING or is_rereview):
         raise ValidationError("Only pending folklore revisions can be reviewed.")
 
-    if not (is_reviewer(reviewer) or is_admin(reviewer)):
-        raise ValidationError("Only reviewers or admins can submit reviews.")
+    if decision == Review.Decision.FLAG:
+        if not can_flag_live_entry(reviewer):
+            raise ValidationError("Only approved platform members can flag entries.")
+    else:
+        if not (is_reviewer(reviewer) or is_admin(reviewer)):
+            raise ValidationError("Only reviewers or admins can submit reviews.")
+        if revision.contributor_id == reviewer.id:
+            raise ValidationError("You cannot review your own submission.")
 
-    if revision.contributor_id == reviewer.id:
-        raise ValidationError("You cannot review your own submission.")
-
-    if decision == FolkloreReview.Decision.REJECT and not notes.strip():
+    if (
+        decision in [FolkloreReview.Decision.REJECT, FolkloreReview.Decision.RETURN]
+        and not notes.strip()
+    ):
         raise ValidationError("Rejection requires reviewer notes.")
     if decision == FolkloreReview.Decision.FLAG and not notes.strip():
         raise ValidationError("Flagging requires reviewer notes.")
@@ -338,16 +528,44 @@ def submit_folklore_review(
         )
         return revision
 
+    if decision == FolkloreReview.Decision.RETURN:
+        if not is_rereview:
+            raise ValidationError("Only flagged entries can be returned for fixing.")
+        _return_folklore_for_fixing(
+            revision=revision,
+            reviewer=reviewer,
+            notes=notes,
+            assigned_to_username=assigned_to_username,
+            source_revision_id=source_revision_id,
+        )
+        return revision
+
     if decision == FolkloreReview.Decision.REJECT:
         if is_rereview:
-            transition_folklore_status(
-                entry=entry,
-                to_status=FolkloreEntry.Status.REJECTED,
+            title = _folklore_revision_title(revision)
+            transition_folklore_status(entry=entry, to_status=FolkloreEntry.Status.ARCHIVED)
+            notes_fragment = f" Reviewer note: {notes}" if notes else ""
+            notify(
+                user=revision.contributor,
+                notif_type=Notification.Type.REVISION_REJECTED,
+                message=f'Your published entry "{title}" was rejected after re-review and removed from the public archive.{notes_fragment}',
+                target_url="/admin-applications?tab=contributions",
             )
             return revision
 
+        title = _folklore_revision_title(revision)
         revision.status = FolkloreRevision.Status.REJECTED
-        revision.save(update_fields=["status"])
+        revision.reviewer_notes = notes
+        revision.save(update_fields=["status", "reviewer_notes"])
+        notes_fragment = (
+            f" Reviewer note: {revision.reviewer_notes}" if revision.reviewer_notes else ""
+        )
+        notify(
+            user=revision.contributor,
+            notif_type=Notification.Type.REVISION_REJECTED,
+            message=f'Your submission "{title}" was not approved.{notes_fragment}',
+            target_url=f"/folklore-draft?revision_id={revision.id}",
+        )
         return revision
 
     # Phase 3: compute quorum using unique reviewer/admin actors.
@@ -377,6 +595,12 @@ def submit_folklore_review(
             entry=entry,
             to_status=FolkloreEntry.Status.APPROVED,
         )
+        notify(
+            user=revision.contributor,
+            notif_type=Notification.Type.REVISION_APPROVED,
+            message=f'Your entry "{entry.title}" completed re-review and remains approved.',
+            target_url=f"/folklore-view?entry_id={entry.id}",
+        )
         return revision
 
     was_new_submission = revision.entry is None
@@ -386,6 +610,13 @@ def submit_folklore_review(
 
     publish_folklore_revision(revision=revision)
     finalize_folklore_approved_revision(revision=revision)
+    _resolve_folklore_correction(revision)
+    notify(
+        user=revision.contributor,
+        notif_type=Notification.Type.REVISION_APPROVED,
+        message=f'Your entry "{revision.entry.title}" has been approved and is now live.',
+        target_url=f"/folklore-view?entry_id={revision.entry.id}",
+    )
 
     if was_new_submission:
         award_folklore_entry(
@@ -403,7 +634,15 @@ def submit_folklore_review(
 
 
 @transaction.atomic
-def submit_review(*, revision: EntryRevision, reviewer, decision, notes=""):
+def submit_review(
+    *,
+    revision: EntryRevision,
+    reviewer,
+    decision,
+    notes="",
+    assigned_to_username="",
+    source_revision_id="",
+):
     """
     Submit a review decision.
 
@@ -441,17 +680,20 @@ def submit_review(*, revision: EntryRevision, reviewer, decision, notes=""):
     # 2. Reviewer role gate + prevent self-review
     # --------------------------------------------------------
 
-    if not (is_reviewer(reviewer) or is_admin(reviewer)):
-        raise ValidationError("Only reviewers or admins can submit reviews.")
-
-    if revision.contributor_id == reviewer.id:
-        raise ValidationError("You cannot review your own submission.")
+    if decision == FolkloreReview.Decision.FLAG:
+        if not can_flag_live_entry(reviewer):
+            raise ValidationError("Only approved platform members can flag entries.")
+    else:
+        if not (is_reviewer(reviewer) or is_admin(reviewer)):
+            raise ValidationError("Only reviewers or admins can submit reviews.")
+        if revision.contributor_id == reviewer.id:
+            raise ValidationError("You cannot review your own submission.")
 
     # --------------------------------------------------------
     # 3. Review content rules
     # --------------------------------------------------------
 
-    if decision == Review.Decision.REJECT and not notes.strip():
+    if decision in [Review.Decision.REJECT, Review.Decision.RETURN] and not notes.strip():
         raise ValidationError("Rejection requires reviewer notes.")
     if decision == Review.Decision.FLAG and not notes.strip():
         raise ValidationError("Flagging requires reviewer notes.")
@@ -501,6 +743,18 @@ def submit_review(*, revision: EntryRevision, reviewer, decision, notes=""):
         entry.save(update_fields=["status"])
         return revision
 
+    if decision == Review.Decision.RETURN:
+        if not is_rereview:
+            raise ValidationError("Only flagged entries can be returned for fixing.")
+        _return_dictionary_for_fixing(
+            revision=revision,
+            reviewer=reviewer,
+            notes=notes,
+            assigned_to_username=assigned_to_username,
+            source_revision_id=source_revision_id,
+        )
+        return revision
+
     # ========================================================
     # IMMEDIATE REJECTION
     # ========================================================
@@ -509,19 +763,31 @@ def submit_review(*, revision: EntryRevision, reviewer, decision, notes=""):
 
         # Re-review rejection
         if is_rereview:
-            validate_transition(
-                entry.status,
-                EntryStatus.REJECTED,
-                entity_name="DictionaryEntry",
+            title = _dictionary_revision_title(revision)
+            entry.archive()
+            notes_fragment = f" Reviewer note: {notes}" if notes else ""
+            notify(
+                user=revision.contributor,
+                notif_type=Notification.Type.REVISION_REJECTED,
+                message=f'Your published entry "{title}" was rejected after re-review and removed from the public archive.{notes_fragment}',
+                target_url="/admin-applications?tab=contributions",
             )
-            entry.status = EntryStatus.REJECTED
-            entry.save(update_fields=["status"])
             return revision
 
         # Normal rejection
+        title = _dictionary_revision_title(revision)
         revision.status = EntryRevision.Status.REJECTED
         revision.reviewer_notes = notes
         revision.save(update_fields=["status", "reviewer_notes"])
+        notes_fragment = (
+            f" Reviewer note: {revision.reviewer_notes}" if revision.reviewer_notes else ""
+        )
+        notify(
+            user=revision.contributor,
+            notif_type=Notification.Type.REVISION_REJECTED,
+            message=f'Your submission "{title}" was not approved.{notes_fragment}',
+            target_url=f"/dictionary-draft?revision_id={revision.id}",
+        )
         return revision
 
     # ========================================================
@@ -563,6 +829,12 @@ def submit_review(*, revision: EntryRevision, reviewer, decision, notes=""):
         )
         entry.status = EntryStatus.APPROVED
         entry.save(update_fields=["status"])
+        notify(
+            user=revision.contributor,
+            notif_type=Notification.Type.REVISION_APPROVED,
+            message=f'Your entry "{entry.term}" completed re-review and remains approved.',
+            target_url=f"/dictionary-view?entry_id={entry.id}",
+        )
         return revision
 
     # ========================================================
@@ -588,6 +860,13 @@ def submit_review(*, revision: EntryRevision, reviewer, decision, notes=""):
         approvers=approvers,
     )
     finalize_approved_revision(revision=revision)
+    _resolve_dictionary_correction(revision)
+    notify(
+        user=revision.contributor,
+        notif_type=Notification.Type.REVISION_APPROVED,
+        message=f'Your entry "{revision.entry.term}" has been approved and is now live.',
+        target_url=f"/dictionary-view?entry_id={revision.entry.id}",
+    )
 
     # Contribution counters are historical and never decremented.
     # We only award at approval time.

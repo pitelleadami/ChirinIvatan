@@ -9,10 +9,10 @@ Split:
 """
 
 import uuid
-from django.conf import settings
-from django.db import models
-from django.core.exceptions import ValidationError
 
+from django.conf import settings
+from django.core.exceptions import ValidationError
+from django.db import models
 
 FOLKLORE_SUBCATEGORIES_BY_CATEGORY = {
     "oral_narratives": {"myths", "legends", "folktales", "oral_histories"},
@@ -41,7 +41,9 @@ LEGACY_FOLKLORE_CATEGORY_MAP = {
 
 
 def normalize_folklore_taxonomy(data):
-    category, subcategory = LEGACY_FOLKLORE_CATEGORY_MAP.get(str(data.get("category", "")).strip(), (None, None))
+    category, subcategory = LEGACY_FOLKLORE_CATEGORY_MAP.get(
+        str(data.get("category", "")).strip(), (None, None)
+    )
     if category:
         data["category"] = category
         data["subcategory"] = data.get("subcategory") or subcategory
@@ -58,16 +60,17 @@ class FolkloreEntry(models.Model):
     - auto-default license assignment on approval
     - license immutability after approval
     """
+
     DEFAULT_LICENSE = "CC BY-NC 4.0"
 
     class Status(models.TextChoices):
-        DRAFT = 'draft', 'Draft'
-        PENDING = 'pending', 'Pending'
-        APPROVED = 'approved', 'Approved'
-        APPROVED_UNDER_REVIEW = 'approved_under_review', 'Approved (Under Review)'
-        REJECTED = 'rejected', 'Rejected'
-        ARCHIVED = 'archived', 'Archived'
-        DELETED = 'deleted', 'Deleted'
+        DRAFT = "draft", "Draft"
+        PENDING = "pending", "Pending"
+        APPROVED = "approved", "Approved"
+        APPROVED_UNDER_REVIEW = "approved_under_review", "Approved (Under Review)"
+        REJECTED = "rejected", "Rejected"
+        ARCHIVED = "archived", "Archived"
+        DELETED = "deleted", "Deleted"
 
     class Category(models.TextChoices):
         ORAL_NARRATIVES = "oral_narratives", "Oral Narratives"
@@ -113,7 +116,9 @@ class FolkloreEntry(models.Model):
     title = models.CharField(max_length=255)
     content = models.TextField()
     category = models.CharField(max_length=40, choices=Category.choices)
-    subcategory = models.CharField(max_length=40, choices=Subcategory.choices, blank=True, default="")
+    subcategory = models.CharField(
+        max_length=40, choices=Subcategory.choices, blank=True, default=""
+    )
     municipality_source = models.CharField(
         max_length=32,
         choices=MunicipalitySource.choices,
@@ -130,16 +135,10 @@ class FolkloreEntry(models.Model):
     copyright_usage = models.CharField(max_length=255, blank=True, default="")
 
     contributor = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.PROTECT,
-        related_name='folklore_entries'
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="folklore_entries"
     )
 
-    status = models.CharField(
-        max_length=30,
-        choices=Status.choices,
-        default=Status.DRAFT
-    )
+    status = models.CharField(max_length=30, choices=Status.choices, default=Status.DRAFT)
     archived_at = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -148,16 +147,23 @@ class FolkloreEntry(models.Model):
     def save(self, *args, **kwargs):
         # Always validate before persisting.
         update_fields = kwargs.get("update_fields")
-        normalized = normalize_folklore_taxonomy({"category": self.category, "subcategory": self.subcategory})
+        normalized = normalize_folklore_taxonomy(
+            {"category": self.category, "subcategory": self.subcategory}
+        )
         previous_subcategory = self.subcategory
         self.category = normalized.get("category", self.category)
         self.subcategory = normalized.get("subcategory", self.subcategory)
-        if update_fields is not None and self.subcategory != previous_subcategory and "subcategory" not in update_fields:
+        if (
+            update_fields is not None
+            and self.subcategory != previous_subcategory
+            and "subcategory" not in update_fields
+        ):
             kwargs["update_fields"] = list(update_fields) + ["subcategory"]
         self.clean()
 
         if (
             self.status == self.Status.APPROVED
+            and self.self_produced_media
             and not self.copyright_usage.strip()
         ):
             self.copyright_usage = self.DEFAULT_LICENSE
@@ -170,14 +176,19 @@ class FolkloreEntry(models.Model):
         # should happen through a new revision snapshot lifecycle.
         if self.pk:
             previous = FolkloreEntry.objects.filter(pk=self.pk).first()
+            is_external_media_license_cleanup = (
+                previous
+                and previous.status == self.Status.APPROVED
+                and not self.self_produced_media
+                and not self.copyright_usage.strip()
+            )
             if (
                 previous
                 and previous.status == self.Status.APPROVED
                 and previous.copyright_usage != self.copyright_usage
+                and not is_external_media_license_cleanup
             ):
-                raise ValidationError(
-                    "Copyright/license is immutable after approval."
-                )
+                raise ValidationError("Copyright/license is immutable after approval.")
 
         super().save(*args, **kwargs)
 
@@ -190,7 +201,9 @@ class FolkloreEntry(models.Model):
         valid_subcategories = {choice for choice, _ in self.Subcategory.choices}
         if self.subcategory and self.subcategory not in valid_subcategories:
             raise ValidationError("Invalid subcategory value.")
-        if self.subcategory and self.subcategory not in FOLKLORE_SUBCATEGORIES_BY_CATEGORY.get(self.category, set()):
+        if self.subcategory and self.subcategory not in FOLKLORE_SUBCATEGORIES_BY_CATEGORY.get(
+            self.category, set()
+        ):
             raise ValidationError("Subcategory does not belong to selected category.")
 
         valid_municipalities = {choice for choice, _ in self.MunicipalitySource.choices}
@@ -202,20 +215,60 @@ class FolkloreEntry(models.Model):
 
         has_media = bool(self.media_url.strip() or self.photo_upload or self.audio_upload)
         if has_media and not self.self_produced_media and not self.media_source.strip():
-            raise ValidationError(
-                "Media source is required unless marked as self-produced."
-            )
+            raise ValidationError("Media source is required unless marked as self-produced.")
 
     def __str__(self):
         return self.title
 
 
-setattr(FolkloreEntry.Category, "MYTH", "myth")
-setattr(FolkloreEntry.Category, "LEGEND", "legend")
-setattr(FolkloreEntry.Category, "LAJI", "laji")
-setattr(FolkloreEntry.Category, "POEM", "poem")
-setattr(FolkloreEntry.Category, "PROVERB", "proverb")
-setattr(FolkloreEntry.Category, "IDIOM", "idiom")
+FolkloreEntry.Category.MYTH = "myth"
+FolkloreEntry.Category.LEGEND = "legend"
+FolkloreEntry.Category.LAJI = "laji"
+FolkloreEntry.Category.POEM = "poem"
+FolkloreEntry.Category.PROVERB = "proverb"
+FolkloreEntry.Category.IDIOM = "idiom"
+
+
+class FolkloreComment(models.Model):
+    """
+    Flat comment on a live folklore entry.
+
+    Any authenticated user may comment. Only the author or an admin may delete.
+    Comments are not part of the revision/review workflow — they are discussion,
+    not edits to the archival record.
+    """
+
+    BODY_MAX_LENGTH = 2000
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    entry = models.ForeignKey(
+        FolkloreEntry,
+        on_delete=models.CASCADE,
+        related_name="comments",
+    )
+
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="folklore_comments",
+    )
+
+    body = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at"]
+
+    def clean(self):
+        body = (self.body or "").strip()
+        if not body:
+            raise ValidationError("Comment body must not be empty.")
+        if len(body) > self.BODY_MAX_LENGTH:
+            raise ValidationError(f"Comment must be {self.BODY_MAX_LENGTH} characters or fewer.")
+
+    def __str__(self):
+        return f"{self.author_id} on {self.entry_id}"
 
 
 class FolkloreRevision(models.Model):
@@ -225,6 +278,9 @@ class FolkloreRevision(models.Model):
     Beginner model:
     - live entry = current public state
     - revision row = submitted version waiting for approval lifecycle
+    - revision_type="revision": contributor updating their own entry
+    - revision_type="variant": alternate version by a different contributor;
+      on approval creates a new FolkloreEntry rather than overwriting the original
     """
 
     class Status(models.TextChoices):
@@ -232,6 +288,10 @@ class FolkloreRevision(models.Model):
         PENDING = "pending", "Pending"
         APPROVED = "approved", "Approved"
         REJECTED = "rejected", "Rejected"
+
+    class RevisionType(models.TextChoices):
+        REVISION = "revision", "Revision"
+        VARIANT = "variant", "Variant"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
@@ -243,15 +303,29 @@ class FolkloreRevision(models.Model):
         blank=True,
     )
 
+    # Populated only when revision_type="variant"; points to the source entry
+    # that inspired the variant. Kept after source entry deletion (SET_NULL).
+    variant_of = models.ForeignKey(
+        FolkloreEntry,
+        on_delete=models.SET_NULL,
+        related_name="variant_revisions",
+        null=True,
+        blank=True,
+    )
+
+    revision_type = models.CharField(
+        max_length=20,
+        choices=RevisionType.choices,
+        default=RevisionType.REVISION,
+    )
+
     contributor = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
         related_name="folklore_revisions",
     )
 
-    proposed_data = models.JSONField(
-        help_text="Full proposed snapshot of folklore entry fields."
-    )
+    proposed_data = models.JSONField(help_text="Full proposed snapshot of folklore entry fields.")
     photo_upload = models.ImageField(upload_to="folklore/photos/", null=True, blank=True)
     audio_upload = models.FileField(upload_to="folklore/audio/", null=True, blank=True)
 
@@ -272,3 +346,56 @@ class FolkloreRevision(models.Model):
 
     def __str__(self):
         return f"{self.id} ({self.status})"
+
+
+class FolkloreMediaAsset(models.Model):
+    """
+    Image asset inserted inside a folklore rich-text draft.
+
+    Assets begin attached to a revision. The rendered folklore HTML stores the
+    returned image URL and data-media-id so the content remains readable through
+    the normal public media path.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
+    revision = models.ForeignKey(
+        FolkloreRevision,
+        on_delete=models.CASCADE,
+        related_name="media_assets",
+        null=True,
+        blank=True,
+    )
+    entry = models.ForeignKey(
+        FolkloreEntry,
+        on_delete=models.CASCADE,
+        related_name="media_assets",
+        null=True,
+        blank=True,
+    )
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="folklore_media_assets",
+    )
+
+    image = models.ImageField(upload_to="folklore/inline/")
+    caption = models.CharField(max_length=240, blank=True, default="")
+    alt_text = models.CharField(max_length=180, blank=True, default="")
+    order = models.PositiveIntegerField(default=0)
+    self_produced = models.BooleanField(default=True)
+    source = models.TextField(blank=True, default="")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["order", "created_at"]
+
+    def clean(self):
+        if not self.revision_id and not self.entry_id:
+            raise ValidationError("Media asset must belong to a revision or entry.")
+        if not self.self_produced and not self.source.strip():
+            raise ValidationError("Source is required unless image is self-produced.")
+
+    def __str__(self):
+        return f"Folklore media {self.id}"

@@ -3,6 +3,7 @@
 This frontend is a workflow console for SPEC-03 backend APIs.
 
 Canonical path note:
+
 - Use this folder: `frontend/`
 - This is the only frontend source path in the repo.
 
@@ -28,6 +29,7 @@ npm run dev
 ```
 
 Open:
+
 - `http://localhost:5173`
 
 ## 4) Build Check
@@ -76,6 +78,7 @@ python3 manage.py recompute_gamification
 2. Start frontend dev server.
 3. Log in at Django admin in same browser.
 4. Open frontend and test in this order:
+
 - Folklore Draft Builder
 - Reviewer Dashboard
 - Public Profile Viewer
@@ -85,18 +88,22 @@ python3 manage.py recompute_gamification
 ## 9) Troubleshooting
 
 1. `Authentication required`
+
 - You are not logged in (or session expired).
 - Log in again via `/admin/`.
 
 2. CSRF failure
+
 - Ensure frontend host is trusted in backend settings.
 - Use same browser/session for login and API actions.
 
 3. Empty leaderboard/profile data
+
 - You may not have approved contributions yet.
 - Create/approve test content first.
 
 4. API errors on role decisions/invites
+
 - Ensure user is reviewer/admin for gated actions.
 
 ## 10) Current Scope

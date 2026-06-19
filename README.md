@@ -17,4 +17,4 @@ workflows, content review, and usability feedback before wider beta testing.
 
 This is an active test deployment, not a general public production release.
 
-*IS295B implementation starting 2026-02*
+_IS295B implementation starting 2026-02_

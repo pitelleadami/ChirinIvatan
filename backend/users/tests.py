@@ -1,12 +1,12 @@
 import json
 import tempfile
 from unittest.mock import patch
+from urllib.parse import urlparse
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
-from django.core import signing
-from django.core.exceptions import ValidationError
 from django.core import mail
+from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 
@@ -21,6 +21,7 @@ from users.models import (
     GamificationConfig,
     MunicipalityMonthlyWinner,
     MunicipalityStats,
+    Notification,
     RecognitionEvent,
     RoleApplication,
     RoleApplicationDecision,
@@ -37,18 +38,11 @@ from users.recognition import (
     recompute_user_gamification,
 )
 
-
 User = get_user_model()
 
 
 def valid_captcha_payload(answer=7):
-    return {
-        "captcha_token": signing.dumps(
-            {"answer": answer},
-            salt="chirin-role-onboarding-captcha",
-        ),
-        "captcha_answer": str(answer),
-    }
+    return {"turnstile_token": "test-turnstile-token"}
 
 
 class ContributionLedgerTests(TestCase):
@@ -77,13 +71,17 @@ class ContributionLedgerTests(TestCase):
             password="testpass123",
         )
 
-    def _mark_leaderboard_eligible(self, user, *, municipality="Basco", include_in_leaderboard=True):
+    def _mark_leaderboard_eligible(
+        self, user, *, municipality="Basco", include_in_leaderboard=True
+    ):
         user.groups.add(self.contributor_group)
         profile, _ = UserProfile.objects.get_or_create(user=user)
         profile.municipality = municipality
         profile.include_in_leaderboard = include_in_leaderboard
         profile.save(update_fields=["municipality", "include_in_leaderboard"])
-        if not user.role_onboarding_records.filter(role=RoleOnboardingRecord.Role.CONTRIBUTOR).exists():
+        if not user.role_onboarding_records.filter(
+            role=RoleOnboardingRecord.Role.CONTRIBUTOR
+        ).exists():
             RoleOnboardingRecord.objects.create(
                 user=user,
                 role=RoleOnboardingRecord.Role.CONTRIBUTOR,
@@ -275,6 +273,22 @@ class ContributionLedgerTests(TestCase):
         usernames = [row["username"] for row in payload["rows"]]
         self.assertIn(self.contributor1.username, usernames)
 
+    def test_global_leaderboard_excludes_unactivated_role_group_account(self):
+        self.contributor1.set_unusable_password()
+        self.contributor1.save(update_fields=["password"])
+        self.contributor1.groups.add(self.contributor_group)
+        UserProfile.objects.create(
+            user=self.contributor1,
+            municipality="Basco",
+        )
+
+        response = self.client.get("/leaderboard/global")
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        usernames = [row["username"] for row in payload["rows"]]
+        self.assertNotIn(self.contributor1.username, usernames)
+
     def test_global_leaderboard_includes_role_group_account_with_zero_score(self):
         self.contributor1.groups.add(self.contributor_group)
         UserProfile.objects.create(
@@ -286,7 +300,9 @@ class ContributionLedgerTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = json.loads(response.content)
-        row = next(item for item in payload["rows"] if item["username"] == self.contributor1.username)
+        row = next(
+            item for item in payload["rows"] if item["username"] == self.contributor1.username
+        )
         self.assertEqual(row["value"], 0)
         self.assertEqual(row["total_contributions"], 0)
 
@@ -359,10 +375,13 @@ class PublicUserProfileApiTests(TestCase):
         self.user = User.objects.create_user(
             username="profile_user",
             password="testpass123",
+            first_name="Profile",
+            last_name="User",
         )
         UserProfile.objects.create(
             user=self.user,
             municipality="Basco",
+            name_extension="III",
             post_nominals="PhD",
             affiliation="Ivatan Org",
             occupation="Teacher",
@@ -384,6 +403,107 @@ class PublicUserProfileApiTests(TestCase):
         )
         revision.refresh_from_db()
         return revision
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        FRONTEND_BASE_URL="https://chirinivatan.test",
+        DEFAULT_FROM_EMAIL="Chirin Ivatan <noreply@chirinivatan.test>",
+    )
+    def test_profile_email_change_requires_verification_before_update(self):
+        self.user.email = "old@example.com"
+        self.user.save(update_fields=["email"])
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            "/api/profile/my",
+            data=json.dumps({"email": "new@example.com"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["email_change_pending"])
+        self.assertEqual(payload["pending_email"], "new@example.com")
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, "old@example.com")
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("new@example.com", mail.outbox[0].to)
+
+        verify_url = next(
+            line
+            for line in mail.outbox[0].body.splitlines()
+            if "/api/profile/email/verify/" in line
+        )
+        verify_path = urlparse(verify_url).path
+        verify_response = self.client.get(verify_path)
+
+        self.assertEqual(verify_response.status_code, 302)
+        self.assertIn("email_verified=1", verify_response["Location"])
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.email, "new@example.com")
+
+    def test_profile_username_can_be_changed(self):
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            "/api/profile/my",
+            data=json.dumps({"username": "better.profile"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.username, "better.profile")
+        self.assertEqual(response.json()["username"], "better.profile")
+
+    def test_profile_username_change_blocks_taken_username(self):
+        User.objects.create_user(username="already_taken", password="testpass123")
+        self.client.force_login(self.user)
+
+        response = self.client.post(
+            "/api/profile/my",
+            data=json.dumps({"username": "already_taken"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"], "That username is already taken.")
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.username, "profile_user")
+
+    def test_public_profile_normalizes_all_caps_names_and_affiliations(self):
+        self.user.username = "KADAMI"
+        self.user.first_name = "KRISTELLE"
+        self.user.last_name = "ADAMI"
+        self.user.save(update_fields=["username", "first_name", "last_name"])
+        profile = self.user.profile
+        profile.affiliation = "IVATAN HERITAGE GROUP"
+        profile.occupation = "COMMUNITY RESEARCHER"
+        profile.cultural_affiliations = [
+            {"role": "CULTURAL STEWARD", "organization": "BASCO HERITAGE COUNCIL"}
+        ]
+        profile.other_affiliations = [
+            {"designation": "FACULTY MEMBER", "institution": "BATANES STATE COLLEGE"}
+        ]
+        profile.save()
+
+        response = self.client.get("/api/users/kadami")
+
+        self.assertEqual(response.status_code, 200)
+        header = response.json()["header"]
+        self.assertEqual(header["username"], "kadami")
+        self.assertEqual(header["first_name"], "Kristelle")
+        self.assertEqual(header["last_name"], "Adami")
+        self.assertEqual(header["affiliation"], "Ivatan Heritage Group")
+        self.assertEqual(header["occupation"], "Community Researcher")
+        self.assertEqual(
+            header["cultural_affiliations"],
+            [{"role": "Cultural Steward", "organization": "Basco Heritage Council"}],
+        )
+        self.assertEqual(
+            header["other_affiliations"],
+            [{"designation": "Faculty Member", "institution": "Batanes State College"}],
+        )
 
     def test_public_profile_endpoint_returns_summary_and_lists(self):
         # Approved mother term
@@ -414,6 +534,7 @@ class PublicUserProfileApiTests(TestCase):
             status=FolkloreEntry.Status.PENDING,
         )
         from folklore.services import transition_folklore_status
+
         transition_folklore_status(
             entry=folklore,
             to_status=FolkloreEntry.Status.APPROVED,
@@ -424,6 +545,7 @@ class PublicUserProfileApiTests(TestCase):
         payload = response.json()
 
         self.assertEqual(payload["header"]["username"], self.user.username)
+        self.assertEqual(payload["header"]["name_extension"], "III")
         self.assertEqual(payload["header"]["post_nominals"], "PhD")
         self.assertEqual(payload["header"]["municipality"], "Basco")
         self.assertEqual(payload["header"]["affiliation"], "Ivatan Org")
@@ -485,7 +607,9 @@ class SiteContentApiTests(TestCase):
         self.admin_group, _ = Group.objects.get_or_create(name="Admin")
         self.admin_user = User.objects.create_user(username="site_admin", password="testpass123")
         self.admin_user.groups.add(self.admin_group)
-        self.regular_user = User.objects.create_user(username="regular_user", password="testpass123")
+        self.regular_user = User.objects.create_user(
+            username="regular_user", password="testpass123"
+        )
 
     def test_public_site_content_returns_defaults(self):
         response = self.client.get("/api/site-content")
@@ -773,6 +897,16 @@ class SiteContentApiTests(TestCase):
         contributor.groups.add(contributor_group)
         UserProfile.objects.get_or_create(user=contributor)
 
+        unactivated_contributor = User.objects.create_user(
+            username="unactivated_contributor",
+            first_name="Unactivated",
+            last_name="Contributor",
+        )
+        unactivated_contributor.set_unusable_password()
+        unactivated_contributor.save(update_fields=["password"])
+        unactivated_contributor.groups.add(contributor_group)
+        UserProfile.objects.get_or_create(user=unactivated_contributor)
+
         hidden_admin = User.objects.create_user(username="hidden_admin", password="testpass123")
         hidden_admin.groups.add(self.admin_group)
         hidden_profile, _ = UserProfile.objects.get_or_create(user=hidden_admin)
@@ -788,11 +922,13 @@ class SiteContentApiTests(TestCase):
         self.assertEqual(rows[second_admin.username]["org_chart_group"], "administrators")
         self.assertEqual(rows[second_admin.username]["role"], "Administrator")
         self.assertEqual(rows[contributor.username]["org_chart_group"], "contributors")
+        self.assertNotIn(unactivated_contributor.username, rows)
         self.assertNotIn(hidden_admin.username, rows)
 
 
 class RoleOnboardingFlowTests(TestCase):
     def setUp(self):
+        self.contributor_group, _ = Group.objects.get_or_create(name="Contributor")
         self.reviewer_group, _ = Group.objects.get_or_create(name="Reviewer")
         self.admin_group, _ = Group.objects.get_or_create(name="Admin")
 
@@ -804,7 +940,9 @@ class RoleOnboardingFlowTests(TestCase):
 
         self.admin_user = User.objects.create_user(username="admin_user", password="testpass123")
         self.admin_user.groups.add(self.admin_group)
-        self.admin_user_b = User.objects.create_user(username="admin_user_b", password="testpass123")
+        self.admin_user_b = User.objects.create_user(
+            username="admin_user_b", password="testpass123"
+        )
         self.admin_user_b.groups.add(self.admin_group)
 
         self.applicant = User.objects.create_user(username="applicant", password="testpass123")
@@ -847,6 +985,105 @@ class RoleOnboardingFlowTests(TestCase):
             profile["header"]["onboarding_accountability"]["contributor"],
         )
 
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        FRONTEND_BASE_URL="https://chirinivatan.test",
+        DEFAULT_FROM_EMAIL="Chirin Ivatan <noreply@chirinivatan.test>",
+    )
+    def test_final_role_approval_emails_applicant_with_approvers_and_activation_link(self):
+        self.applicant.email = "approved.applicant@example.com"
+        self.applicant.save(update_fields=["email"])
+
+        self.client.force_login(self.applicant)
+        create = self.client.post(
+            "/api/users/role-applications",
+            data=json.dumps({"target_role": "contributor", **valid_captcha_payload()}),
+            content_type="application/json",
+        )
+        application_id = create.json()["application_id"]
+
+        self.client.force_login(self.reviewer_a)
+        first_decision = self.client.post(
+            f"/api/users/role-applications/{application_id}/decide",
+            data=json.dumps({"decision": "approve", "notes": "looks good"}),
+            content_type="application/json",
+        )
+        self.assertEqual(first_decision.status_code, 200)
+        self.assertEqual(
+            first_decision.json()["application_status"], RoleApplication.Status.PENDING
+        )
+        self.assertEqual(len(mail.outbox), 0)
+
+        self.client.force_login(self.admin_user)
+        with self.captureOnCommitCallbacks(execute=True):
+            final_decision = self.client.post(
+                f"/api/users/role-applications/{application_id}/decide",
+                data=json.dumps({"decision": "approve", "notes": "second approval"}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(final_decision.status_code, 200)
+        self.assertEqual(
+            final_decision.json()["application_status"], RoleApplication.Status.APPROVED
+        )
+        self.assertEqual(len(mail.outbox), 1)
+        email = mail.outbox[0]
+        self.assertEqual(email.to, ["approved.applicant@example.com"])
+        self.assertIn("Contributor application was approved", email.subject)
+        self.assertIn("reviewer_a", email.body)
+        self.assertIn("admin_user", email.body)
+        self.assertIn(
+            "https://chirinivatan.test/roles?status_email=approved.applicant%40example.com",
+            email.body,
+        )
+        self.assertIn(str(application_id), email.body)
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        FRONTEND_BASE_URL="https://chirinivatan.test",
+        DEFAULT_FROM_EMAIL="Chirin Ivatan <noreply@chirinivatan.test>",
+    )
+    def test_public_approved_application_waits_for_activation_before_role_group(self):
+        create = self.client.post(
+            "/api/users/role-applications",
+            data=json.dumps(
+                {
+                    "target_role": "contributor",
+                    "first_name": "Public",
+                    "last_name": "Applicant",
+                    "email": "public.awaiting@example.com",
+                    "municipality": "Basco",
+                    **valid_captcha_payload(),
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(create.status_code, 201)
+        application_id = create.json()["application_id"]
+
+        self.client.force_login(self.reviewer_a)
+        self.client.post(
+            f"/api/users/role-applications/{application_id}/decide",
+            data=json.dumps({"decision": "approve", "notes": "approve 1"}),
+            content_type="application/json",
+        )
+        self.client.force_login(self.admin_user)
+        with self.captureOnCommitCallbacks(execute=True):
+            final_decision = self.client.post(
+                f"/api/users/role-applications/{application_id}/decide",
+                data=json.dumps({"decision": "approve", "notes": "approve 2"}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(final_decision.status_code, 200)
+        self.assertEqual(
+            final_decision.json()["application_status"], RoleApplication.Status.APPROVED
+        )
+        applicant = User.objects.get(email="public.awaiting@example.com")
+        self.assertFalse(applicant.has_usable_password())
+        self.assertFalse(applicant.is_active)
+        self.assertFalse(applicant.groups.filter(name="Contributor").exists())
+
     def test_reviewer_application_can_activate_via_two_admins(self):
         self.client.force_login(self.applicant)
         create = self.client.post(
@@ -882,7 +1119,13 @@ class RoleOnboardingFlowTests(TestCase):
         self.client.force_login(self.applicant)
         create = self.client.post(
             "/api/users/role-applications",
-            data=json.dumps({"target_role": "reviewer", "reviewer_reason": "I can help validate submissions.", **valid_captcha_payload()}),
+            data=json.dumps(
+                {
+                    "target_role": "reviewer",
+                    "reviewer_reason": "I can help validate submissions.",
+                    **valid_captcha_payload(),
+                }
+            ),
             content_type="application/json",
         )
         self.assertEqual(create.status_code, 201)
@@ -964,7 +1207,13 @@ class RoleOnboardingFlowTests(TestCase):
         self.client.force_login(self.applicant)
         create = self.client.post(
             "/api/users/role-applications",
-            data=json.dumps({"target_role": "reviewer", "reviewer_reason": "I can help validate submissions.", **valid_captcha_payload()}),
+            data=json.dumps(
+                {
+                    "target_role": "reviewer",
+                    "reviewer_reason": "I can help validate submissions.",
+                    **valid_captcha_payload(),
+                }
+            ),
             content_type="application/json",
         )
         self.assertEqual(create.status_code, 201)
@@ -986,7 +1235,20 @@ class RoleOnboardingFlowTests(TestCase):
         self.assertEqual(decide_2.status_code, 200)
         self.assertEqual(decide_2.json()["application_status"], RoleApplication.Status.APPROVED)
 
-    def test_reviewer_application_requires_reason(self):
+    def test_non_contributor_reviewer_application_does_not_require_reason(self):
+        self.client.force_login(self.applicant)
+        response = self.client.post(
+            "/api/users/role-applications",
+            data=json.dumps({"target_role": "reviewer", **valid_captcha_payload()}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["target_role"], RoleApplication.TargetRole.REVIEWER)
+        self.assertEqual(response.json()["reviewer_reason"], "")
+
+    def test_contributor_reviewer_application_requires_reason(self):
+        self.applicant.groups.add(self.contributor_group)
         self.client.force_login(self.applicant)
         response = self.client.post(
             "/api/users/role-applications",
@@ -1054,7 +1316,7 @@ class RoleOnboardingFlowTests(TestCase):
                 self.assertFalse(consultant.profile.include_in_leaderboard)
                 self.assertEqual(
                     consultant.profile.cultural_affiliations,
-                    [{"role": "Knowledge holder", "organization": "Sabtang community"}],
+                    [{"role": "Knowledge Holder", "organization": "Sabtang Community"}],
                 )
                 self.assertEqual(
                     consultant.profile.other_affiliations,
@@ -1062,9 +1324,9 @@ class RoleOnboardingFlowTests(TestCase):
                 )
                 self.assertEqual(
                     consultant.profile.affiliation,
-                    "Sabtang community, Ivatan Cultural Council",
+                    "Sabtang Community, Ivatan Cultural Council",
                 )
-                self.assertEqual(consultant.profile.occupation, "Knowledge holder, Adviser")
+                self.assertEqual(consultant.profile.occupation, "Knowledge Holder, Adviser")
                 self.assertTrue(bool(consultant.profile.profile_photo))
                 self.assertIn("Created as Consultant profile", payload["accountability_label"])
 
@@ -1104,7 +1366,7 @@ class RoleOnboardingFlowTests(TestCase):
                 self.assertEqual(consultant.last_name, "Updated")
                 self.assertEqual(consultant.email, "apo.updated@example.com")
                 self.assertEqual(consultant.profile.municipality, "Ivana")
-                self.assertEqual(consultant.profile.affiliation, "Ivana community")
+                self.assertEqual(consultant.profile.affiliation, "Ivana Community")
                 self.assertEqual(consultant.profile.occupation, "Elder")
                 self.assertIn("consultant-updated", consultant.profile.profile_photo.name)
                 record = consultant.role_onboarding_records.get(
@@ -1134,6 +1396,12 @@ class RoleOnboardingFlowTests(TestCase):
         self.assertIn("/roles?invite=", payload["accept_url"])
         self.assertEqual(len(mail.outbox), 1)
         self.assertIn(payload["accept_url"], mail.outbox[0].body)
+        self.assertEqual(len(mail.outbox[0].alternatives), 1)
+        html_body, content_type = mail.outbox[0].alternatives[0]
+        self.assertEqual(content_type, "text/html")
+        self.assertIn("You are invited to join the digital yaru", html_body)
+        self.assertIn(payload["accept_url"], html_body)
+        self.assertIn("Accept invitation", html_body)
 
         invitation = RoleInvitation.objects.get(email="new.invitee@example.com")
         accept = self.client.post(
@@ -1142,10 +1410,12 @@ class RoleOnboardingFlowTests(TestCase):
                 {
                     "first_name": "New",
                     "last_name": "Invitee",
+                    "name_extension": "Jr.",
                     "municipality": "Uyugan",
                     "username": "new.invitee",
                     "password": "StrongInvitePass123!",
                     "password_confirm": "StrongInvitePass123!",
+                    **valid_captcha_payload(),
                 }
             ),
             content_type="application/json",
@@ -1157,7 +1427,10 @@ class RoleOnboardingFlowTests(TestCase):
         self.assertTrue(invited_user.groups.filter(name="Reviewer").exists())
         self.assertEqual(invited_user.first_name, "New")
         self.assertEqual(invited_user.last_name, "Invitee")
+        self.assertEqual(invited_user.profile.name_extension, "Jr.")
         self.assertEqual(invited_user.profile.municipality, "Uyugan")
+        self.assertTrue(invited_user.profile.onboarding_prompt_pending)
+        self.assertFalse(invited_user.profile.onboarding_prompt_dismissed)
         self.assertFalse(RoleApplication.objects.filter(applicant=invited_user).exists())
         invitation.refresh_from_db()
         self.assertEqual(invitation.status, RoleInvitation.Status.ACCEPTED)
@@ -1222,13 +1495,16 @@ class RoleOnboardingFlowTests(TestCase):
                     "username": "profile.required",
                     "password": "StrongInvitePass123!",
                     "password_confirm": "StrongInvitePass123!",
+                    **valid_captcha_payload(),
                 }
             ),
             content_type="application/json",
         )
 
         self.assertEqual(accept.status_code, 400)
-        self.assertIn("First name, last name, and municipality are required", accept.json()["detail"])
+        self.assertIn(
+            "First name, last name, and municipality are required", accept.json()["detail"]
+        )
 
     @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
     def test_admin_can_invite_consultant_by_email(self):
@@ -1258,6 +1534,7 @@ class RoleOnboardingFlowTests(TestCase):
                     "username": "email.consultant",
                     "password": "StrongInvitePass123!",
                     "password_confirm": "StrongInvitePass123!",
+                    **valid_captcha_payload(),
                 }
             ),
             content_type="application/json",
@@ -1298,6 +1575,7 @@ class RoleOnboardingFlowTests(TestCase):
                     "username": "new.admin",
                     "password": "StrongInvitePass123!",
                     "password_confirm": "StrongInvitePass123!",
+                    **valid_captcha_payload(),
                 }
             ),
             content_type="application/json",
@@ -1316,7 +1594,9 @@ class RoleOnboardingFlowTests(TestCase):
         self.client.force_login(self.reviewer_a)
         invite = self.client.post(
             "/api/admin/role-invitations/email",
-            data=json.dumps({"email": "admin.blocked@example.com", "role": "admin", **valid_captcha_payload()}),
+            data=json.dumps(
+                {"email": "admin.blocked@example.com", "role": "admin", **valid_captcha_payload()}
+            ),
             content_type="application/json",
         )
 
@@ -1328,7 +1608,13 @@ class RoleOnboardingFlowTests(TestCase):
         self.client.force_login(self.reviewer_a)
         invite = self.client.post(
             "/api/admin/role-invitations/email",
-            data=json.dumps({"email": "consultant.blocked@example.com", "role": "consultant", **valid_captcha_payload()}),
+            data=json.dumps(
+                {
+                    "email": "consultant.blocked@example.com",
+                    "role": "consultant",
+                    **valid_captcha_payload(),
+                }
+            ),
             content_type="application/json",
         )
 
@@ -1340,7 +1626,13 @@ class RoleOnboardingFlowTests(TestCase):
         self.client.force_login(self.reviewer_a)
         invite = self.client.post(
             "/api/admin/role-invitations/email",
-            data=json.dumps({"email": "reviewer.invited@example.com", "role": "contributor", **valid_captcha_payload()}),
+            data=json.dumps(
+                {
+                    "email": "reviewer.invited@example.com",
+                    "role": "contributor",
+                    **valid_captcha_payload(),
+                }
+            ),
             content_type="application/json",
         )
 
@@ -1443,7 +1735,9 @@ class RoleOnboardingFlowTests(TestCase):
         self.client.force_login(self.admin_user)
         response = self.client.post(
             "/api/admin/role-invitations/email",
-            data=json.dumps({"email": "invalid-address", "role": "contributor", **valid_captcha_payload()}),
+            data=json.dumps(
+                {"email": "invalid-address", "role": "contributor", **valid_captcha_payload()}
+            ),
             content_type="application/json",
         )
 
@@ -1500,7 +1794,9 @@ class RoleOnboardingFlowTests(TestCase):
         self.assertIn(approved_contributor.username, usernames)
         self.assertNotIn(registered_only.username, usernames)
 
-    def test_admin_users_endpoint_keeps_existing_contributor_with_pending_reviewer_application(self):
+    def test_admin_users_endpoint_keeps_existing_contributor_with_pending_reviewer_application(
+        self,
+    ):
         contributor_group, _ = Group.objects.get_or_create(name="Contributor")
         self.applicant.groups.add(contributor_group)
         RoleApplication.objects.create(
@@ -1585,7 +1881,8 @@ class PublicRoleCredentialClaimTests(TestCase):
             last_name="Applicant",
         )
         self.applicant.set_unusable_password()
-        self.applicant.save(update_fields=["password"])
+        self.applicant.is_active = False
+        self.applicant.save(update_fields=["password", "is_active"])
 
         self.approved_application = RoleApplication.objects.create(
             applicant=self.applicant,
@@ -1615,6 +1912,22 @@ class PublicRoleCredentialClaimTests(TestCase):
         self.assertEqual(self.applicant.username, "claim.user")
         self.assertTrue(self.applicant.has_usable_password())
         self.assertTrue(self.applicant.check_password("IvatanHeritage!2026"))
+        self.assertTrue(self.applicant.is_active)
+        self.assertTrue(self.applicant.groups.filter(name="Contributor").exists())
+        self.assertTrue(self.applicant.profile.onboarding_prompt_pending)
+        self.assertFalse(self.applicant.profile.onboarding_prompt_dismissed)
+
+    def test_public_status_marks_approved_unclaimed_application_as_awaiting_activation(self):
+        response = self.client.post(
+            "/api/users/role-applications/status",
+            data=json.dumps({"email": "claim@example.com"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        row = response.json()["rows"][0]
+        self.assertEqual(row["public_status"], "approved_pending_activation")
+        self.assertTrue(row["can_claim_credentials"])
 
     def test_public_claim_requires_approved_application(self):
         pending_application = RoleApplication.objects.create(
@@ -1663,7 +1976,9 @@ class PublicRoleCredentialClaimTests(TestCase):
 class CulturalStewardshipTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="culture_user", password="testpass123")
-        self.reviewer = User.objects.create_user(username="culture_reviewer", password="testpass123")
+        self.reviewer = User.objects.create_user(
+            username="culture_reviewer", password="testpass123"
+        )
         reviewer_group, _ = Group.objects.get_or_create(name="Reviewer")
         self.reviewer.groups.add(reviewer_group)
 
@@ -1766,6 +2081,31 @@ class AdminAccountControlTests(TestCase):
         self.user.refresh_from_db()
         self.assertTrue(self.user.is_active)
 
+    def test_admin_cannot_activate_approved_account_before_credentials_are_claimed(self):
+        pending_activation_user = User.objects.create_user(
+            username="awaiting_activation",
+            email="awaiting@example.com",
+            is_active=False,
+        )
+        pending_activation_user.set_unusable_password()
+        pending_activation_user.save(update_fields=["password"])
+        RoleApplication.objects.create(
+            applicant=pending_activation_user,
+            target_role=RoleApplication.TargetRole.CONTRIBUTOR,
+            status=RoleApplication.Status.APPROVED,
+        )
+
+        response = self.client.post(
+            f"/api/admin/users/{pending_activation_user.username}/status",
+            data=json.dumps({"is_active": True, "notes": "activate early"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        pending_activation_user.refresh_from_db()
+        self.assertFalse(pending_activation_user.is_active)
+        self.assertIn("must create credentials", response.json()["detail"])
+
     def test_admin_cannot_deactivate_self(self):
         response = self.client.post(
             f"/api/admin/users/{self.admin.username}/status",
@@ -1856,7 +2196,7 @@ class AdminAccountControlTests(TestCase):
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 400)
-        self.assertIn("CAPTCHA", response.json()["detail"])
+        self.assertIn("Turnstile", response.json()["detail"])
 
         response = self.client.post(
             f"/api/users/{reporter.username}/suspicious-flag",
@@ -1893,6 +2233,35 @@ class AdminAccountControlTests(TestCase):
                 action=AdminAccountAction.Action.SEND_PASSWORD_RESET,
             ).exists()
         )
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_public_password_reset_request_sends_generic_email(self):
+        self.client.logout()
+
+        response = self.client.post(
+            "/api/auth/password-reset",
+            data=json.dumps({"email": self.user.email, **valid_captcha_payload()}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn(self.user.email, mail.outbox[0].to)
+        self.assertIn("password reset link has been sent", response.json()["detail"])
+
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_public_password_reset_request_rejects_unknown_email(self):
+        self.client.logout()
+
+        response = self.client.post(
+            "/api/auth/password-reset",
+            data=json.dumps({"email": "nobody@example.com", **valid_captcha_payload()}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(len(mail.outbox), 0)
+        self.assertEqual(response.json()["detail"], "No active account uses that email address.")
 
 
 class GamificationAdvancedFeaturesTests(TestCase):
@@ -1970,3 +2339,197 @@ class GamificationAdvancedFeaturesTests(TestCase):
         )
         with self.assertRaises(ValidationError):
             config.full_clean()
+
+
+class ProfileOnboardingTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="onboarding_user",
+            password="testpass123",
+            first_name="New",
+            last_name="Steward",
+        )
+        self.profile = UserProfile.objects.create(
+            user=self.user,
+            municipality="Basco",
+            onboarding_prompt_pending=True,
+        )
+
+    def test_unauthenticated_dismiss_returns_401(self):
+        response = self.client.post("/api/profile/onboarding/dismiss")
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_login_payload_exposes_pending_onboarding(self):
+        response = self.client.post(
+            "/api/auth/login",
+            data=json.dumps({"username": self.user.username, "password": "testpass123"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["onboarding_prompt_pending"])
+        self.assertFalse(response.json()["onboarding_prompt_dismissed"])
+
+    def test_login_accepts_lowercase_for_legacy_uppercase_username(self):
+        self.user.username = "ONBOARDING_USER"
+        self.user.save(update_fields=["username"])
+
+        response = self.client.post(
+            "/api/auth/login",
+            data=json.dumps({"username": "onboarding_user", "password": "testpass123"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["username"], "onboarding_user")
+
+    def test_invalid_login_mentions_lowercase_username_handles(self):
+        response = self.client.post(
+            "/api/auth/login",
+            data=json.dumps({"username": "ONBOARDING_USER", "password": "wrong-password"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("lowercase", response.json()["detail"])
+
+    def test_dismiss_persists_and_is_returned_by_auth_me(self):
+        self.client.force_login(self.user)
+
+        dismiss = self.client.post("/api/profile/onboarding/dismiss")
+
+        self.assertEqual(dismiss.status_code, 200)
+        self.assertEqual(dismiss.json(), {"dismissed": True})
+        self.profile.refresh_from_db()
+        self.assertFalse(self.profile.onboarding_prompt_pending)
+        self.assertTrue(self.profile.onboarding_prompt_dismissed)
+
+        auth_me = self.client.get("/api/auth/me")
+        self.assertEqual(auth_me.status_code, 200)
+        self.assertFalse(auth_me.json()["onboarding_prompt_pending"])
+        self.assertTrue(auth_me.json()["onboarding_prompt_dismissed"])
+
+
+class NotificationTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="notif_user", password="testpass123")
+        self.other_user = User.objects.create_user(
+            username="other_notif_user", password="testpass123"
+        )
+
+    def test_unauthenticated_request_returns_401(self):
+        response = self.client.get("/api/notifications")
+        self.assertEqual(response.status_code, 401)
+
+    def test_empty_list_returns_zero_count_and_empty_rows(self):
+        self.client.login(username="notif_user", password="testpass123")
+
+        response = self.client.get("/api/notifications")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"unread_count": 0, "notifications": []})
+
+    def test_created_notification_appears_with_expected_fields(self):
+        notification = Notification.objects.create(
+            user=self.user,
+            notif_type=Notification.Type.REVISION_APPROVED,
+            message='Your entry "Vahay" has been approved and is now live.',
+            target_url="/dictionary-view?entry_id=example",
+        )
+        self.client.login(username="notif_user", password="testpass123")
+
+        response = self.client.get("/api/notifications")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["unread_count"], 1)
+        self.assertEqual(len(payload["notifications"]), 1)
+        row = payload["notifications"][0]
+        self.assertEqual(row["id"], str(notification.id))
+        self.assertEqual(row["notif_type"], Notification.Type.REVISION_APPROVED)
+        self.assertEqual(row["message"], notification.message)
+        self.assertEqual(row["target_url"], notification.target_url)
+        self.assertFalse(row["is_read"])
+        self.assertIn("created_at", row)
+
+    def test_mark_read_with_specific_ids_marks_only_those(self):
+        first = Notification.objects.create(
+            user=self.user,
+            notif_type=Notification.Type.MILESTONE,
+            message="First milestone.",
+        )
+        second = Notification.objects.create(
+            user=self.user,
+            notif_type=Notification.Type.MILESTONE,
+            message="Second milestone.",
+        )
+        self.client.login(username="notif_user", password="testpass123")
+
+        response = self.client.post(
+            "/api/notifications/mark-read",
+            data=json.dumps({"ids": [str(first.id)]}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["marked"], 1)
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertTrue(first.is_read)
+        self.assertFalse(second.is_read)
+
+    def test_mark_read_with_no_body_marks_all(self):
+        Notification.objects.create(
+            user=self.user,
+            notif_type=Notification.Type.MILESTONE,
+            message="First milestone.",
+        )
+        Notification.objects.create(
+            user=self.user,
+            notif_type=Notification.Type.ROLE_DECIDED,
+            message="Role decided.",
+        )
+        self.client.login(username="notif_user", password="testpass123")
+
+        response = self.client.post("/api/notifications/mark-read")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["marked"], 2)
+        self.assertEqual(Notification.objects.filter(user=self.user, is_read=False).count(), 0)
+
+    def test_unread_count_decrements_after_mark_read(self):
+        first = Notification.objects.create(
+            user=self.user,
+            notif_type=Notification.Type.MILESTONE,
+            message="First milestone.",
+        )
+        Notification.objects.create(
+            user=self.user,
+            notif_type=Notification.Type.MILESTONE,
+            message="Second milestone.",
+        )
+        self.client.login(username="notif_user", password="testpass123")
+
+        self.client.post(
+            "/api/notifications/mark-read",
+            data=json.dumps({"ids": [str(first.id)]}),
+            content_type="application/json",
+        )
+        response = self.client.get("/api/notifications")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["unread_count"], 1)
+
+    def test_notifications_from_other_users_are_not_visible(self):
+        Notification.objects.create(
+            user=self.other_user,
+            notif_type=Notification.Type.COMMENT_RECEIVED,
+            message="Someone else should see this.",
+        )
+        self.client.login(username="notif_user", password="testpass123")
+
+        response = self.client.get("/api/notifications")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"unread_count": 0, "notifications": []})

@@ -4,25 +4,24 @@ export const REVIEW_PROCESS_FAQ_SECTION = {
   id: 'how-review-works',
   title: 'How Review Works',
   roles: ALL_FAQ_ROLES,
-  intro:
-    'A public trust guide explaining how dictionary and folklore contributions move from private draft to reviewed archive entry.',
   items: [
     {
       q: 'Who can submit words, stories, corrections, and media?',
-      a: 'Approved contributors can submit new dictionary entries, folklore records, media attachments, and revisions to existing public entries. Visitors can browse the archive and apply for contributor access through the Role Center.',
+      a: 'Approved platform members can submit new dictionary entries and folklore records. Signed-in contributors, reviewers, consultants, and admins can flag a public entry for re-review when they notice a possible correction.',
       bullets: [
         'Contributor access is granted through application review or direct invitation.',
-        'Reviewers and admins may also contribute, but their own submissions still need independent review.',
-        'Consultant profiles can be credited for cultural knowledge without needing a login account.',
+        'Reviewers, consultants, and admins may also contribute, but their own submissions still need independent review.',
+        'Visitors can browse the archive and apply for access through the Digital Yaru page.',
       ],
     },
     {
       q: 'Who reviews submissions before they become public?',
-      a: 'Submissions are reviewed by approved reviewers and admins who are responsible for language accuracy, source clarity, cultural care, and public readiness.',
+      a: 'Submissions are reviewed by approved reviewers, consultants, and admins who are responsible for language accuracy, source clarity, cultural care, and public readiness.',
       bullets: [
         'Dictionary and folklore drafts remain private while they are pending.',
-        'A reviewer or admin should not approve their own submission.',
-        'Admins can help resolve unusual cases, role issues, and re-review concerns.',
+        'Two distinct qualified approvals are required before a submission is published.',
+        'A reviewer, consultant, or admin cannot approve their own submission.',
+        'A rejection requires notes and returns the submission without publishing it.',
       ],
     },
     {
@@ -47,11 +46,11 @@ export const REVIEW_PROCESS_FAQ_SECTION = {
     },
     {
       q: 'How do disputes, corrections, or concerns work?',
-      a: 'The archive is designed to keep learning. Published entries can be revised, flagged for re-review, or corrected when better information becomes available.',
+      a: 'The archive is designed to keep learning. Signed-in platform members can flag published entries for re-review when better information or a correction becomes available.',
       bullets: [
-        'Contributors can submit revisions to approved public entries.',
-        'Reviewers and admins can flag approved entries for re-review when concerns arise.',
-        'Entries under re-review can be checked again without losing the original audit trail.',
+        'The flag must include notes explaining what should be checked.',
+        'A flagged entry remains visible as Approved Under Review while qualified reviewers reassess it.',
+        'Re-review decisions preserve the original approval and review audit trail.',
         'Admins can use notes and audit logs to preserve why a decision was made.',
       ],
     },
@@ -93,7 +92,7 @@ export const DEFAULT_FAQ_SECTIONS = [
       },
       {
         q: 'Can I request corrections for an entry?',
-        a: 'Yes. You can apply as a contributor and submit a revision, or ask an existing contributor to help route the correction through review.',
+        a: 'Yes. Approved platform members can open a public entry and flag it for re-review with a clear explanation. Visitors can apply through the Digital Yaru page before using protected workflows.',
       },
     ],
   },
@@ -130,7 +129,13 @@ export const DEFAULT_FAQ_SECTIONS = [
     items: [
       {
         q: 'What types of folklore are included?',
-        bullets: ['Traditional stories', 'Myths and legends', 'Proverbs and sayings', 'Songs and laji', 'Other oral tradition records'],
+        bullets: [
+          'Traditional stories',
+          'Myths and legends',
+          'Proverbs and sayings',
+          'Songs and laji',
+          'Other oral tradition records',
+        ],
       },
       {
         q: 'Can folklore entries include media?',
@@ -183,7 +188,7 @@ export const DEFAULT_FAQ_SECTIONS = [
         bullets: [
           'Complete a public profile with municipality, affiliation, bionote, and photo.',
           'Create dictionary and folklore drafts.',
-          'Revise existing public entries when corrections are needed.',
+          'Flag existing public entries for re-review when corrections may be needed.',
           'Upload media where appropriate and permitted.',
           'Track submitted revisions and receive recognition for approved participation.',
         ],
@@ -193,7 +198,7 @@ export const DEFAULT_FAQ_SECTIONS = [
         bullets: [
           'Complete your profile first.',
           'For a new dictionary word, fill the headword, meaning, examples, source, and optional media details.',
-          'For a correction, open the published entry and start a revision from there.',
+          'For a correction, open the published entry and flag it for re-review with specific notes.',
           'For folklore, add title, category, place, story content, source, and optional media.',
           'Use preview before saving, then save draft and submit when ready for review.',
         ],
@@ -237,11 +242,17 @@ export const DEFAULT_FAQ_SECTIONS = [
       },
       {
         q: 'What happens after I submit a dictionary or folklore draft?',
-        a: 'Your draft enters moderation. Reviewers may approve, reject with notes, or flag it for further attention depending on quality, source reliability, and cultural sensitivity.',
+        a: 'Your draft enters moderation. It becomes public after two distinct qualified reviewers, consultants, or admins approve it. A rejection includes notes explaining what needs attention.',
       },
       {
         q: 'Why might a submission be rejected?',
-        bullets: ['Incomplete information', 'Incorrect translation or category', 'Missing or vague sources', 'Inappropriate content', 'Duplicate entry'],
+        bullets: [
+          'Incomplete information',
+          'Incorrect translation or category',
+          'Missing or vague sources',
+          'Inappropriate content',
+          'Duplicate entry',
+        ],
         outro: 'Review notes are provided so you can revise and resubmit when appropriate.',
       },
     ],
@@ -269,18 +280,17 @@ export const DEFAULT_FAQ_SECTIONS = [
     id: 'reviewers',
     title: 'Reviewer Guide',
     roles: ['reviewer', 'admin'],
-    intro:
-      'Reviewers protect quality and cultural integrity by validating submitted dictionary and folklore revisions before publication.',
     items: [
       {
         q: 'What can reviewers do?',
         bullets: [
-          'Open the Reviewer Dashboard.',
+          "Open Reviews in Steward's Desk.",
           'Review pending dictionary and folklore submissions.',
           'Approve accurate and well-sourced submissions.',
           'Reject submissions that should not move forward.',
           'Flag published content that needs re-review.',
           'Participate in role onboarding decisions when permitted.',
+          'Track items where their approval is recorded but quorum is still pending.',
         ],
       },
       {
@@ -294,7 +304,7 @@ export const DEFAULT_FAQ_SECTIONS = [
       },
       {
         q: 'Can reviewers approve their own submissions?',
-        a: 'No. Reviewers and admins should not approve or reject their own submissions. Their own entries should be handled by other qualified reviewers or admins.',
+        a: 'No. Reviewers, consultants, and admins cannot approve or reject their own submissions. Their entries must be handled by other qualified reviewers, consultants, or admins.',
       },
       {
         q: 'When should I reject instead of approve?',
@@ -302,7 +312,7 @@ export const DEFAULT_FAQ_SECTIONS = [
       },
       {
         q: 'When should I flag a live entry for re-review?',
-        a: 'Flag a public entry only when it needs another review round. The system requires notes or justification so the concern is clear.',
+        a: 'Flag a public entry when you identify a possible correction, source concern, cultural issue, or significant omission. The system requires notes so qualified reviewers understand what to reassess.',
       },
     ],
   },
@@ -319,7 +329,7 @@ export const DEFAULT_FAQ_SECTIONS = [
           'Review role applications and invitations.',
           'Inspect people, profiles, roles, public profiles, and activity logs.',
           'Approve or reject contributor and reviewer applications.',
-          'Manage public site content such as About, Digital Yaru, support statements, partner details, and FAQs.',
+          'Manage public site content such as About, Digital Yaru, support statements, supporting organizations, and FAQs.',
           'Use the Django Admin Console for deeper backend management when necessary.',
         ],
       },
@@ -356,11 +366,11 @@ export const DEFAULT_FAQ_SECTIONS = [
     items: [
       {
         q: 'I cannot log in.',
-        a: 'Check the username and password, then confirm the backend server is running. If the account is inactive, ask an admin.',
+        a: 'Check your username and password. If you forgot the password, use the reset link on the login page and complete the verification step. If the account is inactive, contact an admin.',
       },
       {
         q: 'I cannot submit a draft.',
-        a: 'Make sure required fields are filled, a revision ID exists for update or submit actions, and the backend is reachable.',
+        a: 'Check the highlighted required fields, source and media permission answers, and any validation message shown near the form. Save the draft again before submitting if the page reports missing draft information.',
       },
       {
         q: 'My image upload fails.',
@@ -368,7 +378,7 @@ export const DEFAULT_FAQ_SECTIONS = [
       },
       {
         q: 'Approve or reject returns forbidden.',
-        a: 'The account may not have reviewer or admin access, or the entry may already have been reviewed by that user in the same round.',
+        a: 'The account may not have reviewer, consultant, or admin access; the item may be your own submission; or you may already have reviewed it in the current round.',
       },
       {
         q: 'The page shows no entries.',
@@ -385,11 +395,7 @@ export function ensureCoreFaqSections(sections = []) {
 
   const visitorIndex = rows.findIndex((section) => section?.id === 'visitors')
   const insertAt = visitorIndex >= 0 ? visitorIndex + 1 : 0
-  return [
-    ...rows.slice(0, insertAt),
-    REVIEW_PROCESS_FAQ_SECTION,
-    ...rows.slice(insertAt),
-  ]
+  return [...rows.slice(0, insertAt), REVIEW_PROCESS_FAQ_SECTION, ...rows.slice(insertAt)]
 }
 
 export const DICTIONARY_FIELD_GUIDES = [
@@ -417,7 +423,7 @@ export const DICTIONARY_FIELD_GUIDES = [
       'Use variants when the same lexical item appears in another Ivatan form, dialect, municipality usage, or pronunciation pattern without becoming a completely different dictionary entry.',
     include: [
       'The alternate headword form itself.',
-      'The correct variant type such as Ivatan (Common Usage), Isamurungen, Ivasayen, or Itbayaten.',
+      'The correct variant type such as Ivatan (Common Usage), Isamurungen, Ivasayen, Itbayaten, Old / Historical Form, Borrowed Form, or Newly Coined Term / Expression.',
       'Its pronunciation text if it differs from the main headword.',
       'Its own audio file or source note when available.',
     ],
@@ -426,7 +432,8 @@ export const DICTIONARY_FIELD_GUIDES = [
       'Do not use variants when the form has a clearly different meaning that deserves its own entry.',
       'Do not leave a blank variant row sitting in the draft.',
     ],
-    example: 'Example: a Basco-used form and a Sabtang-used form of the same word may belong here as variants.',
+    example:
+      'Example: a Basco-used form and a Sabtang-used form of the same word may belong here as variants.',
   },
   {
     id: 'guide-mother-variants',
@@ -469,7 +476,8 @@ export const DICTIONARY_FIELD_GUIDES = [
       'Do not force every dropdown option to be filled. Only add forms you truly know.',
       'Do not use this area for long explanations; use usage notes for that.',
     ],
-    example: 'Example: a verb may include present tense, past tense, and actor-focus forms if those are known and useful.',
+    example:
+      'Example: a verb may include present tense, past tense, and actor-focus forms if those are known and useful.',
   },
   {
     id: 'guide-usage-notes',
@@ -486,7 +494,8 @@ export const DICTIONARY_FIELD_GUIDES = [
       'Do not write a full story here if the note can stay short and practical.',
       'Do not use this field as a source citation list.',
     ],
-    example: 'Example: Common among older speakers in Basco, or usually said in family conversation, not formal speeches.',
+    example:
+      'Example: Common among older speakers in Basco, or usually said in family conversation, not formal speeches.',
   },
   {
     id: 'guide-etymology',
@@ -503,7 +512,8 @@ export const DICTIONARY_FIELD_GUIDES = [
       'Do not state uncertain history as absolute fact.',
       'Do not use etymology when you only want to explain present-day usage.',
     ],
-    example: 'Example: Possibly from an older root related to sea travel, or borrowed from Spanish and adapted locally.',
+    example:
+      'Example: Possibly from an older root related to sea travel, or borrowed from Spanish and adapted locally.',
   },
   {
     id: 'guide-sources',
@@ -520,6 +530,7 @@ export const DICTIONARY_FIELD_GUIDES = [
       'Do not claim self-recorded or contributor-owned unless it is accurate.',
       'Do not leave source notes vague when the entry depends on a specific person or document.',
     ],
-    example: 'Example: From interview with a Mahatao elder, February 2026, or recorded by contributor during family conversation in Basco.',
+    example:
+      'Example: From interview with a Mahatao elder, February 2026, or recorded by contributor during family conversation in Basco.',
   },
 ]

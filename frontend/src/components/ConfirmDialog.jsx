@@ -22,7 +22,9 @@ export default function ConfirmDialog({
         aria-describedby="confirm-dialog-message"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="confirm-dialog-icon" aria-hidden="true">!</div>
+        <div className="confirm-dialog-icon" aria-hidden="true">
+          !
+        </div>
         <div>
           <p className="profile-kicker">Confirm action</p>
           <h2 id="confirm-dialog-title">{title}</h2>

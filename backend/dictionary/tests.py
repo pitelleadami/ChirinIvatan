@@ -1,23 +1,24 @@
+from datetime import timedelta
+
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
-from datetime import timedelta
 
 from dictionary.models import Entry, EntryRevision, EntryStatus, VariantGroup
-from dictionary.state_machine import validate_transition
 from dictionary.services import (
     create_revision_from_entry,
     finalize_approved_revision,
     get_visible_revision_history,
     publish_revision,
 )
+from dictionary.state_machine import validate_transition
 from dictionary.variant_services import promote_to_mother
-from django.contrib.auth.models import Group
 from folklore.models import FolkloreEntry
-
+from users.models import Notification, UserProfile
 
 User = get_user_model()
 
@@ -120,8 +121,8 @@ class DictionaryServicesTests(TestCase):
         )
 
         self.assertEqual(entry.status, EntryStatus.APPROVED)
-        self.assertEqual(entry.term, "vahay")
-        self.assertEqual(entry.meaning, "house")
+        self.assertEqual(entry.term, "Vahay")
+        self.assertEqual(entry.meaning, "House")
         self.assertEqual(entry.part_of_speech, "noun")
         self.assertEqual(entry.variant_type, "general")
         self.assertEqual(entry.usage_notes, "common noun")
@@ -197,7 +198,7 @@ class DictionaryServicesTests(TestCase):
         mother.refresh_from_db()
         variant.refresh_from_db()
 
-        self.assertEqual(mother.meaning, "updated shared meaning")
+        self.assertEqual(mother.meaning, "Updated shared meaning")
         self.assertEqual(variant.meaning, "")
         self.assertEqual(variant.pronunciation_text, "new pronunciation")
         self.assertEqual(variant.variant_type, "Isamurong")
@@ -227,10 +228,10 @@ class DictionaryServicesTests(TestCase):
 
         entry = publish_revision(revision=revision, approvers=[self.approver])
         group = entry.variant_group
-        variant = group.entries.get(term="bahay")
+        variant = group.entries.get(term="Bahay")
 
         self.assertFalse(variant.is_mother)
-        self.assertEqual(variant.meaning, "house")
+        self.assertEqual(variant.meaning, "House")
         self.assertEqual(variant.pronunciation_text, "ba-hay")
         self.assertEqual(variant.audio_contributor, self.contributor)
         self.assertTrue(
@@ -240,6 +241,25 @@ class DictionaryServicesTests(TestCase):
                 is_base_snapshot=True,
             ).exists()
         )
+
+    def test_publish_revision_normalizes_headword_meaning_and_examples(self):
+        revision = EntryRevision.objects.create(
+            contributor=self.contributor,
+            proposed_data={
+                "term": "aMUNG",
+                "meaning": "fish caught near Basco",
+                "example_sentence": "MANGU KA",
+                "example_translation": "HOW ARE YOU",
+            },
+            status=EntryRevision.Status.APPROVED,
+        )
+
+        entry = publish_revision(revision=revision, approvers=[self.approver])
+
+        self.assertEqual(entry.term, "Amung")
+        self.assertEqual(entry.meaning, "Fish caught near Basco")
+        self.assertEqual(entry.example_sentence, "Mangu ka.")
+        self.assertEqual(entry.example_translation, "How are you.")
 
     def test_publish_revision_rejects_invalid_entry_state_transition(self):
         entry = Entry.objects.create(
@@ -329,9 +349,7 @@ class DictionaryServicesTests(TestCase):
             is_base_snapshot=False,
         ).count()
         self.assertEqual(kept_non_base, 20)
-        self.assertTrue(
-            EntryRevision.objects.filter(id=base.id, is_base_snapshot=True).exists()
-        )
+        self.assertTrue(EntryRevision.objects.filter(id=base.id, is_base_snapshot=True).exists())
         self.assertFalse(EntryRevision.objects.filter(id=first_non_base_id).exists())
 
     def test_public_revision_history_shows_base_plus_last_five(self):
@@ -410,13 +428,24 @@ class DictionaryEntryDetailApiTests(TestCase):
         self.contributor = User.objects.create_user(
             username="api_contrib",
             password="testpass123",
+            first_name="Test",
+            last_name="Contributor",
         )
         self.reviewer = User.objects.create_user(
             username="api_reviewer",
             password="testpass123",
+            first_name="Review",
+            last_name="Steward",
         )
         reviewer_group, _ = Group.objects.get_or_create(name="Reviewer")
         self.reviewer.groups.add(reviewer_group)
+        contributor_group, _ = Group.objects.get_or_create(name="Contributor")
+        self.contributor.groups.add(contributor_group)
+        UserProfile.objects.create(
+            user=self.contributor,
+            name_extension="Jr.",
+            post_nominals="MA",
+        )
 
     def _build_entry_with_history(self):
         entry = Entry.objects.create(
@@ -485,6 +514,60 @@ class DictionaryEntryDetailApiTests(TestCase):
         self.assertIn("contributors", payload)
         self.assertEqual(payload["header"]["term"], "api-term")
         self.assertEqual(payload["semantic_core"]["meaning"], entry.meaning)
+
+    def test_initial_approval_does_not_claim_a_reviser_and_returns_linkable_actors(self):
+        entry = Entry.objects.create(
+            term="first-version",
+            status=EntryStatus.APPROVED,
+            initial_contributor=self.contributor,
+            last_revised_by=self.contributor,
+        )
+        entry.last_approved_by.add(self.reviewer)
+        EntryRevision.objects.create(
+            entry=entry,
+            contributor=self.contributor,
+            proposed_data={"term": "first-version"},
+            status=EntryRevision.Status.APPROVED,
+            approved_at=timezone.now(),
+            is_base_snapshot=True,
+        )
+
+        response = self.client.get(f"/api/dictionary/entries/{entry.id}")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        self.assertEqual(
+            payload["attribution"]["term"]["initially_contributed_by_actor"],
+            {"username": "api_contrib", "display_name": "Test Contributor Jr., MA"},
+        )
+        self.assertEqual(
+            payload["attribution"]["always_visible"]["reviewed_and_approved_by_actors"],
+            [{"username": "api_reviewer", "display_name": "Review Steward"}],
+        )
+        self.assertIsNone(payload["attribution"]["always_visible"]["last_revised_by"])
+        self.assertEqual(payload["contributors"]["unique_revision_contributor_actors"], [])
+
+    def test_contributor_can_flag_public_entry_from_detail(self):
+        entry = Entry.objects.create(
+            term="flag-me",
+            status=EntryStatus.APPROVED,
+            initial_contributor=self.contributor,
+            last_revised_by=self.contributor,
+        )
+        EntryRevision.objects.create(
+            entry=entry,
+            contributor=self.contributor,
+            proposed_data={"term": "flag-me"},
+            status=EntryRevision.Status.APPROVED,
+            approved_at=timezone.now(),
+            is_base_snapshot=True,
+        )
+        self.client.force_login(self.contributor)
+
+        response = self.client.get(f"/api/dictionary/entries/{entry.id}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["review_action"]["can_flag_for_rereview"])
 
     def test_variant_entry_uses_mother_semantic_core(self):
         mother = Entry.objects.create(
@@ -645,7 +728,7 @@ class DictionaryEntryDetailApiTests(TestCase):
         group = VariantGroup.objects.create(mother_entry=mother)
         mother.variant_group = group
         mother.save(update_fields=["variant_group"])
-        variant = Entry.objects.create(
+        Entry.objects.create(
             term="bahay",
             meaning="",
             status=EntryStatus.APPROVED,
@@ -740,24 +823,119 @@ class DictionaryRevisionApiTests(TestCase):
             },
         )
         self.assertEqual(update_response.status_code, 200)
-        self.assertEqual(update_response.json()["meaning"], "language; speech")
+        self.assertEqual(update_response.json()["meaning"], "Language; speech")
 
         list_response = self.client.get("/api/dictionary/revisions/my")
         self.assertEqual(list_response.status_code, 200)
         self.assertEqual(len(list_response.json()["rows"]), 1)
 
-        submit_response = self.client.post(
-            f"/api/dictionary/revisions/{revision_id}/submit"
-        )
+        submit_response = self.client.post(f"/api/dictionary/revisions/{revision_id}/submit")
         self.assertEqual(submit_response.status_code, 200)
         self.assertEqual(submit_response.json()["status"], EntryRevision.Status.PENDING)
+        self.assertFalse(
+            Notification.objects.filter(
+                user=self.contributor,
+                notif_type=Notification.Type.SUBMISSION_RECEIVED,
+            ).exists()
+        )
+
+    def test_my_revisions_includes_reviewer_notes_for_rejected_submission(self):
+        revision = EntryRevision.objects.create(
+            contributor=self.contributor,
+            status=EntryRevision.Status.REJECTED,
+            proposed_data={"term": "returned", "meaning": "Needs correction"},
+            reviewer_notes="Please verify the source and spelling.",
+        )
+        self.client.force_login(self.contributor)
+
+        response = self.client.get("/api/dictionary/revisions/my")
+
+        self.assertEqual(response.status_code, 200)
+        row = next(
+            item for item in response.json()["rows"] if item["revision_id"] == str(revision.id)
+        )
+        self.assertEqual(row["reviewer_notes"], "Please verify the source and spelling.")
+
+    def test_rejected_submission_can_be_fixed_and_resubmitted(self):
+        revision = EntryRevision.objects.create(
+            contributor=self.contributor,
+            status=EntryRevision.Status.REJECTED,
+            proposed_data={
+                "term": "returned",
+                "meaning": "Needs correction",
+                "term_source_is_self_knowledge": True,
+            },
+            reviewer_notes="Please correct the meaning.",
+        )
+        self.client.force_login(self.contributor)
+
+        update_response = self.client.post(
+            f"/api/dictionary/revisions/{revision.id}",
+            data={"meaning": "Corrected meaning"},
+        )
+        submit_response = self.client.post(f"/api/dictionary/revisions/{revision.id}/submit")
+
+        self.assertEqual(update_response.status_code, 200)
+        self.assertEqual(submit_response.status_code, 200)
+        revision.refresh_from_db()
+        self.assertEqual(revision.proposed_data["meaning"], "Corrected meaning")
+        self.assertEqual(revision.status, EntryRevision.Status.PENDING)
+
+    def test_create_and_update_draft_allow_one_field(self):
+        self.client.force_login(self.contributor)
+
+        create_response = self.client.post(
+            "/api/dictionary/revisions/create",
+            data={"term": "partial-headword"},
+        )
+
+        self.assertEqual(create_response.status_code, 201)
+        revision_id = create_response.json()["revision_id"]
+        self.assertEqual(create_response.json()["term"], "Partial-headword")
+
+        update_response = self.client.post(
+            f"/api/dictionary/revisions/{revision_id}",
+            data={"meaning": "partial meaning"},
+        )
+
+        self.assertEqual(update_response.status_code, 200)
+        self.assertEqual(update_response.json()["meaning"], "Partial meaning")
+
+        submit_response = self.client.post(f"/api/dictionary/revisions/{revision_id}/submit")
+        self.assertEqual(submit_response.status_code, 400)
+
+    def test_create_draft_normalizes_dictionary_text_case(self):
+        self.client.force_login(self.contributor)
+
+        response = self.client.post(
+            "/api/dictionary/revisions/create",
+            data={
+                "term": "aMUNG",
+                "meaning": "fish from Basco",
+                "example_sentence": "mangu ka",
+                "example_translation": "how are you",
+            },
+        )
+
+        self.assertEqual(response.status_code, 201)
+        proposed = response.json()["proposed_data"]
+        self.assertEqual(proposed["term"], "Amung")
+        self.assertEqual(proposed["meaning"], "Fish from Basco")
+        self.assertEqual(proposed["example_sentence"], "Mangu ka.")
+        self.assertEqual(proposed["example_translation"], "How are you.")
+
+    def test_create_draft_rejects_empty_payload(self):
+        self.client.force_login(self.contributor)
+
+        response = self.client.post("/api/dictionary/revisions/create", data={})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("at least one field", response.json()["detail"])
 
     def test_start_revision_from_existing_entry_uses_snapshot(self):
         self.client.force_login(self.other_user)
 
-        response = self.client.post(
-            f"/api/dictionary/entries/{self.entry.id}/revisions/start"
-        )
+        response = self.client.post(f"/api/dictionary/entries/{self.entry.id}/revisions/start")
 
         self.assertEqual(response.status_code, 201)
         payload = response.json()
@@ -790,6 +968,49 @@ class DictionaryRevisionApiTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("meaning is required", response.json()["detail"])
+
+    def test_submit_requires_english_translation_for_ivatan_example(self):
+        revision = EntryRevision.objects.create(
+            contributor=self.contributor,
+            proposed_data={
+                "term": "example-gap",
+                "meaning": "has an untranslated example",
+                "term_source_is_self_knowledge": True,
+                "example_sentence": "Mangu ka?",
+                "example_translation": "",
+            },
+            status=EntryRevision.Status.DRAFT,
+        )
+        self.client.force_login(self.contributor)
+
+        response = self.client.post(f"/api/dictionary/revisions/{revision.id}/submit")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("English translation is required", response.json()["detail"])
+
+    def test_submit_requires_english_translation_for_variant_ivatan_example(self):
+        revision = EntryRevision.objects.create(
+            contributor=self.contributor,
+            proposed_data={
+                "term": "variant-example-gap",
+                "meaning": "has an untranslated variant example",
+                "term_source_is_self_knowledge": True,
+                "variants": [
+                    {
+                        "term": "variant form",
+                        "example_sentence": "Mangu ka?",
+                        "example_translation": "",
+                    }
+                ],
+            },
+            status=EntryRevision.Status.DRAFT,
+        )
+        self.client.force_login(self.contributor)
+
+        response = self.client.post(f"/api/dictionary/revisions/{revision.id}/submit")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Variant 1", response.json()["detail"])
 
     def test_submit_requires_audio_source_when_audio_not_self_recorded(self):
         revision = EntryRevision.objects.create(
@@ -860,8 +1081,13 @@ class DictionaryRevisionApiTests(TestCase):
             },
         )
 
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("headword source is required", response.json()["detail"])
+        self.assertEqual(response.status_code, 201)
+        revision_id = response.json()["revision_id"]
+
+        submit_response = self.client.post(f"/api/dictionary/revisions/{revision_id}/submit")
+
+        self.assertEqual(submit_response.status_code, 400)
+        self.assertIn("headword source is required", submit_response.json()["detail"])
 
     def test_user_cannot_update_someone_elses_revision(self):
         revision = EntryRevision.objects.create(
@@ -907,8 +1133,39 @@ class DictionaryRevisionApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.json()["variants"][0]["term"], "variant-term")
+        self.assertEqual(response.json()["variants"][0]["term"], "Variant-term")
         self.assertEqual(response.json()["variants"][0]["variant_type"], "Isamurong")
+
+    def test_create_revision_preserves_variant_context_fields(self):
+        self.client.force_login(self.contributor)
+
+        response = self.client.post(
+            "/api/dictionary/revisions/create",
+            data={
+                "term": "main-term",
+                "meaning": "main meaning",
+                "term_source_is_self_knowledge": "true",
+                "variants": (
+                    '[{"term": "old-term", "variant_type": "Old / Historical Form", '
+                    '"pronunciation_text": "old pronunciation", '
+                    '"usage_notes": "Used by older speakers.", '
+                    '"example_sentence": "Old sample.", '
+                    '"example_translation": "Old sample translation.", '
+                    '"historical_note": "Remembered in Basco, pre-war, rarely used now."}]'
+                ),
+            },
+        )
+
+        self.assertEqual(response.status_code, 201)
+        variant = response.json()["variants"][0]
+        self.assertEqual(variant["variant_type"], "Old / Historical Form")
+        self.assertEqual(variant["usage_notes"], "Used by older speakers.")
+        self.assertEqual(variant["example_sentence"], "Old sample.")
+        self.assertEqual(variant["example_translation"], "Old sample translation.")
+        self.assertEqual(
+            variant["historical_note"],
+            "Remembered in Basco, pre-war, rarely used now.",
+        )
 
     def test_create_revision_accepts_variant_audio_upload(self):
         self.client.force_login(self.contributor)

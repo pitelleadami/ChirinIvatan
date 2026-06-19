@@ -10,14 +10,15 @@ Model roles:
 """
 
 import uuid
+
 from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
-
 # ============================================
 # ENTRY STATUS ENUM
 # ============================================
+
 
 class EntryStatus(models.TextChoices):
     # Entry-level state machine values.
@@ -33,6 +34,7 @@ class EntryStatus(models.TextChoices):
 # ============================================
 # VARIANT GROUP
 # ============================================
+
 
 class VariantGroup(models.Model):
     """
@@ -59,6 +61,7 @@ class VariantGroup(models.Model):
 # ============================================
 # ENTRY (LIVE PUBLIC OBJECT)
 # ============================================
+
 
 class Entry(models.Model):
     """
@@ -91,6 +94,7 @@ class Entry(models.Model):
     photo = models.ImageField(upload_to="dictionary/photos/", null=True, blank=True)
     photo_source = models.TextField(blank=True)
     photo_source_is_contributor_owned = models.BooleanField(default=False)
+    photo_license = models.CharField(max_length=255, blank=True, default="")
 
     english_synonym = models.CharField(max_length=255, blank=True)
     ivatan_synonym = models.CharField(max_length=255, blank=True)
@@ -113,6 +117,7 @@ class Entry(models.Model):
 
     audio_source = models.TextField(blank=True)
     audio_source_is_self_recorded = models.BooleanField(default=False)
+    audio_license = models.CharField(max_length=255, blank=True, default="")
 
     variant_type = models.CharField(max_length=100, blank=True)
 
@@ -205,6 +210,7 @@ class Entry(models.Model):
 # ENTRY REVISION (SUBMISSION OBJECT)
 # ============================================
 
+
 class EntryRevision(models.Model):
     """
     All submissions (new terms, edits, media changes, variant additions)
@@ -237,9 +243,7 @@ class EntryRevision(models.Model):
         related_name="entry_revisions",
     )
 
-    proposed_data = models.JSONField(
-        help_text="Full proposed snapshot of entry fields."
-    )
+    proposed_data = models.JSONField(help_text="Full proposed snapshot of entry fields.")
 
     status = models.CharField(
         max_length=20,

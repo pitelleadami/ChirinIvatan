@@ -1,0 +1,29 @@
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+extend-exclude = '''
+(
+  /migrations/
+  | /media/
+  | /staticfiles/
+)
+'''
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = [
+  "*/migrations/*",
+  "backend/media",
+  "backend/staticfiles",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+ignore = [
+  "B904",
+  "E501",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["backend", "dictionary", "folklore", "reviews", "users"]

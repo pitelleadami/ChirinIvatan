@@ -10,6 +10,7 @@ Last updated: 2026-06-06
 Chirin Ivatan gamification is recognition-based cultural stewardship, not point gaming.
 
 Core goals:
+
 - Sustain contribution and review participation
 - Preserve dignity and cultural framing
 - Prevent count inflation and abuse
@@ -21,6 +22,7 @@ Core goals:
 ## 2) Backend Status Snapshot
 
 Implemented now:
+
 - deterministic level and badge computation
 - backend-only authority for recognition
 - cached aggregate user stats
@@ -31,6 +33,7 @@ Implemented now:
 - lazy month rollover with monthly municipality winners
 
 Validated now:
+
 - migrations clean
 - `manage.py check` clean
 - full test suite pass (`users reviews dictionary folklore`)
@@ -40,18 +43,19 @@ Validated now:
 ## 3) Contributor Level Track (Combined Approved Contributions)
 
 Combined includes:
+
 - approved dictionary originals
 - approved folklore originals
 - approved revisions (unique rules remain enforced by existing contribution logic)
 
-| Level | Title | Threshold |
-|---|---|---|
-| 0 | Community Learner | 0 |
-| 1 | Language Contributor | 5 |
-| 2 | Cultural Steward | 20 |
-| 3 | Heritage Guardian | 50 |
-| 4 | Ivatan Archivist | 100 |
-| 5 | Heritage Champion | 200 |
+| Level | Title                | Threshold |
+| ----- | -------------------- | --------- |
+| 0     | Community Learner    | 0         |
+| 1     | Language Contributor | 5         |
+| 2     | Cultural Steward     | 20        |
+| 3     | Heritage Guardian    | 50        |
+| 4     | Ivatan Archivist     | 100       |
+| 5     | Heritage Champion    | 200       |
 
 ---
 
@@ -59,18 +63,19 @@ Combined includes:
 
 Completed reviews include approve/reject decisions.
 
-| Level | Title | Threshold |
-|---|---|---|
-| 0 | Reviewer | 0 |
-| 1 | Cultural Validator | 10 |
-| 2 | Heritage Moderator | 50 |
-| 3 | Senior Cultural Consultant | 100 |
+| Level | Title                      | Threshold |
+| ----- | -------------------------- | --------- |
+| 0     | Reviewer                   | 0         |
+| 1     | Cultural Validator         | 10        |
+| 2     | Heritage Moderator         | 50        |
+| 3     | Senior Cultural Consultant | 100       |
 
 ---
 
 ## 5) Badge Rules
 
 ### 5.1 Dictionary badges (original dictionary approvals only)
+
 - Word Contributor (5)
 - Lexicon Builder (20)
 - Language Preserver (50)
@@ -78,6 +83,7 @@ Completed reviews include approve/reject decisions.
 - Master Lexicon Keeper (200)
 
 ### 5.2 Folklore badges (original folklore approvals only)
+
 - Story Contributor (1)
 - Folklore Weaver (3)
 - Tradition Keeper (5)
@@ -85,6 +91,7 @@ Completed reviews include approve/reject decisions.
 - Oral Historian (50)
 
 ### 5.3 Quality badge
+
 - Accuracy Champion
 - Threshold: combined approved contributions >= 20
 - Constraint: historical rejection count <= configured max (default 0)
@@ -104,6 +111,7 @@ Completed reviews include approve/reject decisions.
 ## 7) Data Models (Current)
 
 Implemented models:
+
 - `UserContributionStats`
 - `MunicipalityStats`
 - `RecognitionEvent`
@@ -112,6 +120,7 @@ Implemented models:
 - `MunicipalityMonthlyWinner`
 
 Existing models used as sources:
+
 - `ContributionEvent`
 - review models
 - revision models
@@ -121,11 +130,13 @@ Existing models used as sources:
 ## 8) Municipality System
 
 Supports:
+
 - all-time municipality totals
 - monthly municipality totals
 - monthly winner materialization (dictionary, folklore, combined)
 
 Month handling:
+
 - lazy rollover using runtime state and month keys
 - winner event auto-generated once per month/metric
 
@@ -134,24 +145,31 @@ Month handling:
 ## 9) API Surface (Current)
 
 1. Profile payload includes gamification block:
+
 - `GET /api/users/<username>`
 
 2. Stewardship/gamification detail:
+
 - `GET /api/users/<username>/cultural-stewardship`
 
 3. User recognition feed:
+
 - `GET /api/users/<username>/recognition-events`
 
 4. Global leaderboard dimensions:
+
 - `GET /leaderboard/global?metric=dictionary|folklore|combined&period=all_time|monthly`
 
 5. Municipality leaderboard dimensions:
+
 - `GET /leaderboard/municipality?municipality=<name>&metric=dictionary|folklore|combined&period=all_time|monthly`
 
 6. Municipality totals list:
+
 - `GET /leaderboard/municipalities`
 
 7. Monthly municipality winners:
+
 - `GET /leaderboard/municipality-winners?month=YYYY-MM`
 
 ---
@@ -159,6 +177,7 @@ Month handling:
 ## 10) Admin Controls
 
 Admin-editable via `GamificationConfig`:
+
 - contributor level thresholds/titles
 - reviewer level thresholds/titles
 - dictionary badge thresholds
@@ -166,6 +185,7 @@ Admin-editable via `GamificationConfig`:
 - quality badge threshold/max rejection rule
 
 Fallback behavior:
+
 - if config missing or malformed, safe defaults are used.
 
 ---
@@ -173,6 +193,7 @@ Fallback behavior:
 ## 11) Operational Command
 
 Backfill/recompute for all users:
+
 - `python3 manage.py recompute_gamification`
 
 Recommended after migration or threshold changes.

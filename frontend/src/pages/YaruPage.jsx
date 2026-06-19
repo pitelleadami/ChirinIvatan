@@ -22,12 +22,16 @@ function memberInitials(member) {
 }
 
 function partnerInitials(name) {
-  const words = String(name || 'Partner')
+  const words = String(name || 'Supporting Organization')
     .split(/\s+/)
     .filter(Boolean)
   return words.length > 1
-    ? words.slice(0, 2).map((word) => word[0]).join('').toUpperCase()
-    : (words[0] || 'Partner').slice(0, 2).toUpperCase()
+    ? words
+        .slice(0, 2)
+        .map((word) => word[0])
+        .join('')
+        .toUpperCase()
+    : (words[0] || 'Supporting Organization').slice(0, 2).toUpperCase()
 }
 
 function YaruMemberCard({ member }) {
@@ -38,7 +42,14 @@ function YaruMemberCard({ member }) {
       onClick={() => navigate(`${ROUTES.profileView}?username=${encodeURIComponent(member.username)}`)}
     >
       {member.profile_photo ? (
-        <img className="yaru-avatar" src={member.profile_photo} alt="" />
+        <img
+          className="yaru-avatar"
+          src={member.profile_photo}
+          alt=""
+          width="82"
+          height="82"
+          decoding="async"
+        />
       ) : (
         <span className="yaru-avatar-placeholder" aria-hidden="true">
           {memberInitials(member)}
@@ -57,9 +68,9 @@ export default function YaruPage({ currentUser = {} }) {
   const groups = currentUser.groups || []
   const isAdminUser = currentUser.is_superuser || groups.includes('Admin')
   const canShowJoinNow = !currentUser.is_authenticated || isAdminUser
-  const visiblePartnerDetails = content.partner_details.filter((partner) => (
-    partner?.name || partner?.logo_url || partner?.url
-  ))
+  const visiblePartnerDetails = content.partner_details.filter(
+    (partner) => partner?.name || partner?.logo_url || partner?.url,
+  )
 
   useEffect(() => {
     let ignore = false
@@ -169,7 +180,9 @@ export default function YaruPage({ currentUser = {} }) {
                 <div className="yaru-chart-row" key={group.key}>
                   <h3>{group.title}</h3>
                   <div className="yaru-row-cards yaru-empty-row">
-                    <p className="yaru-empty-note">Profiles will appear here once stewards choose to be listed publicly.</p>
+                    <p className="yaru-empty-note">
+                      Profiles will appear here once stewards choose to be listed publicly.
+                    </p>
                     {group.key === 'contributors' && canShowJoinNow && (
                       <button
                         type="button"
@@ -189,7 +202,7 @@ export default function YaruPage({ currentUser = {} }) {
 
       {visiblePartnerDetails.length > 0 && (
         <section className="yaru-partner-section">
-          <h2>Partners</h2>
+          <h2>Supporting Organizations</h2>
           <div className="partner-grid">
             {visiblePartnerDetails.map((partner, index) => (
               <a
@@ -206,7 +219,7 @@ export default function YaruPage({ currentUser = {} }) {
                     {partnerInitials(partner.name)}
                   </span>
                 )}
-                <span className="partner-agency-name">{partner.name || 'Partner'}</span>
+                <span className="partner-agency-name">{partner.name || 'Supporting Organization'}</span>
               </a>
             ))}
           </div>

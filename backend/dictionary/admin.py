@@ -85,9 +85,9 @@ class EntryRevisionAdminForm(forms.ModelForm):
                 "ivatan_synonym": entry.ivatan_synonym,
                 "english_antonym": entry.english_antonym,
                 "ivatan_antonym": entry.ivatan_antonym,
-                "audio_pronunciation": entry.audio_pronunciation.name
-                if entry.audio_pronunciation
-                else "",
+                "audio_pronunciation": (
+                    entry.audio_pronunciation.name if entry.audio_pronunciation else ""
+                ),
                 "photo": entry.photo.name if entry.photo else "",
             }
 

@@ -11,46 +11,68 @@ business rules live in services (role_onboarding.py, recognition.py),
 while this file handles request parsing and response shaping.
 """
 
+import json
+import sys
+import urllib.parse
+import urllib.request
+import uuid
+
 from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model, login, logout
 from django.contrib.auth.forms import PasswordResetForm
 from django.contrib.auth.models import Group
 from django.contrib.auth.password_validation import validate_password
-from django.core.validators import validate_email
-from django.core.files.storage import default_storage
-from django.core.mail import send_mail
 from django.core import signing
-from django.http import Http404, JsonResponse
+from django.core.exceptions import ValidationError
+from django.core.files.storage import default_storage
+from django.core.mail import EmailMultiAlternatives, send_mail
+from django.core.validators import validate_email
 from django.db import transaction
 from django.db.models import Max, Q, Sum
+from django.http import Http404, JsonResponse
+from django.shortcuts import redirect
+from django.template.loader import render_to_string
 from django.utils import timezone
 from django.utils.text import slugify
-from django.views.decorators.csrf import ensure_csrf_cookie
+from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_http_methods
-import json
-import random
-import uuid
 
 from dictionary.models import Entry, EntryRevision, EntryStatus
 from folklore.models import FolkloreEntry, FolkloreRevision
 from reviews.models import FolkloreReview, Review, ReviewAdminOverride
+from users.leaderboard_filters import leaderboard_participant_q
 from users.models import (
     AdminAccountAction,
     ContributionEvent,
     MunicipalityMonthlyWinner,
+    Notification,
     RecognitionEvent,
     RoleApplication,
     RoleApplicationDecision,
     RoleInvitation,
     RoleOnboardingRecord,
     SiteContentSettings,
-    UserSessionEvent,
     UserContributionStats,
     UserProfile,
+    UserSessionEvent,
 )
-from users.leaderboard_filters import leaderboard_participant_q
+from users.names import (
+    display_name as formatted_display_name,
+)
+from users.names import (
+    normalize_affiliation_text,
+    normalize_person_name,
+    normalize_username,
+)
+from users.notifications import notify
+from users.recognition import (
+    build_gamification_profile_payload,
+    leaderboard_rows,
+    recompute_user_gamification,
+)
 from users.role_onboarding import (
     accept_email_role_invitation,
+    activate_role_for_approved_application,
     can_screen_roles,
     create_consultant_profile,
     create_email_role_invitation,
@@ -62,19 +84,63 @@ from users.role_onboarding import (
     is_reviewer,
     update_managed_consultant_profile,
 )
-from users.recognition import (
-    build_gamification_profile_payload,
-    leaderboard_rows,
-    recompute_user_gamification,
-)
-from django.core.exceptions import ValidationError
-
 
 User = get_user_model()
 ADMIN_ACTIVITY_LIMIT = 500
 ADMIN_OVERVIEW_RECENT_LIMIT = 5
-CAPTCHA_MAX_AGE_SECONDS = 600
-CAPTCHA_SALT = "chirin-role-onboarding-captcha"
+TURNSTILE_TEST_TOKEN = "test-turnstile-token"
+
+
+def _serialize_notification(notification):
+    return {
+        "id": str(notification.id),
+        "notif_type": notification.notif_type,
+        "message": notification.message,
+        "target_url": notification.target_url,
+        "is_read": notification.is_read,
+        "created_at": notification.created_at.isoformat(),
+    }
+
+
+@require_GET
+def notifications_list_view(request):
+    auth_error = _require_authenticated(request)
+    if auth_error:
+        return auth_error
+
+    queryset = Notification.objects.filter(user=request.user)
+    rows = list(queryset[:40])
+    return JsonResponse(
+        {
+            "unread_count": queryset.filter(is_read=False).count(),
+            "notifications": [_serialize_notification(row) for row in rows],
+        }
+    )
+
+
+@require_http_methods(["POST"])
+def notifications_mark_read_view(request):
+    auth_error = _require_authenticated(request)
+    if auth_error:
+        return auth_error
+
+    payload = {}
+    if request.body and request.content_type == "application/json":
+        payload, parse_error = _parse_json_body(request)
+        if parse_error:
+            return parse_error
+
+    queryset = Notification.objects.filter(user=request.user, is_read=False)
+    ids = payload.get("ids")
+    if ids:
+        queryset = queryset.filter(id__in=ids)
+
+    marked = queryset.update(is_read=True)
+    return JsonResponse({"marked": marked})
+
+
+EMAIL_CHANGE_SALT = "chirin-profile-email-change"
+EMAIL_CHANGE_MAX_AGE_SECONDS = 3 * 24 * 60 * 60
 DEFAULT_SITE_CONTENT = {
     "brand_name": "Chirin Ivatan",
     "brand_logo_url": "",
@@ -150,7 +216,7 @@ DEFAULT_SITE_CONTENT = {
             "institutions, researchers, and heritage organizations."
         ),
         (
-            "To support long-term sustainability, the project welcomes partnerships and collaborative "
+            "To support long-term sustainability, the project welcomes supporting organizations and collaborative "
             "support for continued innovation, maintenance, and capacity building. Chirin Ivatan also "
             "aims to become a mobile-friendly and multilingual platform that connects Ivatans across "
             "the islands and the global diaspora."
@@ -162,9 +228,9 @@ DEFAULT_SITE_CONTENT = {
         ),
     ],
     "about_final_quote": (
-        "\"Chirin Ivatan is more than just a project. It is a shared act of remembrance built "
+        '"Chirin Ivatan is more than just a project. It is a shared act of remembrance built '
         "in the spirit of Yaru, where every word remembered and every story told helps keep "
-        "the Ivatan heritage alive.\""
+        'the Ivatan heritage alive."'
     ),
     "yaru_heading": "The Digital Yaru",
     "yaru_intro_paragraphs": [
@@ -173,7 +239,7 @@ DEFAULT_SITE_CONTENT = {
             "strength and shared purpose."
         ),
         (
-            "The project welcomes contributors, reviewers, consultants, and partners who can lend "
+            "The project welcomes contributors, reviewers, consultants, and supporting organizations who can lend "
             "their hands, voices, and knowledge. Whether you are a student, storyteller, educator, "
             "or simply someone who cares to help, you are invited to be part of this digital yaru."
         ),
@@ -215,8 +281,7 @@ DEFAULT_SITE_CONTENT = {
     ],
     "maintenance_enabled": False,
     "maintenance_message": (
-        "Chirin Ivatan is temporarily paused for maintenance. "
-        "Please check back soon."
+        "Chirin Ivatan is temporarily paused for maintenance. " "Please check back soon."
     ),
 }
 
@@ -263,17 +328,20 @@ def _serialize_auth_user(user, request=None):
         and str(profile.municipality or "").strip()
     )
     return {
-        "username": user.username,
+        "username": normalize_username(user.username),
         "is_authenticated": user.is_authenticated,
         "is_staff": user.is_staff,
         "is_superuser": user.is_superuser,
         "groups": groups,
-        "first_name": user.first_name,
-        "last_name": user.last_name,
+        "first_name": normalize_person_name(user.first_name),
+        "last_name": normalize_person_name(user.last_name),
+        "name_extension": profile.name_extension if profile else "",
         "post_nominals": profile.post_nominals if profile else "",
         "municipality": profile.municipality if profile else "",
         "profile_photo": photo_url,
         "profile_complete": profile_complete,
+        "onboarding_prompt_pending": (profile.onboarding_prompt_pending if profile else False),
+        "onboarding_prompt_dismissed": (profile.onboarding_prompt_dismissed if profile else False),
         "include_in_leaderboard": profile.include_in_leaderboard if profile else True,
         "show_on_yaru_chart": profile.show_on_yaru_chart if profile else True,
         "show_live_contributions": profile.show_live_contributions if profile else True,
@@ -286,20 +354,23 @@ def _serialize_private_profile(request, user):
     if profile.profile_photo:
         photo_url = request.build_absolute_uri(profile.profile_photo.url)
     return {
-        "username": user.username,
-        "first_name": user.first_name,
-        "last_name": user.last_name,
+        "username": normalize_username(user.username),
+        "first_name": normalize_person_name(user.first_name),
+        "last_name": normalize_person_name(user.last_name),
+        "name_extension": profile.name_extension,
         "email": user.email,
         "post_nominals": profile.post_nominals,
         "municipality": profile.municipality,
-        "affiliation": profile.affiliation,
-        "occupation": profile.occupation,
-        "cultural_affiliations": profile.cultural_affiliations or [],
-        "other_affiliations": profile.other_affiliations or [],
+        "affiliation": normalize_affiliation_text(profile.affiliation),
+        "occupation": normalize_affiliation_text(profile.occupation),
+        "cultural_affiliations": _profile_cultural_affiliations(profile),
+        "other_affiliations": _profile_other_affiliations(profile),
         "bio": profile.bio,
         "include_in_leaderboard": profile.include_in_leaderboard,
         "show_on_yaru_chart": profile.show_on_yaru_chart,
         "show_live_contributions": profile.show_live_contributions,
+        "onboarding_prompt_pending": profile.onboarding_prompt_pending,
+        "onboarding_prompt_dismissed": profile.onboarding_prompt_dismissed,
         "profile_photo": photo_url,
     }
 
@@ -322,11 +393,39 @@ def _sanitize_affiliation_rows(value, first_key, second_key):
     for row in rows:
         if not isinstance(row, dict):
             continue
-        first_value = str(row.get(first_key, "")).strip()
-        second_value = str(row.get(second_key, "")).strip()
+        first_value = normalize_affiliation_text(row.get(first_key, ""))
+        second_value = normalize_affiliation_text(row.get(second_key, ""))
         if first_value or second_value:
             cleaned.append({first_key: first_value, second_key: second_value})
     return cleaned
+
+
+def _normalized_affiliation_rows(rows, first_key, second_key):
+    cleaned = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        first_value = normalize_affiliation_text(row.get(first_key, ""))
+        second_value = normalize_affiliation_text(row.get(second_key, ""))
+        if first_value or second_value:
+            cleaned.append({first_key: first_value, second_key: second_value})
+    return cleaned
+
+
+def _profile_cultural_affiliations(profile):
+    return _normalized_affiliation_rows(
+        profile.cultural_affiliations if profile else [],
+        "role",
+        "organization",
+    )
+
+
+def _profile_other_affiliations(profile):
+    return _normalized_affiliation_rows(
+        profile.other_affiliations if profile else [],
+        "designation",
+        "institution",
+    )
 
 
 def _sanitize_paragraphs(value):
@@ -380,7 +479,9 @@ def _sanitize_faq_sections(value):
         roles = section.get("roles", [])
         if not isinstance(roles, list):
             roles = []
-        roles = [str(role).strip().lower() for role in roles if str(role).strip().lower() in valid_roles]
+        roles = [
+            str(role).strip().lower() for role in roles if str(role).strip().lower() in valid_roles
+        ]
         if not roles:
             roles = ["visitor", "contributor", "reviewer", "admin"]
 
@@ -419,7 +520,14 @@ def _sanitize_faq_sections(value):
 
 def _site_content_payload(row=None):
     if not row:
-        return {**DEFAULT_SITE_CONTENT, "is_default": True, "updated_at": None, "updated_by": ""}
+        return {
+            **DEFAULT_SITE_CONTENT,
+            "beta_locked": True,
+            "maintenance_enabled": False,
+            "is_default": True,
+            "updated_at": None,
+            "updated_by": "",
+        }
     return {
         "brand_name": row.brand_name or DEFAULT_SITE_CONTENT["brand_name"],
         "brand_logo_url": row.brand_logo_url,
@@ -439,15 +547,20 @@ def _site_content_payload(row=None):
         "support_statements": row.support_statements or [],
         "partner_details": row.partner_details or [],
         "faq_sections": row.faq_sections or [],
-        "privacy_notice_paragraphs": row.privacy_notice_paragraphs or DEFAULT_SITE_CONTENT["privacy_notice_paragraphs"],
+        "privacy_notice_paragraphs": row.privacy_notice_paragraphs
+        or DEFAULT_SITE_CONTENT["privacy_notice_paragraphs"],
         "media_upload_policy_paragraphs": (
-            row.media_upload_policy_paragraphs or DEFAULT_SITE_CONTENT["media_upload_policy_paragraphs"]
+            row.media_upload_policy_paragraphs
+            or DEFAULT_SITE_CONTENT["media_upload_policy_paragraphs"]
         ),
         "contributor_agreement_paragraphs": (
-            row.contributor_agreement_paragraphs or DEFAULT_SITE_CONTENT["contributor_agreement_paragraphs"]
+            row.contributor_agreement_paragraphs
+            or DEFAULT_SITE_CONTENT["contributor_agreement_paragraphs"]
         ),
+        "beta_locked": bool(row.beta_locked),
         "maintenance_enabled": bool(row.maintenance_enabled),
-        "maintenance_message": row.maintenance_message or DEFAULT_SITE_CONTENT["maintenance_message"],
+        "maintenance_message": row.maintenance_message
+        or DEFAULT_SITE_CONTENT["maintenance_message"],
         "is_default": False,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         "updated_by": row.updated_by.username if row.updated_by else "",
@@ -483,9 +596,7 @@ def _public_role_label(user):
 
 
 def _display_name_with_post_nominals(user, profile):
-    full_name = user.get_full_name().strip() or user.username
-    post_nominals = str(profile.post_nominals if profile else "").strip()
-    return f"{full_name}, {post_nominals}" if post_nominals else full_name
+    return formatted_display_name(user, profile)
 
 
 def _profile_public_affiliation(profile):
@@ -527,7 +638,10 @@ def _serialize_role_application(request, application):
         "",
     )
     screening_status = application.status
-    if application.status == RoleApplication.Status.PENDING and current_user_decision == RoleApplicationDecision.Decision.APPROVE:
+    if (
+        application.status == RoleApplication.Status.PENDING
+        and current_user_decision == RoleApplicationDecision.Decision.APPROVE
+    ):
         screening_status = "awaiting_quorum"
     return {
         "application_id": str(application.id),
@@ -540,16 +654,17 @@ def _serialize_role_application(request, application):
         "updated_at": application.updated_at.isoformat(),
         "decided_at": application.decided_at.isoformat() if application.decided_at else None,
         "applicant": {
-            "username": applicant.username,
-            "first_name": applicant.first_name,
-            "last_name": applicant.last_name,
+            "username": normalize_username(applicant.username),
+            "first_name": normalize_person_name(applicant.first_name),
+            "last_name": normalize_person_name(applicant.last_name),
+            "name_extension": profile.name_extension if profile else "",
             "email": applicant.email,
             "post_nominals": profile.post_nominals if profile else "",
             "municipality": profile.municipality if profile else "",
-            "affiliation": profile.affiliation if profile else "",
-            "occupation": profile.occupation if profile else "",
-            "cultural_affiliations": profile.cultural_affiliations if profile else [],
-            "other_affiliations": profile.other_affiliations if profile else [],
+            "affiliation": normalize_affiliation_text(profile.affiliation) if profile else "",
+            "occupation": normalize_affiliation_text(profile.occupation) if profile else "",
+            "cultural_affiliations": _profile_cultural_affiliations(profile),
+            "other_affiliations": _profile_other_affiliations(profile),
             "groups": groups,
             "profile_photo": (
                 request.build_absolute_uri(profile.profile_photo.url)
@@ -566,9 +681,7 @@ def _serialize_role_application(request, application):
                 "decider_role": (
                     "admin"
                     if is_admin(row.decided_by)
-                    else "reviewer"
-                    if is_reviewer(row.decided_by)
-                    else "user"
+                    else "reviewer" if is_reviewer(row.decided_by) else "user"
                 ),
                 "created_at": row.created_at.isoformat(),
             }
@@ -580,7 +693,11 @@ def _serialize_role_application(request, application):
 def _serialize_public_role_application_status(application):
     approval_count = application.decisions.filter(decision="approve").count()
     if application.status == RoleApplication.Status.APPROVED:
-        public_status = "approved_final"
+        public_status = (
+            "approved_pending_activation"
+            if not application.applicant.has_usable_password()
+            else "approved_final"
+        )
     elif application.status == RoleApplication.Status.REJECTED:
         public_status = "rejected"
     elif approval_count:
@@ -619,11 +736,13 @@ def _serialize_admin_user(request, user):
 
     return {
         "user_id": user.id,
-        "username": user.username,
-        "first_name": user.first_name,
-        "last_name": user.last_name,
+        "username": normalize_username(user.username),
+        "first_name": normalize_person_name(user.first_name),
+        "last_name": normalize_person_name(user.last_name),
+        "name_extension": profile.name_extension if profile else "",
         "email": user.email,
         "is_active": user.is_active,
+        "has_usable_password": user.has_usable_password(),
         "is_staff": user.is_staff,
         "is_superuser": user.is_superuser,
         "date_joined": user.date_joined.isoformat(),
@@ -631,11 +750,12 @@ def _serialize_admin_user(request, user):
         "groups": groups,
         "profile": {
             "municipality": profile.municipality if profile else "",
+            "name_extension": profile.name_extension if profile else "",
             "post_nominals": profile.post_nominals if profile else "",
-            "affiliation": profile.affiliation if profile else "",
-            "occupation": profile.occupation if profile else "",
-            "cultural_affiliations": profile.cultural_affiliations if profile else [],
-            "other_affiliations": profile.other_affiliations if profile else [],
+            "affiliation": normalize_affiliation_text(profile.affiliation) if profile else "",
+            "occupation": normalize_affiliation_text(profile.occupation) if profile else "",
+            "cultural_affiliations": _profile_cultural_affiliations(profile),
+            "other_affiliations": _profile_other_affiliations(profile),
             "bio": profile.bio if profile else "",
             "include_in_leaderboard": profile.include_in_leaderboard if profile else True,
             "show_on_yaru_chart": profile.show_on_yaru_chart if profile else True,
@@ -657,7 +777,8 @@ def _serialize_admin_user(request, user):
                 "accountability_notes": record.accountability_notes,
                 "invited_by": record.invited_by.username if record.invited_by else "",
                 "approved_by_reviewers": [
-                    reviewer.username for reviewer in record.approved_by_reviewers.order_by("username")
+                    reviewer.username
+                    for reviewer in record.approved_by_reviewers.order_by("username")
                 ],
                 "approved_by_admins": [
                     admin.username for admin in record.approved_by_admins.order_by("username")
@@ -666,12 +787,16 @@ def _serialize_admin_user(request, user):
             }
             for record in onboarding_records
         ],
-        "pending_applications": user.role_applications.filter(status=RoleApplication.Status.PENDING).count(),
+        "pending_applications": user.role_applications.filter(
+            status=RoleApplication.Status.PENDING
+        ).count(),
         "pending_account_flags": _serialize_account_flags(user),
     }
 
 
-def _activity_target_label(*, dictionary_entry=None, folklore_entry=None, entry_revision=None, folklore_revision=None):
+def _activity_target_label(
+    *, dictionary_entry=None, folklore_entry=None, entry_revision=None, folklore_revision=None
+):
     if dictionary_entry:
         return dictionary_entry.term or str(dictionary_entry.id)
     if folklore_entry:
@@ -699,11 +824,14 @@ def _serialize_admin_activity_row(row):
 
 
 def _active_admin_count():
-    return User.objects.filter(
-        is_active=True,
-    ).filter(
-        Q(is_superuser=True) | Q(groups__name="Admin")
-    ).distinct().count()
+    return (
+        User.objects.filter(
+            is_active=True,
+        )
+        .filter(Q(is_superuser=True) | Q(groups__name="Admin"))
+        .distinct()
+        .count()
+    )
 
 
 def _admin_account_action_payload(row):
@@ -782,6 +910,9 @@ def _apply_role_revocation(user, role):
     if not removed:
         raise ValidationError(f"This user does not currently have {role} group access.")
     user.groups.remove(*groups)
+    if role == "reviewer":
+        contributor_group, _ = Group.objects.get_or_create(name="Contributor")
+        user.groups.add(contributor_group)
     if role == "admin" and user.is_staff and not user.is_superuser:
         user.is_staff = False
         user.save(update_fields=["is_staff"])
@@ -811,12 +942,20 @@ def _revision_media_labels(revision):
 
 def _serialize_admin_submission_row(revision, contribution_type):
     proposed_data = revision.proposed_data or {}
-    title = proposed_data.get("term") if contribution_type == "dictionary" else proposed_data.get("title")
+    title = (
+        proposed_data.get("term")
+        if contribution_type == "dictionary"
+        else proposed_data.get("title")
+    )
     contributor = getattr(revision, "contributor", None)
     return {
         "id": str(revision.id),
+        "revision_id": str(revision.id),
+        "entry_id": str(revision.entry_id) if revision.entry_id else "",
         "type": contribution_type,
         "title": title or str(revision.id),
+        "term": proposed_data.get("term", ""),
+        "proposed_data": proposed_data,
         "status": revision.status,
         "contributor": contributor.username if contributor else "",
         "created_at": revision.created_at.isoformat() if revision.created_at else None,
@@ -843,30 +982,36 @@ def _serialize_admin_override_row(row):
 
 
 def _admin_overview_payload(request):
-    site_content = SiteContentSettings.objects.filter(key="default").select_related("updated_by").first()
+    site_content = (
+        SiteContentSettings.objects.filter(key="default").select_related("updated_by").first()
+    )
     dictionary_pending = EntryRevision.objects.filter(status=EntryRevision.Status.PENDING).count()
-    folklore_pending = FolkloreRevision.objects.filter(status=FolkloreRevision.Status.PENDING).count()
+    folklore_pending = FolkloreRevision.objects.filter(
+        status=FolkloreRevision.Status.PENDING
+    ).count()
     dictionary_re_review = Entry.objects.filter(status=EntryStatus.APPROVED_UNDER_REVIEW).count()
-    folklore_re_review = FolkloreEntry.objects.filter(status=FolkloreEntry.Status.APPROVED_UNDER_REVIEW).count()
+    folklore_re_review = FolkloreEntry.objects.filter(
+        status=FolkloreEntry.Status.APPROVED_UNDER_REVIEW
+    ).count()
 
     latest_dictionary = [
         _serialize_admin_submission_row(row, "dictionary")
-        for row in EntryRevision.objects.select_related("contributor")
-        .order_by("-created_at")[:ADMIN_OVERVIEW_RECENT_LIMIT]
+        for row in EntryRevision.objects.select_related("contributor").order_by("-created_at")[
+            :ADMIN_OVERVIEW_RECENT_LIMIT
+        ]
     ]
     latest_folklore = [
         _serialize_admin_submission_row(row, "folklore")
-        for row in FolkloreRevision.objects.select_related("contributor")
-        .order_by("-created_at")[:ADMIN_OVERVIEW_RECENT_LIMIT]
+        for row in FolkloreRevision.objects.select_related("contributor").order_by("-created_at")[
+            :ADMIN_OVERVIEW_RECENT_LIMIT
+        ]
     ]
     latest_submissions = sorted(
         latest_dictionary + latest_folklore,
         key=lambda row: row.get("created_at") or "",
         reverse=True,
     )[:ADMIN_OVERVIEW_RECENT_LIMIT]
-    latest_media_uploads = [
-        row for row in latest_submissions if row.get("media")
-    ][:ADMIN_OVERVIEW_RECENT_LIMIT]
+    latest_media_uploads = [row for row in latest_submissions if row.get("media")][:4]
 
     recent_overrides = [
         _serialize_admin_override_row(row)
@@ -880,8 +1025,12 @@ def _admin_overview_payload(request):
     return {
         "counts": {
             "users": User.objects.filter(is_active=True).count(),
-            "contributors": User.objects.filter(is_active=True, groups__name="Contributor").distinct().count(),
-            "reviewers": User.objects.filter(is_active=True, groups__name="Reviewer").distinct().count(),
+            "contributors": User.objects.filter(is_active=True, groups__name="Contributor")
+            .distinct()
+            .count(),
+            "reviewers": User.objects.filter(is_active=True, groups__name="Reviewer")
+            .distinct()
+            .count(),
             "approved_entries": (
                 Entry.objects.filter(status=EntryStatus.APPROVED).count()
                 + FolkloreEntry.objects.filter(status=FolkloreEntry.Status.APPROVED).count()
@@ -889,7 +1038,9 @@ def _admin_overview_payload(request):
             "pending_entries": dictionary_pending + folklore_pending,
         },
         "queues": {
-            "pending_role_applications": RoleApplication.objects.filter(status=RoleApplication.Status.PENDING).count(),
+            "pending_role_applications": RoleApplication.objects.filter(
+                status=RoleApplication.Status.PENDING
+            ).count(),
             "pending_dictionary_reviews": dictionary_pending,
             "pending_folklore_reviews": folklore_pending,
             "entries_under_re_review": dictionary_re_review + folklore_re_review,
@@ -902,13 +1053,20 @@ def _admin_overview_payload(request):
         },
         "maintenance": {
             "enabled": bool(site_content.maintenance_enabled) if site_content else False,
+            "beta_locked": bool(site_content.beta_locked) if site_content else True,
             "message": (
                 site_content.maintenance_message
                 if site_content and site_content.maintenance_message
                 else DEFAULT_SITE_CONTENT["maintenance_message"]
             ),
-            "updated_at": site_content.updated_at.isoformat() if site_content and site_content.updated_at else None,
-            "updated_by": site_content.updated_by.username if site_content and site_content.updated_by else "",
+            "updated_at": (
+                site_content.updated_at.isoformat()
+                if site_content and site_content.updated_at
+                else None
+            ),
+            "updated_by": (
+                site_content.updated_by.username if site_content and site_content.updated_by else ""
+            ),
         },
         "latest_submissions": latest_submissions,
         "latest_media_uploads": latest_media_uploads,
@@ -919,7 +1077,9 @@ def _admin_overview_payload(request):
 def _admin_user_activity_rows(user):
     rows = []
 
-    for event in UserSessionEvent.objects.filter(user=user).order_by("-created_at")[:ADMIN_ACTIVITY_LIMIT]:
+    for event in UserSessionEvent.objects.filter(user=user).order_by("-created_at")[
+        :ADMIN_ACTIVITY_LIMIT
+    ]:
         rows.append(
             {
                 "id": f"session-{event.id}",
@@ -938,17 +1098,21 @@ def _admin_user_activity_rows(user):
         .select_related("dictionary_entry", "folklore_entry", "entry_revision", "folklore_revision")
         .order_by("-awarded_at")[:ADMIN_ACTIVITY_LIMIT]
     ):
-        target_type = "dictionary" if event.dictionary_entry_id or event.entry_revision_id else "folklore"
+        target_type = (
+            "dictionary" if event.dictionary_entry_id or event.entry_revision_id else "folklore"
+        )
         target_id = (
             str(event.dictionary_entry_id)
             if event.dictionary_entry_id
-            else str(event.folklore_entry_id)
-            if event.folklore_entry_id
-            else str(event.entry_revision_id)
-            if event.entry_revision_id
-            else str(event.folklore_revision_id)
-            if event.folklore_revision_id
-            else ""
+            else (
+                str(event.folklore_entry_id)
+                if event.folklore_entry_id
+                else (
+                    str(event.entry_revision_id)
+                    if event.entry_revision_id
+                    else str(event.folklore_revision_id) if event.folklore_revision_id else ""
+                )
+            )
         )
         rows.append(
             {
@@ -1113,11 +1277,6 @@ def auth_csrf_view(request):
 
 
 @require_GET
-def captcha_challenge_view(request):
-    return JsonResponse(_captcha_challenge_payload())
-
-
-@require_GET
 def auth_me_view(request):
     if not request.user.is_authenticated:
         return JsonResponse({"is_authenticated": False})
@@ -1140,20 +1299,83 @@ def auth_login_view(request):
     if error:
         return error
 
-    username = (payload.get("username") or "").strip()
+    username = normalize_username(payload.get("username"))
     password = payload.get("password") or ""
     if not username or not password:
         return JsonResponse({"detail": "Username and password are required."}, status=400)
 
-    user = authenticate(request, username=username, password=password)
+    stored_user = User.objects.filter(username__iexact=username).first()
+    auth_username = stored_user.username if stored_user else username
+    user = authenticate(request, username=auth_username, password=password)
     if user is None:
-        return JsonResponse({"detail": "Invalid username or password."}, status=400)
+        return JsonResponse(
+            {
+                "detail": (
+                    "Invalid username or password. Usernames are lowercase handles; "
+                    "if your username used capital letters before, try it in lowercase."
+                )
+            },
+            status=400,
+        )
     if not user.is_active:
         return JsonResponse({"detail": "This account is inactive."}, status=403)
 
     login(request, user)
     _record_session_event(request, user, UserSessionEvent.Type.LOGIN)
     return JsonResponse(_serialize_auth_user(user, request=request))
+
+
+@require_http_methods(["POST"])
+def dismiss_profile_onboarding_view(request):
+    auth_error = _require_authenticated(request)
+    if auth_error:
+        return auth_error
+
+    profile, _ = UserProfile.objects.get_or_create(user=request.user)
+    profile.onboarding_prompt_pending = False
+    profile.onboarding_prompt_dismissed = True
+    profile.save(update_fields=["onboarding_prompt_pending", "onboarding_prompt_dismissed"])
+    return JsonResponse({"dismissed": True})
+
+
+@require_http_methods(["POST"])
+def auth_password_reset_request_view(request):
+    payload, error = _parse_json_body(request)
+    if error:
+        return error
+
+    email = str(payload.get("email", "") or "").strip()
+    if not email:
+        return JsonResponse({"detail": "Email address is required."}, status=400)
+
+    form = PasswordResetForm({"email": email})
+    if not form.is_valid():
+        return JsonResponse({"detail": "Enter a valid email address."}, status=400)
+
+    matching_user = User.objects.filter(email__iexact=email, is_active=True).first()
+    if not matching_user:
+        return JsonResponse({"detail": "No active account uses that email address."}, status=404)
+
+    try:
+        _validate_captcha_payload(payload)
+    except ValidationError as exc:
+        return JsonResponse({"detail": _validation_detail(exc)}, status=400)
+
+    try:
+        form.save(
+            request=request,
+            use_https=request.is_secure(),
+            from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
+            email_template_name="registration/password_reset_email.html",
+            subject_template_name="registration/password_reset_subject.txt",
+        )
+    except Exception as exc:
+        return JsonResponse(
+            {"detail": ("Password reset email could not be sent. " f"{type(exc).__name__}: {exc}")},
+            status=500,
+        )
+
+    return JsonResponse({"detail": "A password reset link has been sent to that email address."})
 
 
 @require_http_methods(["POST"])
@@ -1186,17 +1408,47 @@ def my_profile_view(request):
             return error
         uploaded_photo = None
 
+    pending_email = ""
     try:
-        for field in ["first_name", "last_name", "email"]:
+        if "username" in payload:
+            username = _clean_username(payload.get("username"))
+            username_taken = (
+                User.objects.filter(username__iexact=username).exclude(id=user.id).exists()
+            )
+            if username_taken:
+                raise ValidationError("That username is already taken.")
+            user.username = username
+
+        for field in ["first_name", "last_name"]:
             if field in payload:
-                value = _clean_email(payload.get(field), required=False) if field == "email" else (payload.get(field) or "").strip()
-                setattr(user, field, value)
+                setattr(user, field, normalize_person_name(payload.get(field)))
+
+        if "email" in payload:
+            email = _clean_email(payload.get("email"), required=False)
+            if email and email != (user.email or "").strip().lower():
+                existing_email = (
+                    User.objects.filter(email__iexact=email).exclude(id=user.id).exists()
+                )
+                if existing_email:
+                    raise ValidationError("That email address is already used by another account.")
+                _send_email_change_verification(request, user, email)
+                pending_email = email
+            elif not email:
+                raise ValidationError("Email address is required.")
     except ValidationError as exc:
         return JsonResponse({"detail": _validation_detail(exc)}, status=400)
+    except Exception as exc:
+        return JsonResponse(
+            {"detail": ("Email verification could not be sent. " f"{type(exc).__name__}: {exc}")},
+            status=500,
+        )
 
-    for field in ["post_nominals", "municipality", "affiliation", "occupation", "bio"]:
+    for field in ["name_extension", "post_nominals", "municipality", "bio"]:
         if field in payload:
             setattr(profile, field, (payload.get(field) or "").strip())
+    for field in ["affiliation", "occupation"]:
+        if field in payload:
+            setattr(profile, field, normalize_affiliation_text(payload.get(field)))
 
     received_structured_affiliations = False
     if "cultural_affiliations" in payload:
@@ -1224,10 +1476,43 @@ def my_profile_view(request):
     if uploaded_photo:
         profile.profile_photo = uploaded_photo
 
-    user.save(update_fields=["first_name", "last_name", "email"])
+    profile.onboarding_prompt_pending = False
+    profile.onboarding_prompt_dismissed = True
+    user.save(update_fields=["username", "first_name", "last_name"])
     profile.save()
     recompute_user_gamification(user)
-    return JsonResponse(_serialize_private_profile(request, user))
+    response_payload = _serialize_private_profile(request, user)
+    if pending_email:
+        response_payload["pending_email"] = pending_email
+        response_payload["email_change_pending"] = True
+        response_payload["detail"] = (
+            "Profile saved. Check your new email address to verify the change."
+        )
+    return JsonResponse(response_payload)
+
+
+@require_GET
+def verify_profile_email_view(request, token):
+    try:
+        payload = signing.loads(
+            token,
+            salt=EMAIL_CHANGE_SALT,
+            max_age=EMAIL_CHANGE_MAX_AGE_SECONDS,
+        )
+        user = User.objects.get(pk=payload.get("user_id"), is_active=True)
+        current_email = str(payload.get("current_email") or "").strip().lower()
+        new_email = _clean_email(payload.get("new_email"), required=True)
+        if current_email and (user.email or "").strip().lower() != current_email:
+            raise ValidationError("This email verification link is no longer valid.")
+        if User.objects.filter(email__iexact=new_email).exclude(id=user.id).exists():
+            raise ValidationError("That email address is already used by another account.")
+        user.email = new_email
+        user.save(update_fields=["email"])
+        return redirect(f"{settings.FRONTEND_BASE_URL}/profile-edit?email_verified=1")
+    except signing.SignatureExpired:
+        return redirect(f"{settings.FRONTEND_BASE_URL}/profile-edit?email_verified=expired")
+    except Exception:
+        return redirect(f"{settings.FRONTEND_BASE_URL}/profile-edit?email_verified=invalid")
 
 
 @require_http_methods(["POST", "PATCH"])
@@ -1320,8 +1605,7 @@ def site_content_view(request):
 
     row, _ = SiteContentSettings.objects.get_or_create(key="default")
     row.brand_name = (
-        str(payload.get("brand_name", "")).strip()
-        or DEFAULT_SITE_CONTENT["brand_name"]
+        str(payload.get("brand_name", "")).strip() or DEFAULT_SITE_CONTENT["brand_name"]
     )
     row.brand_logo_url = str(payload.get("brand_logo_url", "")).strip()
     row.landing_intro_text = (
@@ -1333,8 +1617,7 @@ def site_content_view(request):
         or DEFAULT_SITE_CONTENT["landing_body_text"]
     )
     row.footer_left_text = (
-        str(payload.get("footer_left_text", "")).strip()
-        or DEFAULT_SITE_CONTENT["footer_left_text"]
+        str(payload.get("footer_left_text", "")).strip() or DEFAULT_SITE_CONTENT["footer_left_text"]
     )
     row.footer_center_text = (
         str(payload.get("footer_center_text", "")).strip()
@@ -1347,7 +1630,9 @@ def site_content_view(request):
     row.about_heading = str(payload.get("about_heading", "")).strip()
     row.about_intro_paragraphs = _sanitize_paragraphs(payload.get("about_intro_paragraphs", []))
     row.about_body_paragraphs = _sanitize_paragraphs(payload.get("about_body_paragraphs", []))
-    row.about_rationale_paragraphs = _sanitize_paragraphs(payload.get("about_rationale_paragraphs", []))
+    row.about_rationale_paragraphs = _sanitize_paragraphs(
+        payload.get("about_rationale_paragraphs", [])
+    )
     row.about_future_paragraphs = _sanitize_paragraphs(payload.get("about_future_paragraphs", []))
     row.about_final_quote = str(payload.get("about_final_quote", "")).strip()
     row.yaru_heading = str(payload.get("yaru_heading", "")).strip()
@@ -1355,9 +1640,15 @@ def site_content_view(request):
     row.support_statements = _sanitize_support_statements(payload.get("support_statements", []))
     row.partner_details = _sanitize_partner_details(payload.get("partner_details", []))
     row.faq_sections = _sanitize_faq_sections(payload.get("faq_sections", []))
-    row.privacy_notice_paragraphs = _sanitize_paragraphs(payload.get("privacy_notice_paragraphs", []))
-    row.media_upload_policy_paragraphs = _sanitize_paragraphs(payload.get("media_upload_policy_paragraphs", []))
-    row.contributor_agreement_paragraphs = _sanitize_paragraphs(payload.get("contributor_agreement_paragraphs", []))
+    row.privacy_notice_paragraphs = _sanitize_paragraphs(
+        payload.get("privacy_notice_paragraphs", [])
+    )
+    row.media_upload_policy_paragraphs = _sanitize_paragraphs(
+        payload.get("media_upload_policy_paragraphs", [])
+    )
+    row.contributor_agreement_paragraphs = _sanitize_paragraphs(
+        payload.get("contributor_agreement_paragraphs", [])
+    )
     row.maintenance_enabled = _payload_bool(payload.get("maintenance_enabled"))
     row.maintenance_message = (
         str(payload.get("maintenance_message", "")).strip()
@@ -1450,14 +1741,139 @@ def site_content_brand_media_view(request):
     )
 
 
+# ─── Beta gate ────────────────────────────────────────────────────────────────
+
+_BETA_COOKIE = "chirin_beta"
+_BETA_COOKIE_MAX_AGE = 60 * 60 * 24 * 30  # 30 days
+_BETA_SALT = "chirin-beta-gate"
+
+
+def _make_beta_token():
+    return signing.dumps("ok", salt=_BETA_SALT)
+
+
+def _valid_beta_token(token):
+    try:
+        signing.loads(token, salt=_BETA_SALT, max_age=_BETA_COOKIE_MAX_AGE)
+        return True
+    except Exception:
+        return False
+
+
+_CRAWLER_UA_FRAGMENTS = (
+    "applebot",
+    "facebookexternalhit",
+    "facebot",
+    "twitterbot",
+    "linkedinbot",
+    "whatsapp",
+    "slackbot-linkexpanding",
+    "telegrambot",
+    "discordbot",
+    "iframely",
+)
+
+
+@require_http_methods(["GET"])
+def beta_check_view(request):
+    """Called by Nginx auth_request — returns 200 (allow) or 401 (gate)."""
+    ua = request.META.get("HTTP_USER_AGENT", "").lower()
+    if any(f in ua for f in _CRAWLER_UA_FRAGMENTS):
+        return JsonResponse({}, status=200)
+    row = SiteContentSettings.objects.filter(key="default").first()
+    if row and not row.beta_locked:
+        return JsonResponse({}, status=200)
+    token = request.COOKIES.get(_BETA_COOKIE, "")
+    if _valid_beta_token(token):
+        return JsonResponse({}, status=200)
+    return JsonResponse({}, status=401)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def beta_login_view(request):
+    """Validates beta password and sets a signed cookie."""
+    beta_password = getattr(settings, "BETA_PASSWORD", "")
+    if not beta_password:
+        # No password configured — open access
+        response = JsonResponse({"ok": True})
+        response.set_cookie(
+            _BETA_COOKIE,
+            _make_beta_token(),
+            max_age=_BETA_COOKIE_MAX_AGE,
+            secure=True,
+            httponly=True,
+            samesite="Lax",
+        )
+        return response
+    try:
+        payload = json.loads(request.body)
+    except Exception:
+        return JsonResponse({"error": "Invalid request."}, status=400)
+    password = str(payload.get("password", "")).strip()
+    if not password or password != beta_password:
+        return JsonResponse({"error": "Wrong password."}, status=401)
+    response = JsonResponse({"ok": True})
+    response.set_cookie(
+        _BETA_COOKIE,
+        _make_beta_token(),
+        max_age=_BETA_COOKIE_MAX_AGE,
+        secure=True,
+        httponly=True,
+        samesite="Lax",
+    )
+    return response
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+def beta_logout_view(request):
+    """Clears the beta cookie (used when the admin removes the gate)."""
+    response = JsonResponse({"ok": True})
+    response.delete_cookie(_BETA_COOKIE)
+    return response
+
+
+# ─── Admin: site mode (open / beta / maintenance) ─────────────────────────────
+
+
+@require_http_methods(["POST"])
+def admin_maintenance_toggle_view(request):
+    """Set site mode: open | beta | maintenance."""
+    if not request.user.is_authenticated or not is_admin(request.user):
+        return JsonResponse({"detail": "Forbidden."}, status=403)
+    try:
+        payload = json.loads(request.body)
+    except Exception:
+        return JsonResponse({"detail": "Invalid JSON."}, status=400)
+    mode = str(payload.get("mode", "")).strip()
+    if mode not in ("open", "beta", "maintenance"):
+        return JsonResponse({"detail": "mode must be open, beta, or maintenance."}, status=400)
+    row, _ = SiteContentSettings.objects.get_or_create(key="default")
+    row.beta_locked = mode in ("beta", "maintenance")
+    row.maintenance_enabled = mode == "maintenance"
+    row.updated_by = request.user
+    row.save(update_fields=["beta_locked", "maintenance_enabled", "updated_by", "updated_at"])
+    return JsonResponse(
+        {
+            "mode": mode,
+            "beta_locked": row.beta_locked,
+            "maintenance_enabled": row.maintenance_enabled,
+        }
+    )
+
+
 @require_GET
 def yaru_members_view(request):
     rows = list(
         User.objects.filter(
             is_active=True,
+            password__isnull=False,
             profile__isnull=False,
             profile__show_on_yaru_chart=True,
         )
+        .exclude(password="")
+        .exclude(password__startswith="!")
         .filter(
             Q(is_superuser=True)
             | Q(groups__name__in=["Admin", "Consultant", "Reviewer", "Contributor"])
@@ -1469,11 +1885,7 @@ def yaru_members_view(request):
     )
 
     superusers = [user for user in rows if user.is_superuser]
-    admins = [
-        user
-        for user in rows
-        if any(group.name == "Admin" for group in user.groups.all())
-    ]
+    admins = [user for user in rows if any(group.name == "Admin" for group in user.groups.all())]
     project_candidates = superusers or admins
     project_proponent_id = (
         sorted(project_candidates, key=lambda user: (user.date_joined, user.id))[0].id
@@ -1505,7 +1917,7 @@ def yaru_members_view(request):
             photo_url = request.build_absolute_uri(profile.profile_photo.url)
         payload.append(
             {
-                "username": user.username,
+                "username": normalize_username(user.username),
                 "display_name": _display_name_with_post_nominals(user, profile),
                 "role": role_label,
                 "org_chart_group": org_chart_group,
@@ -1590,41 +2002,41 @@ def _parse_json_body(request):
         return None, JsonResponse({"detail": "Invalid JSON body."}, status=400)
 
 
-def _captcha_challenge_payload():
-    first = random.randint(2, 9)
-    second = random.randint(2, 9)
-    token = signing.dumps(
-        {"answer": first + second},
-        salt=CAPTCHA_SALT,
-    )
-    return {
-        "question": f"What is {first} + {second}?",
-        "token": token,
-        "expires_in_seconds": CAPTCHA_MAX_AGE_SECONDS,
-    }
-
-
 def _validate_captcha_payload(payload):
-    token = str(payload.get("captcha_token", "") or "").strip()
-    answer = str(payload.get("captcha_answer", "") or "").strip()
-    if not token or not answer:
-        raise ValidationError("CAPTCHA answer is required.")
+    turnstile_token = str(payload.get("turnstile_token", "") or "").strip()
+    if not turnstile_token:
+        raise ValidationError("Turnstile verification is required.")
+    _validate_turnstile_token(turnstile_token)
+
+
+def _validate_turnstile_token(token):
+    if token == TURNSTILE_TEST_TOKEN and (settings.DEBUG or "test" in sys.argv):
+        return
+
+    secret = str(getattr(settings, "TURNSTILE_SECRET_KEY", "") or "").strip()
+    if not secret:
+        raise ValidationError("Turnstile is not configured.")
+
+    encoded = urllib.parse.urlencode(
+        {
+            "secret": secret,
+            "response": token,
+        }
+    ).encode()
+    request = urllib.request.Request(
+        "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+        data=encoded,
+        method="POST",
+    )
+
     try:
-        signed = signing.loads(
-            token,
-            salt=CAPTCHA_SALT,
-            max_age=CAPTCHA_MAX_AGE_SECONDS,
-        )
-    except signing.SignatureExpired:
-        raise ValidationError("CAPTCHA expired. Please try again.")
-    except signing.BadSignature:
-        raise ValidationError("CAPTCHA could not be verified. Please try again.")
-    try:
-        parsed_answer = int(answer)
-    except ValueError:
-        raise ValidationError("CAPTCHA answer must be a number.")
-    if parsed_answer != int(signed.get("answer")):
-        raise ValidationError("CAPTCHA answer is incorrect.")
+        with urllib.request.urlopen(request, timeout=10) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except Exception as exc:
+        raise ValidationError("Turnstile could not be verified. Please try again.") from exc
+
+    if not result.get("success"):
+        raise ValidationError("Turnstile verification failed. Please try again.")
 
 
 def _payload_bool(value):
@@ -1648,6 +2060,83 @@ def _validation_detail(exc):
     return "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc)
 
 
+def _actor_display_name(user):
+    if not user:
+        return ""
+    profile = _safe_profile(user)
+    return _display_name_with_post_nominals(user, profile) or normalize_username(user.username)
+
+
+def _serialize_actor_link(user):
+    if not user:
+        return None
+    return {
+        "username": normalize_username(user.username),
+        "display_name": _actor_display_name(user),
+    }
+
+
+def _serialize_onboarding_accountability(record):
+    if not record:
+        return None
+    reviewers = [
+        _serialize_actor_link(user) for user in record.approved_by_reviewers.order_by("username")
+    ]
+    admins = [
+        _serialize_actor_link(user) for user in record.approved_by_admins.order_by("username")
+    ]
+    return {
+        "role": record.role,
+        "method": record.method,
+        "label": format_accountability_label(record),
+        "invited_by": _serialize_actor_link(record.invited_by),
+        "approved_by": [actor for actor in [*reviewers, *admins] if actor],
+    }
+
+
+def _clean_username(value):
+    username = normalize_username(value)
+    if not username:
+        raise ValidationError("Username is required.")
+    username_field = User._meta.get_field("username")
+    max_username_length = getattr(username_field, "max_length", 150) or 150
+    if len(username) > max_username_length:
+        raise ValidationError(f"Username must be at most {max_username_length} characters.")
+    username_field.clean(username, None)
+    return username
+
+
+def _email_change_verify_url(user, email):
+    token = signing.dumps(
+        {
+            "user_id": user.pk,
+            "current_email": user.email,
+            "new_email": email,
+        },
+        salt=EMAIL_CHANGE_SALT,
+    )
+    return f"{settings.FRONTEND_BASE_URL}/api/profile/email/verify/{token}"
+
+
+def _send_email_change_verification(request, user, email):
+    verify_url = _email_change_verify_url(user, email)
+    subject = "Verify your new Chirin Ivatan email address"
+    message = (
+        "We received a request to use this email address for your Chirin Ivatan account.\n\n"
+        "Open this link to verify the new address:\n"
+        f"{verify_url}\n\n"
+        "If you did not request this change, you can ignore this email. "
+        "Your current account email will remain unchanged."
+    )
+    send_mail(
+        subject,
+        message,
+        getattr(settings, "DEFAULT_FROM_EMAIL", None),
+        [email],
+        fail_silently=False,
+    )
+
+
 def _invitation_accept_url(invitation):
     return f"{settings.FRONTEND_BASE_URL}/roles?invite={invitation.token}"
 
@@ -1658,18 +2147,101 @@ def _send_role_invitation_email(invitation):
         "reviewer": "Reviewer",
     }.get(invitation.role, "Contributor")
     accept_url = _invitation_accept_url(invitation)
+
+    inviter = invitation.invited_by
+    inviter_name = formatted_display_name(inviter, _safe_profile(inviter))
+
     subject = f"You're invited to join Chirin Ivatan as {role_name}"
-    message = (
-        f"You have been invited to join Chirin Ivatan as {role_name}.\n\n"
+    text_message = (
+        "Chirin Ivatan\n\n"
+        f"You have been invited by {inviter_name} to join Chirin Ivatan as {role_name}.\n\n"
+        f"{inviter_name} personally vouched for you, with the belief that you are the right person for this role "
+        f"and that your contribution will matter to the preservation of Ivatan language and culture.\n\n"
         "Use this secure invitation link to create your login and activate your access:\n"
         f"{accept_url}\n\n"
-        "This invitation bypasses the public role approval process because it was sent by an administrator."
+        "After activation, a short welcome guide will show you where to complete your profile and begin.\n\n"
+        "This invitation bypasses the public role approval process because it was sent by an authorized steward."
+    )
+    role_summary = {
+        "consultant": "Share cultural guidance and help validate sensitive knowledge.",
+        "reviewer": "Review submitted entries and help maintain the archive's quality.",
+    }.get(
+        invitation.role,
+        "Document Ivatan words, stories, traditions, and community knowledge.",
+    )
+    html_message = render_to_string(
+        "users/emails/role_invitation.html",
+        {
+            "accept_url": accept_url,
+            "inviter_name": inviter_name,
+            "role_name": role_name,
+            "role_summary": role_summary,
+            "recipient_email": invitation.email,
+        },
+    )
+    email = EmailMultiAlternatives(
+        subject=subject,
+        body=text_message,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        to=[invitation.email],
+    )
+    email.attach_alternative(html_message, "text/html")
+    email.send(fail_silently=False)
+
+
+def _role_application_access_url(application):
+    query = urllib.parse.urlencode(
+        {
+            "status_email": application.applicant.email,
+            "application": str(application.id),
+        }
+    )
+    return f"{settings.FRONTEND_BASE_URL}/roles?{query}"
+
+
+def _actor_display_name(user):
+    return formatted_display_name(user, _safe_profile(user))
+
+
+def _send_role_application_approval_email(application, onboarding_record):
+    role_name = {
+        RoleApplication.TargetRole.REVIEWER: "Reviewer",
+        RoleApplication.TargetRole.CONTRIBUTOR: "Contributor",
+    }.get(application.target_role, "Contributor")
+    applicant = application.applicant
+    recipient = applicant.email
+    if not recipient:
+        return
+
+    approvers = [
+        _actor_display_name(user)
+        for user in onboarding_record.approved_by_reviewers.order_by(
+            "first_name", "last_name", "username"
+        )
+    ] + [
+        _actor_display_name(user)
+        for user in onboarding_record.approved_by_admins.order_by(
+            "first_name", "last_name", "username"
+        )
+    ]
+    approver_text = ", ".join(approvers) if approvers else "the Chirin Ivatan review team"
+    access_url = _role_application_access_url(application)
+    applicant_name = formatted_display_name(applicant, _safe_profile(applicant)) or "there"
+
+    subject = f"Your Chirin Ivatan {role_name} application was approved"
+    message = (
+        f"Hi {applicant_name},\n\n"
+        f"Your application to join Chirin Ivatan as {role_name} has been approved.\n\n"
+        f"Approved by: {approver_text}\n\n"
+        "Open this link to activate your account or check your approved application:\n"
+        f"{access_url}\n\n"
+        "After activating your login, please update your profile so the community can recognize your contribution properly."
     )
     send_mail(
         subject,
         message,
         settings.DEFAULT_FROM_EMAIL,
-        [invitation.email],
+        [recipient],
         fail_silently=False,
     )
 
@@ -1685,12 +2257,13 @@ def _unique_username(seed):
 
 
 def _applicant_from_public_payload(payload):
-    first_name = str(payload.get("first_name", "")).strip()
-    last_name = str(payload.get("last_name", "")).strip()
+    first_name = normalize_person_name(payload.get("first_name", ""))
+    last_name = normalize_person_name(payload.get("last_name", ""))
+    name_extension = str(payload.get("name_extension", "")).strip()
     email = _clean_email(payload.get("email", ""))
     municipality = str(payload.get("municipality", "")).strip()
-    affiliation = str(payload.get("affiliation", "")).strip()
-    occupation = str(payload.get("occupation", "")).strip()
+    affiliation = normalize_affiliation_text(payload.get("affiliation", ""))
+    occupation = normalize_affiliation_text(payload.get("occupation", ""))
     bio = str(payload.get("bio", "")).strip()
     cultural_affiliations = _sanitize_affiliation_rows(
         payload.get("cultural_affiliations", []),
@@ -1709,7 +2282,9 @@ def _applicant_from_public_payload(payload):
     user = User.objects.filter(email__iexact=email).first()
     created = False
     if user is None:
-        username_seed = payload.get("username") or email.split("@")[0] or f"{first_name}.{last_name}"
+        username_seed = (
+            payload.get("username") or email.split("@")[0] or f"{first_name}.{last_name}"
+        )
         user = User.objects.create_user(
             username=_unique_username(username_seed),
             email=email,
@@ -1731,6 +2306,7 @@ def _applicant_from_public_payload(payload):
             user.save(update_fields=update_fields)
 
     profile, _ = UserProfile.objects.get_or_create(user=user)
+    profile.name_extension = name_extension
     profile.municipality = municipality
     profile.affiliation = affiliation
     profile.occupation = occupation
@@ -1748,7 +2324,7 @@ def _applicant_from_public_payload(payload):
 
 @require_GET
 def public_user_profile_view(request, username):
-    user = User.objects.filter(username=username).first()
+    user = User.objects.filter(username__iexact=username).first()
     if not user:
         raise Http404("User not found.")
 
@@ -1799,24 +2375,16 @@ def public_user_profile_view(request, username):
     revisions_count = revised_entries.count()
 
     # Project formula: total = dictionary_terms + folklore_entries + revisions.
-    total_contributions = (
-        dictionary_terms_count + folklore_entries_count + revisions_count
-    )
+    total_contributions = dictionary_terms_count + folklore_entries_count + revisions_count
 
     contributor_record = (
-        user.role_onboarding_records.filter(role="contributor")
-        .order_by("-created_at")
-        .first()
+        user.role_onboarding_records.filter(role="contributor").order_by("-created_at").first()
     )
     reviewer_record = (
-        user.role_onboarding_records.filter(role="reviewer")
-        .order_by("-created_at")
-        .first()
+        user.role_onboarding_records.filter(role="reviewer").order_by("-created_at").first()
     )
     consultant_record = (
-        user.role_onboarding_records.filter(role="consultant")
-        .order_by("-created_at")
-        .first()
+        user.role_onboarding_records.filter(role="consultant").order_by("-created_at").first()
     )
 
     gamification = build_gamification_profile_payload(user)
@@ -1829,17 +2397,18 @@ def public_user_profile_view(request, username):
     return JsonResponse(
         {
             "header": {
-                "username": user.username,
-                "first_name": user.first_name,
-                "last_name": user.last_name,
+                "username": normalize_username(user.username),
+                "first_name": normalize_person_name(user.first_name),
+                "last_name": normalize_person_name(user.last_name),
+                "name_extension": profile.name_extension if profile else "",
                 "post_nominals": profile.post_nominals if profile else "",
                 "role": _public_role_label(user),
                 "profile_photo": photo_url,
                 "municipality": profile.municipality if profile else "",
-                "affiliation": profile.affiliation if profile else "",
-                "occupation": profile.occupation if profile else "",
-                "cultural_affiliations": profile.cultural_affiliations if profile else [],
-                "other_affiliations": profile.other_affiliations if profile else [],
+                "affiliation": normalize_affiliation_text(profile.affiliation) if profile else "",
+                "occupation": normalize_affiliation_text(profile.occupation) if profile else "",
+                "cultural_affiliations": _profile_cultural_affiliations(profile),
+                "other_affiliations": _profile_other_affiliations(profile),
                 "bio": profile.bio if profile else "",
                 "include_in_leaderboard": profile.include_in_leaderboard if profile else True,
                 "show_on_yaru_chart": profile.show_on_yaru_chart if profile else True,
@@ -1849,6 +2418,11 @@ def public_user_profile_view(request, username):
                     "contributor": format_accountability_label(contributor_record),
                     "reviewer": format_accountability_label(reviewer_record),
                     "consultant": format_accountability_label(consultant_record),
+                },
+                "onboarding_accountability_details": {
+                    "contributor": _serialize_onboarding_accountability(contributor_record),
+                    "reviewer": _serialize_onboarding_accountability(reviewer_record),
+                    "consultant": _serialize_onboarding_accountability(consultant_record),
                 },
             },
             "contribution_summary": {
@@ -2026,12 +2600,7 @@ def public_role_application_status_view(request):
         .order_by("-created_at")
     )
     return JsonResponse(
-        {
-            "rows": [
-                _serialize_public_role_application_status(application)
-                for application in rows
-            ]
-        }
+        {"rows": [_serialize_public_role_application_status(application) for application in rows]}
     )
 
 
@@ -2046,7 +2615,7 @@ def public_claim_role_access_view(request):
     except ValidationError as exc:
         return JsonResponse({"detail": _validation_detail(exc)}, status=400)
     application_id = str(payload.get("application_id", "")).strip()
-    username = str(payload.get("username", "")).strip()
+    username = normalize_username(payload.get("username", ""))
     password = str(payload.get("password", ""))
     password_confirm = str(payload.get("password_confirm", ""))
 
@@ -2084,12 +2653,12 @@ def public_claim_role_access_view(request):
                 status=404,
             )
 
-        approved_row_exists = RoleApplication.objects.filter(
+        approved_application = RoleApplication.objects.filter(
             id=application_id,
             applicant=user,
             status=RoleApplication.Status.APPROVED,
-        ).exists()
-        if not approved_row_exists:
+        ).first()
+        if not approved_application:
             return JsonResponse(
                 {"detail": "Approved application reference not found for this email."},
                 status=400,
@@ -2117,12 +2686,23 @@ def public_claim_role_access_view(request):
             return JsonResponse({"detail": "; ".join(exc.messages)}, status=400)
 
         user.set_password(password)
-        user.save(update_fields=["username", "password"])
+        user.is_active = True
+        user.save(update_fields=["username", "password", "is_active"])
+        activate_role_for_approved_application(approved_application)
+        profile, _ = UserProfile.objects.get_or_create(user=user)
+        profile.onboarding_prompt_pending = True
+        profile.onboarding_prompt_dismissed = False
+        profile.save(
+            update_fields=[
+                "onboarding_prompt_pending",
+                "onboarding_prompt_dismissed",
+            ]
+        )
 
     return JsonResponse(
         {
             "detail": "Credentials created. You can now log in.",
-            "username": user.username,
+            "username": normalize_username(user.username),
         },
         status=201,
     )
@@ -2148,9 +2728,7 @@ def my_role_applications_view(request):
                     "reviewer_reason": row["reviewer_reason"],
                     "status": row["status"],
                     "created_at": row["created_at"].isoformat(),
-                    "decided_at": (
-                        row["decided_at"].isoformat() if row["decided_at"] else None
-                    ),
+                    "decided_at": (row["decided_at"].isoformat() if row["decided_at"] else None),
                 }
                 for row in rows
             ]
@@ -2167,7 +2745,9 @@ def admin_role_applications_view(request):
         return JsonResponse({"detail": "Reviewer or admin access required."}, status=403)
 
     status = (request.GET.get("status") or "").strip().lower()
-    rows = RoleApplication.objects.select_related("applicant", "applicant__profile").prefetch_related(
+    rows = RoleApplication.objects.select_related(
+        "applicant", "applicant__profile"
+    ).prefetch_related(
         "applicant__groups",
         "decisions__decided_by",
     )
@@ -2225,6 +2805,7 @@ def admin_users_view(request):
             | Q(first_name__icontains=query)
             | Q(last_name__icontains=query)
             | Q(email__icontains=query)
+            | Q(profile__name_extension__icontains=query)
             | Q(profile__post_nominals__icontains=query)
             | Q(profile__municipality__icontains=query)
             | Q(profile__affiliation__icontains=query)
@@ -2236,10 +2817,7 @@ def admin_users_view(request):
             | Q(role_onboarding_records__role=RoleOnboardingRecord.Role.ADMIN)
         )
     elif group and group != "all":
-        rows = rows.filter(
-            Q(groups__name=group)
-            | Q(role_onboarding_records__role=group.lower())
-        )
+        rows = rows.filter(Q(groups__name=group) | Q(role_onboarding_records__role=group.lower()))
 
     rows = rows.order_by("username").distinct()
     return JsonResponse({"rows": [_serialize_admin_user(request, row) for row in rows]})
@@ -2277,6 +2855,7 @@ def admin_consultant_profile_view(request):
             created_by=request.user,
             first_name=payload.get("first_name", ""),
             last_name=payload.get("last_name", ""),
+            name_extension=payload.get("name_extension", ""),
             email=payload.get("email", ""),
             municipality=payload.get("municipality", ""),
             post_nominals=payload.get("post_nominals", ""),
@@ -2309,7 +2888,7 @@ def admin_consultant_profile_detail_view(request, username):
     if not is_admin(request.user):
         return JsonResponse({"detail": "Admin access required."}, status=403)
 
-    user = User.objects.filter(username=username).first()
+    user = User.objects.filter(username__iexact=username).first()
     if not user:
         return JsonResponse({"detail": "Consultant profile not found."}, status=404)
 
@@ -2338,6 +2917,7 @@ def admin_consultant_profile_detail_view(request, username):
             user=user,
             first_name=payload.get("first_name", ""),
             last_name=payload.get("last_name", ""),
+            name_extension=payload.get("name_extension", ""),
             email=payload.get("email", ""),
             municipality=payload.get("municipality", ""),
             post_nominals=payload.get("post_nominals", ""),
@@ -2376,7 +2956,7 @@ def admin_user_activity_view(request, username):
     rows = _admin_user_activity_rows(user)
     return JsonResponse(
         {
-            "username": user.username,
+            "username": normalize_username(user.username),
             "limit": ADMIN_ACTIVITY_LIMIT,
             "rows": [_serialize_admin_activity_row(row) for row in rows],
         }
@@ -2405,6 +2985,20 @@ def admin_user_status_view(request, username):
     notes = str(payload.get("notes", "") or "").strip()
     if not next_active and not notes:
         return JsonResponse({"detail": "Deactivation requires notes."}, status=400)
+    if (
+        next_active
+        and not target_user.has_usable_password()
+        and target_user.role_applications.filter(status=RoleApplication.Status.APPROVED).exists()
+    ):
+        return JsonResponse(
+            {
+                "detail": (
+                    "This approved account is awaiting activation. "
+                    "The applicant must create credentials from the approval link first."
+                )
+            },
+            status=400,
+        )
     if target_user.id == request.user.id and not next_active:
         return JsonResponse({"detail": "You cannot deactivate your own account."}, status=400)
     if not next_active and is_admin(target_user) and _active_admin_count() <= 1:
@@ -2442,9 +3036,13 @@ def admin_user_password_reset_view(request, username):
     if not target_user:
         return JsonResponse({"detail": "User not found."}, status=404)
     if not target_user.email:
-        return JsonResponse({"detail": "This account has no email address for password reset."}, status=400)
+        return JsonResponse(
+            {"detail": "This account has no email address for password reset."}, status=400
+        )
     if not target_user.is_active:
-        return JsonResponse({"detail": "Reactivate the account before sending a password reset."}, status=400)
+        return JsonResponse(
+            {"detail": "Reactivate the account before sending a password reset."}, status=400
+        )
 
     payload, parse_error = _parse_json_body(request)
     if parse_error:
@@ -2464,12 +3062,7 @@ def admin_user_password_reset_view(request, username):
         )
     except Exception as exc:
         return JsonResponse(
-            {
-                "detail": (
-                    "Password reset action was not sent. "
-                    f"{type(exc).__name__}: {exc}"
-                )
-            },
+            {"detail": ("Password reset action was not sent. " f"{type(exc).__name__}: {exc}")},
             status=500,
         )
 
@@ -2506,13 +3099,17 @@ def admin_user_revoke_role_view(request, username):
     if target_user.id == request.user.id and role == "admin":
         return JsonResponse({"detail": "You cannot revoke your own admin access."}, status=400)
 
-    before_groups = ", ".join(target_user.groups.order_by("name").values_list("name", flat=True)) or "none"
+    before_groups = (
+        ", ".join(target_user.groups.order_by("name").values_list("name", flat=True)) or "none"
+    )
     try:
         removed_groups = _apply_role_revocation(target_user, role)
     except ValidationError as exc:
         return JsonResponse({"detail": _validation_detail(exc)}, status=400)
     target_user.refresh_from_db()
-    after_groups = ", ".join(target_user.groups.order_by("name").values_list("name", flat=True)) or "none"
+    after_groups = (
+        ", ".join(target_user.groups.order_by("name").values_list("name", flat=True)) or "none"
+    )
     _record_admin_account_action(
         target_user=target_user,
         admin=request.user,
@@ -2549,7 +3146,9 @@ def admin_user_suspicious_flag_view(request, username):
     if not notes:
         return JsonResponse({"detail": "Suspicious-account flag requires notes."}, status=400)
     if _pending_account_flags_for_user(target_user).exists():
-        return JsonResponse({"detail": "This account already has a pending suspicious-account flag."}, status=400)
+        return JsonResponse(
+            {"detail": "This account already has a pending suspicious-account flag."}, status=400
+        )
 
     action = _record_admin_account_action(
         target_user=target_user,
@@ -2593,7 +3192,9 @@ def public_user_suspicious_flag_view(request, username):
     if not notes:
         return JsonResponse({"detail": "Suspicious-account flag requires a reason."}, status=400)
     if _pending_account_flags_for_user(target_user).exists():
-        return JsonResponse({"detail": "This account already has a pending suspicious-account flag."}, status=400)
+        return JsonResponse(
+            {"detail": "This account already has a pending suspicious-account flag."}, status=400
+        )
 
     action = _record_admin_account_action(
         target_user=target_user,
@@ -2704,14 +3305,26 @@ def decide_role_application_view(request, application_id):
         return JsonResponse({"detail": _validation_detail(exc)}, status=400)
 
     application.refresh_from_db()
+    if application.status in {
+        RoleApplication.Status.APPROVED,
+        RoleApplication.Status.REJECTED,
+    }:
+        notify(
+            user=application.applicant,
+            notif_type=Notification.Type.ROLE_DECIDED,
+            message=f"Your application for the {application.target_role} role has been {application.status}.",
+            target_url="/roles",
+        )
+    if onboarding_record:
+        transaction.on_commit(
+            lambda: _send_role_application_approval_email(application, onboarding_record)
+        )
     return JsonResponse(
         {
             "application_id": str(application.id),
             "application_status": application.status,
             "decision_id": str(decision_row.id),
-            "onboarding_record_id": (
-                str(onboarding_record.id) if onboarding_record else None
-            ),
+            "onboarding_record_id": (str(onboarding_record.id) if onboarding_record else None),
         }
     )
 
@@ -2729,11 +3342,11 @@ def invite_user_role_view(request):
     if parse_error:
         return parse_error
 
-    username = str(payload.get("username", "")).strip()
+    username = normalize_username(payload.get("username", ""))
     role = str(payload.get("role", "")).strip().lower()
     notes = str(payload.get("notes", "") or "")
 
-    invitee = User.objects.filter(username=username).first()
+    invitee = User.objects.filter(username__iexact=username).first()
     if not invitee:
         return JsonResponse({"detail": "Invitee user not found."}, status=404)
 
@@ -2800,8 +3413,9 @@ def admin_email_role_invitation_view(request):
     except ValidationError as exc:
         return JsonResponse({"detail": _validation_detail(exc)}, status=400)
     role = str(payload.get("role", "")).strip().lower()
-    first_name = str(payload.get("first_name", "") or "").strip()
-    last_name = str(payload.get("last_name", "") or "").strip()
+    first_name = normalize_person_name(payload.get("first_name", ""))
+    last_name = normalize_person_name(payload.get("last_name", ""))
+    name_extension = str(payload.get("name_extension", "") or "").strip()
     municipality = str(payload.get("municipality", "") or "").strip()
     notes = str(payload.get("notes", "") or "")
 
@@ -2812,6 +3426,7 @@ def admin_email_role_invitation_view(request):
             role=role,
             first_name=first_name,
             last_name=last_name,
+            name_extension=name_extension,
             municipality=municipality,
             notes=notes,
         )
@@ -2856,8 +3471,9 @@ def public_role_invitation_view(request, token):
             "role": invitation.role,
             "status": invitation.status,
             "expires_at": invitation.expires_at.isoformat() if invitation.expires_at else None,
-            "first_name": invitation.first_name,
-            "last_name": invitation.last_name,
+            "first_name": normalize_person_name(invitation.first_name),
+            "last_name": normalize_person_name(invitation.last_name),
+            "name_extension": invitation.name_extension,
             "municipality": invitation.municipality,
         }
     )
@@ -2869,15 +3485,23 @@ def public_accept_role_invitation_view(request, token):
     if parse_error:
         return parse_error
 
-    first_name = str(payload.get("first_name", "") or "").strip()
-    last_name = str(payload.get("last_name", "") or "").strip()
+    first_name = normalize_person_name(payload.get("first_name", ""))
+    last_name = normalize_person_name(payload.get("last_name", ""))
+    name_extension = str(payload.get("name_extension", "") or "").strip()
     municipality = str(payload.get("municipality", "") or "").strip()
-    username = str(payload.get("username", "")).strip()
+    username = normalize_username(payload.get("username", ""))
     password = str(payload.get("password", ""))
     password_confirm = str(payload.get("password_confirm", ""))
 
+    try:
+        _validate_captcha_payload(payload)
+    except ValidationError as exc:
+        return JsonResponse({"detail": _validation_detail(exc)}, status=400)
+
     if not username or not password or not password_confirm:
-        return JsonResponse({"detail": "Username, password, and confirmation are required."}, status=400)
+        return JsonResponse(
+            {"detail": "Username, password, and confirmation are required."}, status=400
+        )
     if password != password_confirm:
         return JsonResponse({"detail": "Password confirmation does not match."}, status=400)
 
@@ -2898,6 +3522,7 @@ def public_accept_role_invitation_view(request, token):
             token=token,
             first_name=first_name,
             last_name=last_name,
+            name_extension=name_extension,
             municipality=municipality,
             username=username,
             password=password,

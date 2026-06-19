@@ -1,20 +1,8 @@
-export default function ArchiveEntryDialog({
-  open,
-  title,
-  notes,
-  busy,
-  onNotesChange,
-  onCancel,
-  onConfirm,
-}) {
+export default function ArchiveEntryDialog({ open, title, notes, busy, onNotesChange, onCancel, onConfirm }) {
   if (!open) return null
 
   return (
-    <div
-      className="admin-archive-action-backdrop"
-      role="presentation"
-      onClick={busy ? undefined : onCancel}
-    >
+    <div className="admin-archive-action-backdrop" role="presentation" onClick={busy ? undefined : onCancel}>
       <section
         className="admin-archive-action-modal"
         role="dialog"
@@ -31,7 +19,9 @@ export default function ArchiveEntryDialog({
             Cancel
           </button>
         </div>
-        <p><strong>{title}</strong></p>
+        <p>
+          <strong>{title}</strong>
+        </p>
         <p className="muted">
           This removes the entry from public use while preserving its content, attribution, and audit history.
         </p>

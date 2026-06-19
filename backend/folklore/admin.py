@@ -13,9 +13,10 @@ from django.contrib import admin, messages
 from django.contrib.admin.helpers import ActionForm
 from django.core.exceptions import ValidationError
 
-from .models import FolkloreEntry, FolkloreRevision
 from reviews.models import FolkloreReview
 from reviews.services import submit_folklore_review
+
+from .models import FolkloreEntry, FolkloreRevision
 
 
 class FolkloreReviewActionForm(ActionForm):
@@ -30,44 +31,44 @@ class FolkloreReviewActionForm(ActionForm):
 @admin.register(FolkloreEntry)
 class FolkloreEntryAdmin(admin.ModelAdmin):
     list_display = (
-        'title',
-        'category',
-        'subcategory',
-        'municipality_source',
-        'status',
-        'contributor',
-        'created_at',
+        "title",
+        "category",
+        "subcategory",
+        "municipality_source",
+        "status",
+        "contributor",
+        "created_at",
     )
-    list_filter = ('status', 'category', 'subcategory', 'municipality_source')
-    search_fields = ('title', 'content')
-    readonly_fields = ('created_at', 'updated_at', 'archived_at', 'contributor')
+    list_filter = ("status", "category", "subcategory", "municipality_source")
+    search_fields = ("title", "content")
+    readonly_fields = ("created_at", "updated_at", "archived_at", "contributor")
 
 
 @admin.register(FolkloreRevision)
 class FolkloreRevisionAdmin(admin.ModelAdmin):
     action_form = FolkloreReviewActionForm
     list_display = (
-        'id',
-        'entry',
-        'status',
-        'contributor',
-        'created_at',
-        'approved_at',
+        "id",
+        "entry",
+        "status",
+        "contributor",
+        "created_at",
+        "approved_at",
     )
-    list_filter = ('status',)
-    search_fields = ('id',)
+    list_filter = ("status",)
+    search_fields = ("id",)
     actions = ["approve_revisions", "reject_revisions", "flag_revisions"]
     readonly_fields = (
-        'entry',
-        'contributor',
-        'proposed_data',
-        'photo_upload',
-        'audio_upload',
-        'status',
-        'reviewer_notes',
-        'is_base_snapshot',
-        'created_at',
-        'approved_at',
+        "entry",
+        "contributor",
+        "proposed_data",
+        "photo_upload",
+        "audio_upload",
+        "status",
+        "reviewer_notes",
+        "is_base_snapshot",
+        "created_at",
+        "approved_at",
     )
 
     def has_add_permission(self, request):

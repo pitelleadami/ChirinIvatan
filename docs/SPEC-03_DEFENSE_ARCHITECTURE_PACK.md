@@ -3,6 +3,7 @@
 Purpose: ready-to-present architecture visuals for capstone defense.
 
 How to use this file:
+
 - GitHub/Markdown viewers that support Mermaid can render these diagrams directly.
 - You can also copy each Mermaid block into mermaid.live for export to PNG/SVG.
 
@@ -215,7 +216,7 @@ stateDiagram-v2
 
     APPROVED --> APPROVED_UNDER_REVIEW : flag + notes
     APPROVED_UNDER_REVIEW --> APPROVED : re-review quorum approve
-    APPROVED_UNDER_REVIEW --> REJECTED : re-review single reject
+    APPROVED_UNDER_REVIEW --> ARCHIVED : re-review Reject/Archive
 
     REJECTED --> ARCHIVED : auto/manual archive rules
     APPROVED --> ARCHIVED : manual archive
@@ -244,7 +245,7 @@ stateDiagram-v2
 
     APPROVED --> APPROVED_UNDER_REVIEW : flag + notes
     APPROVED_UNDER_REVIEW --> APPROVED : re-review quorum approve
-    APPROVED_UNDER_REVIEW --> REJECTED : re-review single reject
+    APPROVED_UNDER_REVIEW --> ARCHIVED : re-review Reject/Archive
 
     REJECTED --> ARCHIVED : auto/manual archive rules
     APPROVED --> ARCHIVED : manual archive
@@ -377,12 +378,14 @@ sequenceDiagram
 ## 4) Presentation Notes (for defense slides)
 
 Use 4 slides:
+
 1. ERD slide (Section 1)
 2. State machines slide (Section 2)
 3. Dictionary sequence slide (Section 3.1 + 3.2)
 4. Folklore sequence slide (Section 3.3)
 
 Key message to panel:
+
 - "All changes are revision-first and governance-validated before publication."
 - "Auditability and accountability are first-class, not afterthoughts."
 - "Contribution and recognition are backend-authoritative and non-inflationary."

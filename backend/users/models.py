@@ -1,8 +1,8 @@
 import uuid
-from django.conf import settings
-from django.db import models
-from django.core.exceptions import ValidationError
 
+from django.conf import settings
+from django.core.exceptions import ValidationError
+from django.db import models
 
 """
 users/models.py
@@ -41,6 +41,7 @@ class UserProfile(models.Model):
     )
     # These are all optional and can be safely blank.
     municipality = models.CharField(max_length=255, blank=True, default="")
+    name_extension = models.CharField(max_length=30, blank=True, default="")
     post_nominals = models.CharField(max_length=120, blank=True, default="")
     affiliation = models.CharField(max_length=255, blank=True, default="")
     occupation = models.CharField(max_length=255, blank=True, default="")
@@ -50,6 +51,8 @@ class UserProfile(models.Model):
     include_in_leaderboard = models.BooleanField(default=True)
     show_on_yaru_chart = models.BooleanField(default=True)
     show_live_contributions = models.BooleanField(default=True)
+    onboarding_prompt_pending = models.BooleanField(default=False)
+    onboarding_prompt_dismissed = models.BooleanField(default=False)
     # Optional profile photo path. Frontend should use fallback avatar when empty.
     profile_photo = models.ImageField(
         upload_to="users/profile_photos/",
@@ -94,13 +97,11 @@ class SiteContentSettings(models.Model):
     privacy_notice_paragraphs = models.JSONField(default=list, blank=True)
     media_upload_policy_paragraphs = models.JSONField(default=list, blank=True)
     contributor_agreement_paragraphs = models.JSONField(default=list, blank=True)
+    beta_locked = models.BooleanField(default=True)
     maintenance_enabled = models.BooleanField(default=False)
     maintenance_message = models.TextField(
         blank=True,
-        default=(
-            "Chirin Ivatan is temporarily paused for maintenance. "
-            "Please check back soon."
-        ),
+        default=("Chirin Ivatan is temporarily paused for maintenance. " "Please check back soon."),
     )
 
     updated_by = models.ForeignKey(
@@ -224,6 +225,7 @@ class UserSessionEvent(models.Model):
     "when did this account log in/out?" without turning session history into a
     sensitive tracking ledger.
     """
+
     class Type(models.TextChoices):
         LOGIN = "login", "Login"
         LOGOUT = "logout", "Logout"
@@ -324,6 +326,7 @@ class RoleApplication(models.Model):
     Quorum/decision rules are enforced in service layer.
     This model stores the lifecycle state of the request.
     """
+
     class TargetRole(models.TextChoices):
         CONTRIBUTOR = "contributor", "Contributor"
         REVIEWER = "reviewer", "Reviewer"
@@ -366,6 +369,7 @@ class RoleApplicationDecision(models.Model):
     - stores notes
     - supports accountability on final onboarding record
     """
+
     class Decision(models.TextChoices):
         APPROVE = "approve", "Approve"
         REJECT = "reject", "Reject"
@@ -407,6 +411,7 @@ class RoleOnboardingRecord(models.Model):
     - invited: direct invite by reviewer/admin
     - approved_application: approved through quorum path
     """
+
     class Role(models.TextChoices):
         CONTRIBUTOR = "contributor", "Contributor"
         REVIEWER = "reviewer", "Reviewer"
@@ -468,6 +473,7 @@ class RoleInvitation(models.Model):
     - applications use community approval quorum
     - invitations are an admin accountability path that bypasses quorum
     """
+
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
         ACCEPTED = "accepted", "Accepted"
@@ -497,6 +503,7 @@ class RoleInvitation(models.Model):
     )
     first_name = models.CharField(max_length=150, blank=True, default="")
     last_name = models.CharField(max_length=150, blank=True, default="")
+    name_extension = models.CharField(max_length=30, blank=True, default="")
     municipality = models.CharField(max_length=255, blank=True, default="")
     notes = models.TextField(blank=True, default="")
     expires_at = models.DateTimeField(null=True, blank=True)
@@ -569,6 +576,7 @@ class MunicipalityStats(models.Model):
 
     This is municipality-level equivalent of UserContributionStats.
     """
+
     municipality = models.CharField(max_length=100, primary_key=True)
 
     dictionary_all_time = models.PositiveIntegerField(default=0)
@@ -599,6 +607,7 @@ class RecognitionEvent(models.Model):
     - badge unlock
     - municipality monthly winner
     """
+
     class EventType(models.TextChoices):
         LEVEL_UP = "level_up", "Level Up"
         BADGE_UNLOCK = "badge_unlock", "Badge Unlock"
@@ -671,13 +680,9 @@ class GamificationConfig(models.Model):
                 number = int(item["number"])
                 threshold = int(item["threshold"])
             except (TypeError, ValueError):
-                raise ValidationError(
-                    {field_name: "number and threshold must be integers."}
-                )
+                raise ValidationError({field_name: "number and threshold must be integers."})
             if number < 0 or threshold < 0:
-                raise ValidationError(
-                    {field_name: "number and threshold must be >= 0."}
-                )
+                raise ValidationError({field_name: "number and threshold must be >= 0."})
             if not str(item["title"]).strip():
                 raise ValidationError({field_name: "title must be non-empty."})
 
@@ -690,9 +695,7 @@ class GamificationConfig(models.Model):
             if not isinstance(item, dict):
                 raise ValidationError({field_name: "Each badge row must be an object."})
             if "key" not in item or "name" not in item or "threshold" not in item:
-                raise ValidationError(
-                    {field_name: "Each row requires key, name, and threshold."}
-                )
+                raise ValidationError({field_name: "Each row requires key, name, and threshold."})
             if not str(item["key"]).strip() or not str(item["name"]).strip():
                 raise ValidationError({field_name: "key and name must be non-empty."})
             try:
@@ -714,10 +717,11 @@ class GamificationConfig(models.Model):
         required_quality = ["key", "name", "threshold", "max_rejections"]
         missing = [key for key in required_quality if key not in self.quality_badge]
         if missing:
-            raise ValidationError(
-                {"quality_badge": f"Missing required keys: {', '.join(missing)}"}
-            )
-        if not str(self.quality_badge["key"]).strip() or not str(self.quality_badge["name"]).strip():
+            raise ValidationError({"quality_badge": f"Missing required keys: {', '.join(missing)}"})
+        if (
+            not str(self.quality_badge["key"]).strip()
+            or not str(self.quality_badge["name"]).strip()
+        ):
             raise ValidationError({"quality_badge": "key and name must be non-empty."})
         try:
             threshold = int(self.quality_badge["threshold"])
@@ -727,9 +731,7 @@ class GamificationConfig(models.Model):
                 {"quality_badge": "threshold and max_rejections must be integers."}
             )
         if threshold < 0 or max_rejections < 0:
-            raise ValidationError(
-                {"quality_badge": "threshold and max_rejections must be >= 0."}
-            )
+            raise ValidationError({"quality_badge": "threshold and max_rejections must be >= 0."})
 
 
 class GamificationRuntimeState(models.Model):
@@ -756,6 +758,7 @@ class MunicipalityMonthlyWinner(models.Model):
     - folklore
     - combined
     """
+
     class Metric(models.TextChoices):
         DICTIONARY = "dictionary", "Dictionary"
         FOLKLORE = "folklore", "Folklore"
@@ -779,3 +782,28 @@ class MunicipalityMonthlyWinner(models.Model):
 
     def __str__(self):
         return f"{self.month_key}:{self.metric}:{self.municipality}"
+
+
+class Notification(models.Model):
+    class Type(models.TextChoices):
+        SUBMISSION_RECEIVED = "submission_received", "Submission received"
+        REVISION_APPROVED = "revision_approved", "Revision approved"
+        REVISION_REJECTED = "revision_rejected", "Revision rejected"
+        MILESTONE = "milestone", "Milestone"
+        COMMENT_RECEIVED = "comment_received", "Comment on your entry"
+        ROLE_DECIDED = "role_decided", "Role application decided"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="notifications",
+    )
+    notif_type = models.CharField(max_length=32, choices=Type.choices)
+    message = models.TextField()
+    target_url = models.CharField(max_length=500, blank=True, default="")
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]

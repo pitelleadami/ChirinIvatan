@@ -1,9 +1,11 @@
 # SPEC-03 Code Maintenance Guide (Beginner-Friendly)
 
 ## Why this document exists
+
 This project now has section comments inside core files. This guide tells you where to look first when something breaks.
 
 ## Start here (backend)
+
 - `backend/reviews/services.py`: review decisions, quorum, reject/flag behavior.
 - `backend/dictionary/services.py`: publishing approved revisions into live dictionary entries.
 - `backend/dictionary/variant_services.py`: mother/variant promotion rules.
@@ -12,11 +14,13 @@ This project now has section comments inside core files. This guide tells you wh
 - `backend/users/models.py`: core tables for contributions, role onboarding, gamification.
 
 ## Start here (frontend)
+
 - `frontend/src/lib/api.js`: all API calls and CSRF behavior.
 - `frontend/src/lib/router.js`: app routes and client-side navigation.
 - `frontend/src/pages/RoleCenterPage.jsx`: application/decision/invitation UI flow.
 
 ## Troubleshooting checklist
+
 1. If review status does not update:
    - Check `backend/reviews/services.py` quorum and state checks.
 2. If contributor/reviewer role does not activate:
@@ -27,6 +31,7 @@ This project now has section comments inside core files. This guide tells you wh
    - Check CSRF in `frontend/src/lib/api.js` and trusted origins in Django settings.
 
 ## How to adapt for another indigenous language
+
 1. Keep workflow logic the same (review/revision/governance).
 2. Replace labels/titles/threshold defaults in `backend/users/recognition.py` and `GamificationConfig`.
 3. Add language-specific fields to dictionary/folklore models via migrations.
@@ -34,8 +39,10 @@ This project now has section comments inside core files. This guide tells you wh
 5. Keep role/accountability flows unchanged unless governance policy changes.
 
 ## Safe change strategy
+
 1. Change one rule area only (review, onboarding, or recognition).
 2. Update tests near that area.
-3. Run:
+3. Update the relevant spec whenever a change makes or changes a product, governance, data, workflow, or display-normalization decision. Use `docs/SPEC-03_REBUILD_SPEC.md` as the master source.
+4. Run:
    - `cd backend && python3 manage.py test users reviews dictionary folklore`
    - `cd frontend && npm run build`

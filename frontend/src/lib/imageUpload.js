@@ -79,9 +79,13 @@ export async function prepareImageUpload(
 
   const outputType = file.type === 'image/png' ? 'image/png' : 'image/jpeg'
   const blob = await canvasToBlob(canvas, outputType, quality)
-  const optimizedFile = new File([blob], outputName.replace(/\.[^.]+$/, outputType === 'image/png' ? '.png' : '.jpg'), {
-    type: outputType,
-  })
+  const optimizedFile = new File(
+    [blob],
+    outputName.replace(/\.[^.]+$/, outputType === 'image/png' ? '.png' : '.jpg'),
+    {
+      type: outputType,
+    },
+  )
 
   return {
     file: optimizedFile,

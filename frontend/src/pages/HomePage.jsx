@@ -3,13 +3,15 @@ import { useEffect, useState } from 'react'
 import brandLogo from '../assets/brand/chirin-ivatan-logo.png'
 import heroVillageImage from '../assets/landing/ivatan-village-hero.jpg'
 import { apiRequest } from '../lib/api'
+import { capitalizeFirst, normalizeHeadword } from '../lib/dictionaryText'
 import { folkloreTaxonomyLabel } from '../lib/folkloreTaxonomy'
+import { compactLeaderboardName } from '../lib/leaderboardDisplay'
 import { getMunicipalityFlag } from '../lib/municipalityFlags'
 import { ROUTES, navigate } from '../lib/router'
 import { DEFAULT_SITE_CONTENT, normalizeSiteContent } from '../lib/siteContent'
 
 function contributorLabel(row) {
-  return row.display_name || row.full_name || row.username
+  return compactLeaderboardName(row.display_name || row.full_name || row.username)
 }
 
 function shortenText(value, limit = 76) {
@@ -30,6 +32,11 @@ function formatPublicDate(value) {
 function hasMeaning(row) {
   const meaning = row.meaning?.trim()
   return meaning && meaning.toLowerCase() !== 'meaning not provided yet'
+}
+
+// Mother terms (or standalone terms with no variant group) are prioritized in the Latest preview.
+function isMotherTerm(row) {
+  return Boolean(row.is_mother) || !row.variant_group_id
 }
 
 function toNumber(value) {
@@ -122,7 +129,7 @@ export default function HomePage({ currentUser = {} }) {
       }
 
       try {
-        const dictionaryPayload = await apiRequest('/api/dictionary/entries?limit=4')
+        const dictionaryPayload = await apiRequest('/api/dictionary/entries?limit=20')
         setDictionaryRows(dictionaryPayload.rows || [])
         setArchiveCounts((current) => ({
           ...current,
@@ -184,28 +191,27 @@ export default function HomePage({ currentUser = {} }) {
     'All',
     ...Array.from(new Set(rankedRows.map((row) => row.municipality).filter(Boolean))).sort(),
   ]
-  const filteredRows = leaderMunicipality === 'All'
-    ? rankedRows
-    : rankedRows.filter((row) => row.municipality === leaderMunicipality)
+  const filteredRows =
+    leaderMunicipality === 'All'
+      ? rankedRows
+      : rankedRows.filter((row) => row.municipality === leaderMunicipality)
   const topFiveMunicipality = filteredRows.slice(0, 5)
-  const latestDictionary = dictionaryRows.filter(hasMeaning).slice(0, 3)
+  const latestDictionary = dictionaryRows.filter(hasMeaning).filter(isMotherTerm).slice(0, 3)
   const latestFolklore = folkloreRows.slice(0, 3)
-  const visibleSupportStatements = siteContent.support_statements.filter((statement) => (
-    statement?.quote || statement?.name || statement?.role
-  ))
-  const visiblePartnerDetails = siteContent.partner_details.filter((partner) => (
-    partner?.name || partner?.logo_url || partner?.url
-  ))
+  const visibleSupportStatements = siteContent.support_statements.filter(
+    (statement) => statement?.quote || statement?.name || statement?.role,
+  )
+  const visiblePartnerDetails = siteContent.partner_details.filter(
+    (partner) => partner?.name || partner?.logo_url || partner?.url,
+  )
   const hasClosingContent = visibleSupportStatements.length > 0 || visiblePartnerDetails.length > 0
   const currentUserGroups = currentUser.groups || []
   const isMember = Boolean(
-    currentUser.is_authenticated
-      && (
-        currentUser.is_superuser
-        || currentUserGroups.includes('Admin')
-        || currentUserGroups.includes('Reviewer')
-        || currentUserGroups.includes('Contributor')
-      ),
+    currentUser.is_authenticated &&
+    (currentUser.is_superuser ||
+      currentUserGroups.includes('Admin') ||
+      currentUserGroups.includes('Reviewer') ||
+      currentUserGroups.includes('Contributor')),
   )
 
   return (
@@ -337,13 +343,20 @@ export default function HomePage({ currentUser = {} }) {
                         <td>
                           <button
                             className="leaderboard-person leaderboard-person-button"
-                            onClick={() => navigate(`${ROUTES.profileView}?username=${encodeURIComponent(row.username)}`)}
+                            onClick={() =>
+                              navigate(`${ROUTES.profileView}?username=${encodeURIComponent(row.username)}`)
+                            }
                           >
                             {row.profile_photo ? (
                               <img className="leaderboard-avatar" src={row.profile_photo} alt="" />
                             ) : (
-                              <span className="leaderboard-avatar leaderboard-avatar-fallback" aria-hidden="true">
-                                {String(row.username || 'CI').slice(0, 2).toUpperCase()}
+                              <span
+                                className="leaderboard-avatar leaderboard-avatar-fallback"
+                                aria-hidden="true"
+                              >
+                                {String(row.username || 'CI')
+                                  .slice(0, 2)
+                                  .toUpperCase()}
                               </span>
                             )}
                             <span className="leaderboard-person-text">
@@ -359,7 +372,10 @@ export default function HomePage({ currentUser = {} }) {
                   </tbody>
                 </table>
               </div>
-              <button className="quiet-link-button leaderboard-panel-link" onClick={() => navigate(ROUTES.leaderboards)}>
+              <button
+                className="quiet-link-button leaderboard-panel-link"
+                onClick={() => navigate(ROUTES.leaderboards)}
+              >
                 View Full Leaderboard
               </button>
             </article>
@@ -380,13 +396,20 @@ export default function HomePage({ currentUser = {} }) {
                     type="button"
                     onClick={() => openDictionaryEntry(row)}
                   >
-                    <div className="queue-header">
-                      <strong>{row.term}</strong>
+                    <div className="latest-entry-card">
+                      <div className="latest-entry-text">
+                        <div className="queue-header">
+                          <strong>{normalizeHeadword(row.term)}</strong>
+                        </div>
+                        <p className="entry-summary">{shortenText(capitalizeFirst(row.meaning))}</p>
+                        <p className="meta">
+                          {row.part_of_speech || 'Entry'} · {formatPublicDate(row.created_at)}
+                        </p>
+                      </div>
+                      {row.photo_url && (
+                        <img className="latest-entry-thumb" src={row.photo_url} alt="" loading="lazy" />
+                      )}
                     </div>
-                    <p className="entry-summary">{shortenText(row.meaning)}</p>
-                    <p className="meta">
-                      {row.part_of_speech || 'Entry'} · {formatPublicDate(row.created_at)}
-                    </p>
                   </button>
                 ))}
               </div>
@@ -406,12 +429,25 @@ export default function HomePage({ currentUser = {} }) {
                     type="button"
                     onClick={() => openFolkloreEntry(row)}
                   >
-                    <div className="queue-header">
-                      <strong>{row.title}</strong>
+                    <div className="latest-entry-card">
+                      <div className="latest-entry-text">
+                        <div className="queue-header">
+                          <strong>{row.title}</strong>
+                        </div>
+                        <p className="meta">
+                          {folkloreTaxonomyLabel(row.category, row.subcategory) || 'Story'} ·{' '}
+                          {formatPublicDate(row.created_at)}
+                        </p>
+                      </div>
+                      {row.photo_upload_url && (
+                        <img
+                          className="latest-entry-thumb"
+                          src={row.photo_upload_url}
+                          alt=""
+                          loading="lazy"
+                        />
+                      )}
                     </div>
-                    <p className="meta">
-                      {folkloreTaxonomyLabel(row.category, row.subcategory) || 'Story'} · {formatPublicDate(row.created_at)}
-                    </p>
                   </button>
                 ))}
               </div>
@@ -431,11 +467,15 @@ export default function HomePage({ currentUser = {} }) {
               <div className="recommendation-stack">
                 {visibleSupportStatements.map((statement, index) => (
                   <article key={`home-support-${index}`} className="recommendation-card">
-                    <span className="recommendation-quote-mark" aria-hidden="true">"</span>
+                    <span className="recommendation-quote-mark" aria-hidden="true">
+                      "
+                    </span>
                     {statement.quote && <p className="recommendation-copy">{statement.quote}</p>}
                     {(statement.name || statement.role) && (
                       <p className="recommendation-source">
-                        <span className="recommendation-logo" aria-hidden="true">CI</span>
+                        <span className="recommendation-logo" aria-hidden="true">
+                          CI
+                        </span>
                         {[statement.name, statement.role].filter(Boolean).join(' · ')}
                       </p>
                     )}
@@ -447,7 +487,7 @@ export default function HomePage({ currentUser = {} }) {
 
           {visiblePartnerDetails.length > 0 && (
             <section className="partner-strip-section">
-              <h2>Partners</h2>
+              <h2>Supporting Organizations</h2>
               <div className="partner-grid">
                 {visiblePartnerDetails.map((partner, index) => (
                   <a
@@ -461,10 +501,10 @@ export default function HomePage({ currentUser = {} }) {
                       <img className="partner-logo-image" src={partner.logo_url} alt="" />
                     ) : (
                       <span className="partner-logo-mark" aria-hidden="true">
-                        {(partner.name || 'Partner').slice(0, 2).toUpperCase()}
+                        {(partner.name || 'Supporting Organization').slice(0, 2).toUpperCase()}
                       </span>
                     )}
-                    <span className="partner-agency-name">{partner.name || 'Partner'}</span>
+                    <span className="partner-agency-name">{partner.name || 'Supporting Organization'}</span>
                   </a>
                 ))}
               </div>

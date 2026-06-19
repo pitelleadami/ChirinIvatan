@@ -4,7 +4,6 @@ from django.db import models
 from users.leaderboard_filters import leaderboard_participant_q
 from users.models import ContributionEvent
 
-
 """
 users/contributions.py
 
