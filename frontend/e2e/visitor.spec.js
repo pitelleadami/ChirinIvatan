@@ -19,11 +19,15 @@ test.describe('visitor (anonymous)', () => {
     await page.getByPlaceholder(/Search an Ivatan term/i).fill(PUBLISHED_TERM)
     await page.getByRole('button', { name: /^Search$/ }).click()
 
-    const result = page.getByRole('button', { name: new RegExp(PUBLISHED_TERM, 'i') })
-    await expect(result.first()).toBeVisible({ timeout: 10_000 })
-    await result.first().click()
+    const result = page
+      .locator('.dictionary-search-results-list')
+      .getByRole('button', { name: new RegExp(PUBLISHED_TERM, 'i') })
+    await expect(result).toBeVisible({ timeout: 10_000 })
+    await result.click()
 
-    await expect(page.getByText(new RegExp(PUBLISHED_MEANING, 'i'))).toBeVisible()
+    await expect(
+      page.locator('.dictionary-entry-detail').getByText(new RegExp(PUBLISHED_MEANING, 'i')),
+    ).toBeVisible()
   })
 
   test('can browse public folklore', async ({ page }) => {
