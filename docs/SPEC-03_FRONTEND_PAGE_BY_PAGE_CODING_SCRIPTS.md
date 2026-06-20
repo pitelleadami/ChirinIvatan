@@ -16,7 +16,7 @@ This document gives practical coding steps. For current screen contents, permiss
 ### Terminal A (backend)
 
 ```bash
-cd /Users/admin/Documents/GitHub/ChirinIvatan/backend
+cd /path/to/ChirinIvatan/backend
 source ../venv/bin/activate
 python3 manage.py migrate
 python3 manage.py runserver
@@ -25,7 +25,7 @@ python3 manage.py runserver
 ### Terminal B (frontend)
 
 ```bash
-cd /Users/admin/Documents/GitHub/ChirinIvatan/frontend
+cd /path/to/ChirinIvatan/frontend
 npm install
 npm run dev
 ```
@@ -344,14 +344,14 @@ After all pages are integrated:
 1. Run frontend build:
 
 ```bash
-cd /Users/admin/Documents/GitHub/ChirinIvatan/frontend
+cd /path/to/ChirinIvatan/frontend
 npm run build
 ```
 
 2. Run backend check:
 
 ```bash
-cd /Users/admin/Documents/GitHub/ChirinIvatan/backend
+cd /path/to/ChirinIvatan/backend
 python3 manage.py check
 ```
 

@@ -15,11 +15,11 @@ Mark each item `PASS` or `FAIL`.
 Commands:
 
 ```bash
-cd /Users/admin/Documents/GitHub/ChirinIvatan/backend
+cd /path/to/ChirinIvatan/backend
 python3 manage.py check
 python3 manage.py migrate
 
-cd /Users/admin/Documents/GitHub/ChirinIvatan/frontend
+cd /path/to/ChirinIvatan/frontend
 npm run build
 ```
 
@@ -33,7 +33,7 @@ npm run build
 Command:
 
 ```bash
-cd /Users/admin/Documents/GitHub/ChirinIvatan/backend
+cd /path/to/ChirinIvatan/backend
 python3 manage.py test users reviews dictionary folklore
 ```
 
