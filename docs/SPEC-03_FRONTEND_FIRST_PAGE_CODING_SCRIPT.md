@@ -33,7 +33,7 @@ To these backend endpoints:
 ### 1.1 Terminal A (backend)
 
 ```bash
-cd /Users/admin/Documents/GitHub/ChirinIvatan/backend
+cd /path/to/ChirinIvatan/backend
 source ../venv/bin/activate
 python3 manage.py migrate
 python3 manage.py runserver
@@ -46,7 +46,7 @@ Expected:
 ### 1.2 Terminal B (frontend)
 
 ```bash
-cd /Users/admin/Documents/GitHub/ChirinIvatan/frontend
+cd /path/to/ChirinIvatan/frontend
 npm install
 npm run dev
 ```
@@ -315,14 +315,14 @@ Mark done only if all are true:
 Run:
 
 ```bash
-cd /Users/admin/Documents/GitHub/ChirinIvatan/frontend
+cd /path/to/ChirinIvatan/frontend
 npm run build
 ```
 
 Then backend sanity check:
 
 ```bash
-cd /Users/admin/Documents/GitHub/ChirinIvatan/backend
+cd /path/to/ChirinIvatan/backend
 python3 manage.py check
 ```
 

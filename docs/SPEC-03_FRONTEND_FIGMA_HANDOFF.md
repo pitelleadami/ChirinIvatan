@@ -446,7 +446,7 @@ There should be one active frontend app at root: `frontend/`.
 Open terminal A:
 
 ```bash
-cd /Users/admin/Documents/GitHub/ChirinIvatan/backend
+cd /path/to/ChirinIvatan/backend
 source ../venv/bin/activate
 python3 manage.py migrate
 python3 manage.py runserver
@@ -463,7 +463,7 @@ Expected backend URL:
 Open terminal B:
 
 ```bash
-cd /Users/admin/Documents/GitHub/ChirinIvatan/frontend
+cd /path/to/ChirinIvatan/frontend
 npm install
 npm run dev
 ```

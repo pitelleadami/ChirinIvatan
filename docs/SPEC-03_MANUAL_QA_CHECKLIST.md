@@ -14,7 +14,7 @@ Companion execution table:
 ## 1) Setup
 
 1. Open backend root:
-   - `cd /Users/admin/Documents/GitHub/ChirinIvatan/backend`
+   - `cd /path/to/ChirinIvatan/backend`
 2. Start server:
    - `python3 manage.py runserver`
 3. Confirm users exist:
