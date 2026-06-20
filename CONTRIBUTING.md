@@ -69,3 +69,7 @@ Do not commit directly to `main`.
 - Confirm deployment notes are updated when the change affects operations.
 - Update `CHANGELOG.md` for visible user-facing or governance changes.
 - Add or update ADRs for meaningful decisions.
+
+## Public Documentation Rule
+
+Production runbooks, credentials, server IPs, backup paths, and operator notes must stay private.
