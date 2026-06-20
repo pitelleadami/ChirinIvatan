@@ -10,8 +10,10 @@ const EMPTY_CULTURAL_AFFILIATION = { role: '', organization: '' }
 const EMPTY_OTHER_AFFILIATION = { designation: '', institution: '' }
 
 const EMPTY_FORM = {
+  username: '',
   first_name: '',
   last_name: '',
+  name_extension: '',
   post_nominals: '',
   email: '',
   municipality: '',
@@ -38,6 +40,27 @@ export default function ProfileEditPage({ currentUser, onAuthChange }) {
   const [photoWarning, setPhotoWarning] = useState('')
   const redirectTimerRef = useRef(null)
 
+  const isOnboarding = currentUser?.is_authenticated && currentUser?.profile_complete === false
+
+  async function handleSkipOnboarding() {
+    try {
+      await apiRequest('/api/auth/csrf')
+      await apiRequest('/api/profile/onboarding/dismiss', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      })
+      onAuthChange({
+        ...(currentUser || {}),
+        onboarding_prompt_pending: false,
+        onboarding_prompt_dismissed: true,
+      })
+      navigate(ROUTES.adminApplications)
+    } catch (requestError) {
+      setError(requestError.message)
+    }
+  }
+
   useEffect(() => {
     let ignore = false
 
@@ -45,11 +68,25 @@ export default function ProfileEditPage({ currentUser, onAuthChange }) {
       setLoading(true)
       setError('')
       try {
+        const params = new URLSearchParams(window.location.search)
+        const verifiedStatus = params.get('email_verified')
+        if (verifiedStatus === '1') {
+          setStatus('Email address verified and updated.')
+          window.history.replaceState({}, '', ROUTES.profileEdit)
+        } else if (verifiedStatus === 'expired') {
+          setError('That email verification link has expired. Please save your new email again.')
+          window.history.replaceState({}, '', ROUTES.profileEdit)
+        } else if (verifiedStatus === 'invalid') {
+          setError('That email verification link is no longer valid.')
+          window.history.replaceState({}, '', ROUTES.profileEdit)
+        }
         const payload = await apiRequest('/api/profile/my')
         if (ignore) return
         setForm({
+          username: payload.username || '',
           first_name: payload.first_name || '',
           last_name: payload.last_name || '',
+          name_extension: payload.name_extension || '',
           post_nominals: payload.post_nominals || '',
           email: payload.email || '',
           municipality: payload.municipality || '',
@@ -86,16 +123,12 @@ export default function ProfileEditPage({ currentUser, onAuthChange }) {
   function updateAffiliation(group, index, field, value) {
     setForm((current) => ({
       ...current,
-      [group]: current[group].map((row, rowIndex) => (
-        rowIndex === index ? { ...row, [field]: value } : row
-      )),
+      [group]: current[group].map((row, rowIndex) => (rowIndex === index ? { ...row, [field]: value } : row)),
     }))
   }
 
   function addAffiliation(group) {
-    const emptyRow = group === 'cultural_affiliations'
-      ? EMPTY_CULTURAL_AFFILIATION
-      : EMPTY_OTHER_AFFILIATION
+    const emptyRow = group === 'cultural_affiliations' ? EMPTY_CULTURAL_AFFILIATION : EMPTY_OTHER_AFFILIATION
     setForm((current) => ({
       ...current,
       [group]: [...current[group], { ...emptyRow }],
@@ -103,9 +136,7 @@ export default function ProfileEditPage({ currentUser, onAuthChange }) {
   }
 
   function removeAffiliation(group, index) {
-    const emptyRow = group === 'cultural_affiliations'
-      ? EMPTY_CULTURAL_AFFILIATION
-      : EMPTY_OTHER_AFFILIATION
+    const emptyRow = group === 'cultural_affiliations' ? EMPTY_CULTURAL_AFFILIATION : EMPTY_OTHER_AFFILIATION
     setForm((current) => {
       const nextRows = current[group].filter((_, rowIndex) => rowIndex !== index)
       return {
@@ -166,24 +197,46 @@ export default function ProfileEditPage({ currentUser, onAuthChange }) {
         method: 'POST',
         body,
       })
-      setStatus('Profile saved. Opening public profile...')
-      setSaveNotice('Profile saved. Opening your public profile...')
+      const pendingEmail = payload.pending_email || ''
+      const successMessage = pendingEmail
+        ? `Profile saved. Verify ${pendingEmail} before it becomes your account email.`
+        : 'Profile saved. Opening public profile...'
+      setStatus(successMessage)
+      setSaveNotice(
+        pendingEmail
+          ? 'Profile saved. Check your new email to verify the change.'
+          : 'Profile saved. Opening your public profile...',
+      )
       setPhotoFile(null)
       setPhotoPreview(payload.profile_photo || photoPreview)
+      setForm((current) => ({
+        ...current,
+        username: payload.username || current.username,
+        email: pendingEmail || payload.email || current.email,
+      }))
       onAuthChange({
         ...(currentUser || {}),
         is_authenticated: true,
+        username: payload.username,
         first_name: payload.first_name,
         last_name: payload.last_name,
+        name_extension: payload.name_extension,
         post_nominals: payload.post_nominals,
+        email: payload.email,
         municipality: payload.municipality,
         profile_photo: payload.profile_photo,
         profile_complete: Boolean(payload.first_name && payload.last_name && payload.municipality),
+        onboarding_prompt_pending: false,
+        onboarding_prompt_dismissed: true,
       })
       if (redirectTimerRef.current) window.clearTimeout(redirectTimerRef.current)
-      redirectTimerRef.current = window.setTimeout(() => {
-        navigate(`${ROUTES.profileView}?username=${encodeURIComponent(payload.username || currentUser?.username || '')}`)
-      }, 2000)
+      if (!pendingEmail) {
+        redirectTimerRef.current = window.setTimeout(() => {
+          navigate(
+            `${ROUTES.profileView}?username=${encodeURIComponent(payload.username || currentUser?.username || '')}`,
+          )
+        }, 2000)
+      }
     } catch (err) {
       setError(err.message)
       setSaveNotice('')
@@ -214,12 +267,22 @@ export default function ProfileEditPage({ currentUser, onAuthChange }) {
       <form className="profile-edit-panel" onSubmit={handleSubmit} noValidate>
         <div className="section-heading">
           <div>
-            <h1>Complete your profile</h1>
-            <p className="muted">Add your profile photo, bionote, municipality, and public profile details.</p>
+            <h1>{isOnboarding ? 'Welcome to Chirin Ivatan!' : 'Edit Profile'}</h1>
+            <p className="muted">
+              {isOnboarding
+                ? 'Set up your public profile so the community knows who you are. You can skip this and do it later.'
+                : 'Update your profile photo, bionote, municipality, and public profile details.'}
+            </p>
           </div>
-          <button type="button" className="ghost" onClick={() => navigate(ROUTES.profileView)}>
-            View Public Profile
-          </button>
+          {isOnboarding ? (
+            <button type="button" className="ghost" onClick={handleSkipOnboarding}>
+              Skip for now
+            </button>
+          ) : (
+            <button type="button" className="ghost" onClick={() => navigate(ROUTES.profileView)}>
+              View Public Profile
+            </button>
+          )}
         </div>
 
         {error && <p className="alert error">{error}</p>}
@@ -265,6 +328,16 @@ export default function ProfileEditPage({ currentUser, onAuthChange }) {
                     />
                   </label>
 
+                  <label className="field" htmlFor="profile-name-extension">
+                    <span>Name extension</span>
+                    <input
+                      id="profile-name-extension"
+                      value={form.name_extension}
+                      onChange={(event) => setField('name_extension', event.target.value)}
+                      placeholder="e.g., Jr., Sr., III"
+                    />
+                  </label>
+
                   <label className="field" htmlFor="profile-post-nominals">
                     <span>Post-nominals</span>
                     <input
@@ -277,14 +350,29 @@ export default function ProfileEditPage({ currentUser, onAuthChange }) {
                 </div>
 
                 <div className="field-grid">
+                  <label className="field" htmlFor="profile-username">
+                    <span>Username</span>
+                    <input
+                      id="profile-username"
+                      autoComplete="username"
+                      value={form.username}
+                      onChange={(event) => setField('username', event.target.value)}
+                    />
+                    <small className="muted">Used in your public profile link and login name.</small>
+                  </label>
+
                   <label className="field" htmlFor="profile-email">
                     <span>Email</span>
                     <input
                       id="profile-email"
                       type="email"
+                      autoComplete="email"
                       value={form.email}
                       onChange={(event) => setField('email', event.target.value)}
                     />
+                    <small className="muted">
+                      New email addresses must be verified before replacing your current email.
+                    </small>
                   </label>
 
                   <label className="field" htmlFor="profile-municipality">
@@ -299,13 +387,14 @@ export default function ProfileEditPage({ currentUser, onAuthChange }) {
                         <option key={municipality} value={municipality}>
                           {municipality}
                         </option>
-                        ))}
-                      </select>
-                  <small className="muted municipality-helper">
-                    Pick origin, residency, or Ivatan-speaking influence. Contributions are credited to this municipality.
-                  </small>
-                </label>
-              </div>
+                      ))}
+                    </select>
+                    <small className="muted municipality-helper">
+                      Pick origin, residency, or Ivatan-speaking influence. Contributions are credited to this
+                      municipality.
+                    </small>
+                  </label>
+                </div>
 
                 <div className="affiliation-editor">
                   <div className="affiliation-editor-heading">
@@ -327,7 +416,9 @@ export default function ProfileEditPage({ currentUser, onAuthChange }) {
                           aria-label="Position / Role"
                           placeholder="e.g., Resident, Member etc."
                           value={row.role}
-                          onChange={(event) => updateAffiliation('cultural_affiliations', index, 'role', event.target.value)}
+                          onChange={(event) =>
+                            updateAffiliation('cultural_affiliations', index, 'role', event.target.value)
+                          }
                         />
                       </label>
                       <label className="field" htmlFor={`profile-cultural-organization-${index}`}>
@@ -337,7 +428,14 @@ export default function ProfileEditPage({ currentUser, onAuthChange }) {
                           aria-label="Agency/ Organization/ Group"
                           placeholder="e.g., Brgy. San Antonio, Ivatan Cultural Council, etc."
                           value={row.organization}
-                          onChange={(event) => updateAffiliation('cultural_affiliations', index, 'organization', event.target.value)}
+                          onChange={(event) =>
+                            updateAffiliation(
+                              'cultural_affiliations',
+                              index,
+                              'organization',
+                              event.target.value,
+                            )
+                          }
                         />
                       </label>
                       {form.cultural_affiliations.length > 1 && (
@@ -373,7 +471,9 @@ export default function ProfileEditPage({ currentUser, onAuthChange }) {
                           aria-label="Position / Role"
                           placeholder="e.g., Student, Clerk, etc."
                           value={row.designation}
-                          onChange={(event) => updateAffiliation('other_affiliations', index, 'designation', event.target.value)}
+                          onChange={(event) =>
+                            updateAffiliation('other_affiliations', index, 'designation', event.target.value)
+                          }
                         />
                       </label>
                       <label className="field" htmlFor={`profile-other-institution-${index}`}>
@@ -383,7 +483,9 @@ export default function ProfileEditPage({ currentUser, onAuthChange }) {
                           aria-label="Agency/ Organization/ Group"
                           placeholder="e.g., Batanes State College, LGU Basco, etc"
                           value={row.institution}
-                          onChange={(event) => updateAffiliation('other_affiliations', index, 'institution', event.target.value)}
+                          onChange={(event) =>
+                            updateAffiliation('other_affiliations', index, 'institution', event.target.value)
+                          }
                         />
                       </label>
                       {form.other_affiliations.length > 1 && (
@@ -414,9 +516,6 @@ export default function ProfileEditPage({ currentUser, onAuthChange }) {
             <div className="actions">
               <button type="submit" disabled={saving}>
                 {saving ? 'Saving...' : 'Save Profile'}
-              </button>
-              <button type="button" className="ghost" onClick={() => navigate(ROUTES.home)}>
-                Back to Home
               </button>
               {(error || status) && (
                 <p className={error ? 'profile-save-feedback error' : 'profile-save-feedback ok'}>

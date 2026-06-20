@@ -11,7 +11,8 @@ Responsibilities:
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timezone as dt_timezone
+from datetime import datetime
+from datetime import timezone as dt_timezone
 
 from django.contrib.auth import get_user_model
 from django.db import models, transaction
@@ -27,10 +28,12 @@ from users.models import (
     GamificationRuntimeState,
     MunicipalityMonthlyWinner,
     MunicipalityStats,
+    Notification,
     RecognitionEvent,
     UserContributionStats,
 )
-
+from users.names import display_name as formatted_display_name
+from users.notifications import notify
 
 User = get_user_model()
 
@@ -245,21 +248,27 @@ def _calculate_user_counters(user):
 
     combined_total = dictionary_original_total + folklore_original_total + revision_total
 
-    total_rejections = EntryRevision.objects.filter(
-        contributor=user,
-        status=EntryRevision.Status.REJECTED,
-    ).count() + FolkloreRevision.objects.filter(
-        contributor=user,
-        status=FolkloreRevision.Status.REJECTED,
-    ).count()
+    total_rejections = (
+        EntryRevision.objects.filter(
+            contributor=user,
+            status=EntryRevision.Status.REJECTED,
+        ).count()
+        + FolkloreRevision.objects.filter(
+            contributor=user,
+            status=FolkloreRevision.Status.REJECTED,
+        ).count()
+    )
 
-    review_completed_total = Review.objects.filter(
-        reviewer=user,
-        decision__in=[Review.Decision.APPROVE, Review.Decision.REJECT],
-    ).count() + FolkloreReview.objects.filter(
-        reviewer=user,
-        decision__in=[FolkloreReview.Decision.APPROVE, FolkloreReview.Decision.REJECT],
-    ).count()
+    review_completed_total = (
+        Review.objects.filter(
+            reviewer=user,
+            decision__in=[Review.Decision.APPROVE, Review.Decision.REJECT],
+        ).count()
+        + FolkloreReview.objects.filter(
+            reviewer=user,
+            decision__in=[FolkloreReview.Decision.APPROVE, FolkloreReview.Decision.REJECT],
+        ).count()
+    )
 
     return {
         "combined_total": combined_total,
@@ -297,7 +306,9 @@ def _calculate_monthly_counters(user, month_key):
     }
 
 
-def _calculate_badges(*, rules, dictionary_original_total, folklore_original_total, combined_total, total_rejections):
+def _calculate_badges(
+    *, rules, dictionary_original_total, folklore_original_total, combined_total, total_rejections
+):
     dictionary_badges = _badge_rows_from_rules(
         rules=rules["dictionary_badges"],
         current_value=dictionary_original_total,
@@ -427,11 +438,20 @@ def _update_municipality_stats_for_user(user, stats):
     return row
 
 
-def _emit_recognition_events_if_needed(*, user, previous_stats, contributor_level, reviewer_level, unlocked_badges):
+def _emit_recognition_events_if_needed(
+    *,
+    user,
+    previous_stats,
+    contributor_level,
+    reviewer_level,
+    unlocked_badges,
+    badge_labels=None,
+):
     # Emit only new achievements (idempotent across repeated recomputes).
     previous_contributor_level = previous_stats.contributor_level if previous_stats else 0
     previous_reviewer_level = previous_stats.reviewer_level if previous_stats else 0
     previous_badges = set(previous_stats.unlocked_badges if previous_stats else [])
+    badge_labels = badge_labels or {}
 
     if contributor_level.number > previous_contributor_level:
         RecognitionEvent.objects.create(
@@ -439,6 +459,12 @@ def _emit_recognition_events_if_needed(*, user, previous_stats, contributor_leve
             event_type=RecognitionEvent.EventType.LEVEL_UP,
             reference_id=f"contributor:{contributor_level.number}",
             payload={"track": "contributor", "title": contributor_level.title},
+        )
+        notify(
+            user=user,
+            notif_type=Notification.Type.MILESTONE,
+            message=f"You unlocked a new milestone: {contributor_level.title}.",
+            target_url=f"/profile-view?username={user.username}",
         )
 
     if reviewer_level.number > previous_reviewer_level:
@@ -448,6 +474,12 @@ def _emit_recognition_events_if_needed(*, user, previous_stats, contributor_leve
             reference_id=f"reviewer:{reviewer_level.number}",
             payload={"track": "reviewer", "title": reviewer_level.title},
         )
+        notify(
+            user=user,
+            notif_type=Notification.Type.MILESTONE,
+            message=f"You unlocked a new milestone: {reviewer_level.title}.",
+            target_url=f"/profile-view?username={user.username}",
+        )
 
     for badge_key in unlocked_badges:
         if badge_key not in previous_badges:
@@ -456,6 +488,12 @@ def _emit_recognition_events_if_needed(*, user, previous_stats, contributor_leve
                 event_type=RecognitionEvent.EventType.BADGE_UNLOCK,
                 reference_id=badge_key,
                 payload={"badge_key": badge_key},
+            )
+            notify(
+                user=user,
+                notif_type=Notification.Type.MILESTONE,
+                message=f"You unlocked a new milestone: {badge_labels.get(badge_key, badge_key)}.",
+                target_url=f"/profile-view?username={user.username}",
             )
 
 
@@ -501,6 +539,10 @@ def recompute_user_gamification(user):
         total_rejections=stats.total_rejections,
     )
     unlocked_badges = _unlocked_badge_keys(dictionary_badges, folklore_badges, quality_badges)
+    badge_labels = {
+        badge["key"]: badge["name"]
+        for badge in dictionary_badges + folklore_badges + quality_badges
+    }
 
     _emit_recognition_events_if_needed(
         user=user,
@@ -508,6 +550,7 @@ def recompute_user_gamification(user):
         contributor_level=contributor_level,
         reviewer_level=reviewer_level,
         unlocked_badges=unlocked_badges,
+        badge_labels=badge_labels,
     )
 
     stats.contributor_level = contributor_level.number
@@ -611,12 +654,14 @@ def contributor_level_for_user(user):
             "title": payload["contributor_level"]["title"],
             "number": payload["contributor_level"]["level"],
         },
-        "next_level": {
-            "title": payload["contributor_level"]["next_title"],
-            "required_approved_entries": payload["contributor_level"]["next_threshold"],
-        }
-        if payload["contributor_level"]["next_threshold"] is not None
-        else None,
+        "next_level": (
+            {
+                "title": payload["contributor_level"]["next_title"],
+                "required_approved_entries": payload["contributor_level"]["next_threshold"],
+            }
+            if payload["contributor_level"]["next_threshold"] is not None
+            else None
+        ),
     }
 
 
@@ -668,11 +713,7 @@ def leaderboard_rows(*, municipality=None, metric="combined", period="all_time",
         rows.append(
             {
                 "username": user.username,
-                "display_name": (
-                    f"{user.get_full_name().strip() or user.username}, {profile.post_nominals}"
-                    if profile and profile.post_nominals
-                    else user.get_full_name().strip() or user.username
-                ),
+                "display_name": formatted_display_name(user, profile),
                 "profile_photo": photo_url,
                 "municipality": profile.municipality if profile else "",
                 "metric": metric,

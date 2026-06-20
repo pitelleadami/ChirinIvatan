@@ -5,7 +5,6 @@ export const ROUTES = {
   yaru: '/yaru',
   faqs: '/faqs',
   manual: '/manual',
-  dashboard: '/dashboard',
   adminApplications: '/admin-applications',
   dictionaryView: '/dictionary-view',
   dictionaryDraft: '/dictionary-draft',
@@ -19,6 +18,15 @@ export const ROUTES = {
 
 // Only these routes are considered valid app pages.
 const ALLOWED = new Set(Object.values(ROUTES))
+
+const LEGACY_REDIRECTS = {
+  '/dashboard': `${ROUTES.adminApplications}?tab=reviews`,
+  '/reviewer-dashboard': `${ROUTES.adminApplications}?tab=reviews`,
+}
+
+export function legacyRedirectFor(pathname) {
+  return LEGACY_REDIRECTS[pathname] || ''
+}
 
 export function normalizePath(pathname) {
   // Guards against unknown URLs; unknown paths fall back to home.

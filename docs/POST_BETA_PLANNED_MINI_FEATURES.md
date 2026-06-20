@@ -4,11 +4,13 @@ Use this file to track larger follow-up improvements that should be planned rath
 
 When an item is fully implemented, deployed, and verified, remove it from this file.
 
+Last reviewed: 2026-06-13
+
 ## Planned Later
 
-- [ ] Replace the current math CAPTCHA with a normal image/letter CAPTCHA or Cloudflare Turnstile.
-- [ ] Improve invitation emails with an HTML layout, clearer accept button, inviter/endorser name, role name, optional invite notes, expiry date, and a plain fallback link.
-- [ ] Add new-user profile onboarding after invited users accept and log in, with options to update public profile or skip for now.
-- [ ] Redirect skipped reviewer/admin/consultant onboarding users to Steward's Desk, and prevent the profile prompt from showing every login.
-- [ ] Merge the standalone Reviewer Dashboard into Steward's Desk and redirect the old reviewer dashboard route to the review section.
 - [ ] Replace or rework the Accuracy Champion badge image so it has stronger contrast and remains readable on light backgrounds.
+
+## Completed
+
+- [x] Merge the standalone Reviewer Dashboard into Steward's Desk and redirect the old reviewer dashboard route to the review section. (`/reviewer-dashboard` → `/admin-applications?tab=reviews` via legacy redirect in `frontend/src/lib/router.js`; ReviewerDashboardPage is now an embedded component within Steward's Desk.)
+- [x] New-user onboarding redirect fires on both login and page-load/refresh — users with `onboarding_prompt_pending` are redirected to the welcome flow from `App.jsx` on mount, matching the existing login-path behaviour in `LoginPage.jsx`.

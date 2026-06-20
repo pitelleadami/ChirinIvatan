@@ -1,7 +1,7 @@
 # SPEC-03 Complete Rebuild Specification
 
 Status: canonical rebuild source of truth
-Last updated: 2026-06-06
+Last updated: 2026-06-13
 Audience: future developers, auditors, thesis defense, deployment maintainers
 Purpose: if the source code is lost, this document plus the companion specs must be enough to recreate the Chirin Ivatan system.
 
@@ -40,6 +40,7 @@ It has five product pillars:
    - contribution ledger
    - badges and levels
    - municipality rankings
+   - in-app notifications
    - admin-managed public copy
    - admin-managed maintenance mode
 
@@ -140,6 +141,8 @@ Production:
 - PostgreSQL.
 - Database credentials come from environment variables.
 - Required backup strategy: database dumps plus media directory/object-storage backup.
+- Production must run an automated application data backup that captures PostgreSQL and media together.
+- The newest backup must be smoke-tested by restoring the database dump into a temporary database and extracting the media archive into a temporary directory, without overwriting production.
 
 ### 3.3 Media
 
@@ -175,6 +178,8 @@ Fields:
 - `include_in_leaderboard`: boolean, admin controlled
 - `show_on_yaru_chart`: boolean, admin controlled
 - `show_live_contributions`: boolean, admin controlled
+- `onboarding_prompt_pending`: boolean
+- `onboarding_prompt_dismissed`: boolean
 - `profile_photo`: optional image
 
 Rules:
@@ -182,6 +187,8 @@ Rules:
 - Profile completion requires first name, last name, profile row, and municipality.
 - Leaderboard hiding does not remove public contribution credits from profile pages.
 - Only admins can toggle leaderboard participation.
+- Accepting an email role invitation sets `onboarding_prompt_pending = true` and clears the dismissed flag.
+- Dismissing or completing the one-time welcome flow clears the pending flag and sets the dismissed flag.
 
 ### 4.2 SiteContentSettings
 
@@ -249,6 +256,7 @@ Semantic core fields:
 - `photo`
 - `photo_source`
 - `photo_source_is_contributor_owned`
+- `photo_license`
 - `english_synonym`
 - `ivatan_synonym`
 - `english_antonym`
@@ -263,6 +271,7 @@ Variant-specific fields:
 - `audio_pronunciation`
 - `audio_source`
 - `audio_source_is_self_recorded`
+- `audio_license`
 - `variant_type`
 - `usage_notes`
 - `etymology`
@@ -270,6 +279,16 @@ Variant-specific fields:
 - `example_translation`
 - `source_text`
 - `term_source_is_self_knowledge`
+
+Current dictionary variant type labels:
+
+- `Ivatan (Common Usage)`
+- `Isamurungen`
+- `Ivasayen`
+- `Itbayaten`
+- `Old / Historical Form`
+- `Borrowed Form`
+- `Newly Coined Term / Expression`
 
 Attribution/governance:
 
@@ -321,6 +340,7 @@ Snapshot fields:
 - `photo`
 - `photo_source`
 - `photo_source_is_contributor_owned`
+- `photo_license`
 - `english_synonym`
 - `ivatan_synonym`
 - `english_antonym`
@@ -330,6 +350,7 @@ Snapshot fields:
 - `audio_pronunciation`
 - `audio_source`
 - `audio_source_is_self_recorded`
+- `audio_license`
 - `variant_type`
 - `usage_notes`
 - `etymology`
@@ -347,6 +368,7 @@ Rules:
 - Approved non-base revision retention max is 20 per entry.
 - Public sees base + last 5 approved revisions.
 - Reviewer/admin sees base + last 15 approved/rejected recent revisions.
+- Media licensing: `photo_license` and `audio_license` default to `CC BY-NC 4.0` on submission. A license is normalized to the platform default when the corresponding media (photo / self-recorded audio) is present, and cleared to empty when it is not. License changes follow the revision lifecycle.
 
 ### 4.6 FolkloreEntry
 
@@ -421,16 +443,23 @@ Purpose: folklore submission or revision snapshot.
 Fields:
 
 - `id`: UUID
-- `entry`: nullable FK to `FolkloreEntry`
+- `entry`: nullable FK to `FolkloreEntry` (null when revision_type = `variant`)
+- `variant_of`: nullable FK to `FolkloreEntry` (set for variant submissions; tracks lineage back to source entry)
 - `contributor`
 - `proposed_data`: JSON snapshot
 - `photo_upload`
 - `audio_upload`
+- `revision_type`: `revision` | `variant` (default `revision`)
 - `status`: `draft`, `pending`, `approved`, `rejected`
 - `reviewer_notes`
 - `is_base_snapshot`
 - `created_at`
 - `approved_at`
+
+`revision_type` semantics:
+
+- `revision`: the original contributor is editing their own published entry. `entry` is set, `variant_of` is null. On approval, overwrites the existing `FolkloreEntry`.
+- `variant`: any authenticated contributor, including the original contributor, may submit an alternate version. The public entry page must show this action to every authenticated user. `entry` is null (pre-publish), `variant_of` points to the source entry. On approval, `publish_revision` creates a brand-new `FolkloreEntry`; the revision row is then updated to point `entry` at the new entry.
 
 Snapshot fields:
 
@@ -448,7 +477,55 @@ Snapshot fields:
 - `photo_upload`
 - `audio_upload`
 
-### 4.8 Review
+### 4.7.1 FolkloreMediaAsset
+
+Purpose: image asset inserted inside a folklore rich-text draft.
+
+Fields:
+
+- `id`: UUID
+- `revision`: nullable FK to `FolkloreRevision`
+- `entry`: nullable FK to `FolkloreEntry`
+- `uploaded_by`: FK to user
+- `image`: uploaded image file
+- `caption`: optional short caption
+- `alt_text`: optional accessibility description
+- `order`: integer ordering hint
+- `self_produced`: boolean
+- `source`: required when not self-produced
+- `created_at`
+
+Rules:
+
+- A media asset must belong to either a revision or an entry.
+- Draft/rejected revision owners can upload inline images through `POST /api/folklore/revisions/<revision_id>/media`.
+- The rich text editor uploads an image immediately, including when the draft has no title or text yet, and inserts it as semantic `<figure><img><figcaption>` HTML.
+- Each inserted image has an optional caption field directly beneath it inside the editor; browser prompt dialogs must not be used.
+- The saved figure preserves the image URL, accessible alternative text, optional caption, and `data-media-id`.
+- New folklore images are added through the rich-text editor only; the folklore form must not show a separate single-photo upload control.
+- Inline image URLs are served through the normal media path and render in draft preview, review, and public folklore detail output.
+
+### 4.8 FolkloreComment
+
+Purpose: flat public comment thread on a published folklore entry.
+
+Fields:
+
+- `id`: UUID
+- `entry`: FK to `FolkloreEntry` (CASCADE delete)
+- `author`: FK to `User` (PROTECT)
+- `body`: text, max 2000 characters
+- `created_at`: datetime (auto, ascending order)
+
+Rules:
+
+- Any authenticated user may post a comment.
+- Only the comment author or an admin/superuser may delete a comment.
+- Comments are flat (no threading or nesting).
+- Body must be non-empty and ≤ 2000 characters (enforced via `clean()`).
+- Exposed in the API under the "Community Voices" section of the folklore detail page.
+
+### 4.9 Review
 
 Purpose: dictionary governance decision.
 
@@ -466,7 +543,7 @@ Constraint:
 
 - one reviewer can review a revision only once per round.
 
-### 4.9 FolkloreReview
+### 4.10 FolkloreReview
 
 Purpose: folklore governance decision.
 
@@ -484,7 +561,7 @@ Constraint:
 
 - one reviewer can review a folklore revision only once per round.
 
-### 4.10 ReviewAdminOverride
+### 4.11 ReviewAdminOverride
 
 Purpose: audit high-impact admin moderation.
 
@@ -506,7 +583,7 @@ Rules:
 - only entries under re-review
 - notes required
 
-### 4.11 RoleApplication
+### 4.12 RoleApplication
 
 Fields:
 
@@ -524,7 +601,7 @@ Rules:
 - pending duplicate application for same role is rejected.
 - users with active role access cannot apply for that same/lower access.
 
-### 4.12 RoleApplicationDecision
+### 4.13 RoleApplicationDecision
 
 Fields:
 
@@ -543,7 +620,7 @@ Rules:
 - the same application appears in that actor's Approved view with an `awaiting_quorum` classification until final approval.
 - other eligible screeners who have not decided still see the application in Pending.
 
-### 4.13 RoleOnboardingRecord
+### 4.14 RoleOnboardingRecord
 
 Purpose: final accountability trail for role access.
 
@@ -559,7 +636,7 @@ Fields:
 - `accountability_notes`
 - `created_at`
 
-### 4.14 RoleInvitation
+### 4.15 RoleInvitation
 
 Purpose: email invitation and claim flow.
 
@@ -583,8 +660,41 @@ Rules:
 
 - new pending invite for same email+role revokes previous pending invite.
 - consultant/admin invitations require admin.
+- Invitation delivery uses `EmailMultiAlternatives`: a plain-text fallback plus a branded HTML alternative.
+- The HTML invitation identifies the inviter and role, explains the role, and includes an accept button plus a visible fallback URL.
 
-### 4.15 ContributionEvent
+### 4.16 Notification
+
+Purpose: durable, per-user in-app updates.
+
+Fields:
+
+- `id`: UUID
+- `user`: recipient
+- `notif_type`
+- `message`
+- `target_url`: optional internal route
+- `is_read`
+- `created_at`
+
+Notification types:
+
+- `submission_received`
+- `revision_approved`
+- `revision_rejected`
+- `milestone`
+- `comment_received`
+- `role_decided`
+
+Rules:
+
+- Notifications are ordered newest first.
+- Users can read only their own notifications.
+- Submission and flag-for-re-review actions do not create notifications.
+- Final approval/rejection decisions, final re-review approval/rejection, recognition milestones, comments on owned folklore entries, and role decisions create notifications.
+- Rejection notifications include reviewer feedback when available.
+
+### 4.17 ContributionEvent
 
 Purpose: authoritative credit ledger.
 
@@ -611,7 +721,7 @@ Rules:
 - revision credit awarded once per user+entry lifetime.
 - credit is historical and is not removed if content is later archived/deleted/rejected.
 
-### 4.16 UserContributionStats
+### 4.18 UserContributionStats
 
 Purpose: cached user totals.
 
@@ -622,7 +732,7 @@ Fields:
 - recognition: `contributor_level`, `reviewer_level`, `unlocked_badges`
 - `updated_at`
 
-### 4.17 MunicipalityStats
+### 4.19 MunicipalityStats
 
 Purpose: cached municipality totals.
 
@@ -634,7 +744,7 @@ Fields:
 - `last_month_calculated`
 - `updated_at`
 
-### 4.18 RecognitionEvent
+### 4.20 RecognitionEvent
 
 Purpose: immutable recognition feed.
 
@@ -653,7 +763,7 @@ Fields:
 - `payload`
 - `created_at`
 
-### 4.19 GamificationConfig
+### 4.21 GamificationConfig
 
 Purpose: admin-editable thresholds/titles.
 
@@ -675,7 +785,7 @@ Fallback defaults:
 - folklore badges: Story Contributor, Folklore Weaver, Tradition Keeper, Cultural Narrator, Oral Historian
 - quality badge: Accuracy Champion
 
-### 4.20 MunicipalityMonthlyWinner and GamificationRuntimeState
+### 4.22 MunicipalityMonthlyWinner and GamificationRuntimeState
 
 Purpose:
 
@@ -782,7 +892,9 @@ Flagging:
 
 Re-review decisions:
 
-- one reject makes entry `rejected`
+- one Reject/Archive removes the published entry from public view by archiving it
+- Return for Fixing creates an assigned correction draft from the selected approved snapshot
+- returned correction drafts remain editable as draft revisions internally but appear in the assignee workspace as Needs Changes
 - approval quorum restores entry to `approved`
 
 ### 6.3 Admin Override
@@ -858,6 +970,15 @@ Usage fields:
 
 - example sentence
 - translation
+- English translation is required whenever the main entry or a variant includes an Ivatan example sentence.
+- Dictionary headwords are normalized to an uppercase first letter with the remaining letters lowercase.
+- Meanings are normalized to an uppercase first character.
+- Dictionary example sentences and translations are normalized as sentence text: obvious all-caps input is converted to sentence case, the first character is capitalized, and terminal punctuation is added when the contributor omitted it.
+- Public attribution blocks show complete profile names, including an optional name extension (`Jr.`, `Sr.`, `II`, `III`, etc.) before any post-nominals; usernames are used only as a fallback.
+- Person names are display-normalized when obvious all-caps input is detected; usernames are stored/displayed lowercase and are not treated as display names.
+- Login resolves username handles case-insensitively before authentication so legacy accounts with mixed-case stored usernames remain able to sign in after password reset.
+- Invalid login copy includes a generic lowercase-username hint without confirming whether an account exists.
+- Profile affiliation rows and generated affiliation/occupation summaries use title-style capitalization for readability; post-nominals and credentials remain as entered.
 - usage notes
 - etymology
 - source/self-knowledge
@@ -996,6 +1117,8 @@ Profile achievements must show all in-progress next badges by category:
 - folklore
 - quality
 
+Earned badge sharing uses a single Share action per badge. The action opens an export modal where the user chooses either a square post image or vertical story image, previews the generated badge card, and downloads the image while a culturally affirming caption is copied to the clipboard. Captions must vary by badge family: dictionary captions emphasize language preservation, folklore captions emphasize cultural memory and storytelling, reviewer captions emphasize accuracy and stewardship, and quality captions emphasize care and trust.
+
 ### 9.5 Leaderboards
 
 User appears only if:
@@ -1079,8 +1202,9 @@ Admin users bypass maintenance restrictions.
 - `POST /api/auth/login`
 - `POST /api/auth/logout`
 - `GET /api/auth/me`
+- `POST /api/profile/onboarding/dismiss`
 
-Login returns authenticated user plus groups/profile status.
+Login returns authenticated user plus groups/profile status and the two onboarding prompt flags.
 
 ### 11.2 Site Content
 
@@ -1157,6 +1281,17 @@ Compatibility aliases:
 - `GET /api/leaderboard/municipality-winners`
 - `GET /api/yaru/members`
 
+### 11.9 Notifications
+
+- `GET /api/notifications`
+  - authentication required
+  - returns `unread_count` and the newest 40 notification rows
+- `POST /api/notifications/mark-read`
+  - authentication required
+  - empty body marks all unread rows
+  - JSON `{ "ids": ["<uuid>"] }` marks only selected rows
+  - the notification panel always shows its read-state control; it displays `Mark all as read` when unread rows exist and disabled `All read` otherwise
+
 ---
 
 ## 12. Screen Inventory and Required Contents
@@ -1169,6 +1304,7 @@ Must include:
 
 - sticky top navigation
 - brand/logo link to home
+- authenticated notification bell with unread badge and recent-notification panel
 - visitor links:
   - About the Project
   - The Digital Yaru
@@ -1206,7 +1342,7 @@ Must include:
 - featured/latest dictionary and folklore rows
 - Hall of Stewards preview
 - support statements when configured
-- partner details when configured
+- supporting organization details when configured
 - no join button for contributors/reviewers/admins
 
 ### 12.3 Login
@@ -1222,8 +1358,8 @@ Must include:
 - generic public error for backend/network failures
 - no localhost/Django operational details for public visitors
 - redirect rules:
-  - incomplete profile -> profile edit
-  - reviewer non-admin -> reviewer dashboard
+  - pending one-time onboarding -> Steward's Desk welcome screen
+  - reviewer non-admin without pending onboarding -> review section
   - other authenticated users -> Steward's Desk
 
 ### 12.4 About Project
@@ -1236,7 +1372,7 @@ Must include:
 - intro/body/rationale/future paragraphs
 - final quote
 - support statements if populated
-- partner details if populated
+- supporting organization details if populated
 
 ### 12.5 Digital Yaru
 
@@ -1367,6 +1503,9 @@ Must include:
   - approve
   - reject with notes
   - flag with notes where supported
+- full review preview must render submitted media and metadata needed for evaluation:
+  - dictionary audio/photo URLs, source and license fields, variants with variant audio, etymology, examples, and related words
+  - folklore rich text content, uploaded photo/audio, external media URL, source/media source, and license
 - no self-submissions in queues
 - my recent reviews
 - items awaiting quorum after my approval
@@ -1422,6 +1561,12 @@ Contributions section:
 
 - own dictionary contributions
 - own folklore contributions
+- separate status tabs for `rejected`, `draft`, `approved`, and `pending`
+- user-facing labels in this order: Needs Changes, Drafts, Approved, Submitted for Review
+- status counts and clear timestamps/status descriptions
+- rejected cards show reviewer feedback directly
+- rejected cards link back to the same revision for correction and resubmission
+- assigned correction drafts from Return for Fixing count under Needs Changes even though their stored revision status remains `draft`
 - create entry buttons
 - edit draft/revision buttons
 - view public entry links
@@ -1458,12 +1603,15 @@ Must include:
   - next in-progress folklore badge
   - quality badge progress
   - full badge catalog in modal
+  - share export modal for earned badges with square post and vertical story formats
 - recognition events
 - cultural stewardship
 - edit profile button only for owner
 - apply as reviewer button for contributor owner only
 - admin-only visibility controls
 - admin-only hide from leaderboard control
+
+Leaderboard recognition sharing uses one Share action for the profile leaderboard card and one Share action for the user's municipality card. Each opens the same export modal pattern: choose square post or vertical story format, preview the generated image, then download the image and copy a caption that frames the recognition as cultural stewardship rather than simple ranking.
 
 ### 12.14 Profile Edit
 
@@ -1517,6 +1665,7 @@ Must include:
 - public status checker
 - claim approved access flow
 - invitation acceptance flow
+- invitation acceptance activates the role and schedules the one-time welcome prompt for the first login
 - login navigation
 - hide general thank-you copy for existing contributors/reviewers
 
@@ -1557,6 +1706,14 @@ Onboarding:
 - rejection requires notes
 - self-decision forbidden
 - duplicate decision forbidden
+- the welcome prompt is shown only while pending and not dismissed
+- dismissing the welcome prompt persists across later logins
+
+Notifications:
+
+- unauthenticated notification requests return 401
+- users cannot list or mark another user's notifications
+- notification target URLs must be internal application routes
 
 Public login:
 
@@ -1600,14 +1757,29 @@ Backend env variables:
 - `DJANGO_STATIC_ROOT`
 - `DJANGO_MEDIA_ROOT`
 
+Security defaults:
+
+- `DJANGO_DEBUG` defaults to `False`; local development must explicitly set `DJANGO_DEBUG=True`.
+- `DJANGO_SECRET_KEY` is mandatory when debug is not true.
+- The backend must fail startup in staging/production if `DJANGO_SECRET_KEY` is missing rather than using a committed fallback secret.
+
 Production frontend:
 
 - split-origin: `VITE_API_BASE=https://api.chirinivatan.com`
 - same-origin reverse proxy: `VITE_API_BASE=`
 
+Production management-command invariant:
+
+- Every production Django management command must load the private server environment file and use the same Python interpreter configured for the backend service.
+- Bare `python3 manage.py ...` commands are forbidden in production because they may target fallback SQLite instead of the PostgreSQL database used by Gunicorn.
+- Before applying schema changes, print and verify `settings.DATABASES['default']['ENGINE']` and `settings.DATABASES['default']['NAME']`.
+- After migration, verify migration state using the same environment, restart the backend, exercise the affected endpoint, and inspect service logs.
+
 Production checklist:
 
-- migrate
+- load the production environment and verify the PostgreSQL target
+- migrate using the production virtual environment and environment variables
+- verify migration state using the same environment
 - collectstatic
 - build frontend
 - restart gunicorn
@@ -1667,6 +1839,10 @@ Manual QA must confirm:
 - admin override
 - role application/reviewer reason
 - email invitation
+- HTML invitation alternative and plain-text fallback
+- one-time post-invitation welcome screen and persistent dismissal
+- notification bell, unread count, navigation targets, and read state
+- own contribution status tabs and visible reviewer feedback on rejected submissions
 - consultant profile
 - site content save
 - FAQ role visibility

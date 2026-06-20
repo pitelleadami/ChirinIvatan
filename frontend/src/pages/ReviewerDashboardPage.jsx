@@ -19,9 +19,16 @@ const DECISION_LABELS = {
 }
 
 function excludeOwnSubmissions(rows, username) {
-  const normalizedUsername = String(username || '').trim().toLowerCase()
+  const normalizedUsername = String(username || '')
+    .trim()
+    .toLowerCase()
   if (!normalizedUsername) return rows
-  return rows.filter((row) => String(row.contributor_username || '').trim().toLowerCase() !== normalizedUsername)
+  return rows.filter(
+    (row) =>
+      String(row.contributor_username || '')
+        .trim()
+        .toLowerCase() !== normalizedUsername,
+  )
 }
 
 export default function ReviewerDashboardPage({ currentUser, refreshToken = 0 }) {
@@ -34,13 +41,24 @@ export default function ReviewerDashboardPage({ currentUser, refreshToken = 0 })
   const [rowResultByRevisionId, setRowResultByRevisionId] = useState({})
   const [rowErrorByRevisionId, setRowErrorByRevisionId] = useState({})
   const [reviewToast, setReviewToast] = useState(null)
+  // Bumped whenever the result toast is dismissed, so open preview modals close with it.
+  const [previewCloseToken, setPreviewCloseToken] = useState(0)
 
   const currentUsername = currentUser?.username || ''
-  const dictionaryRows = excludeOwnSubmissions(dashboard?.dictionary?.pending_submissions || [], currentUsername)
-  const dictionaryRereviewRows = excludeOwnSubmissions(dashboard?.dictionary?.pending_rereview || [], currentUsername)
+  const dictionaryRows = excludeOwnSubmissions(
+    dashboard?.dictionary?.pending_submissions || [],
+    currentUsername,
+  )
+  const dictionaryRereviewRows = excludeOwnSubmissions(
+    dashboard?.dictionary?.pending_rereview || [],
+    currentUsername,
+  )
   const dictionaryAwaitingRows = dashboard?.dictionary?.awaiting_quorum_after_my_approval || []
   const folkloreRows = excludeOwnSubmissions(dashboard?.folklore?.pending_submissions || [], currentUsername)
-  const folkloreRereviewRows = excludeOwnSubmissions(dashboard?.folklore?.pending_rereview || [], currentUsername)
+  const folkloreRereviewRows = excludeOwnSubmissions(
+    dashboard?.folklore?.pending_rereview || [],
+    currentUsername,
+  )
   const folkloreAwaitingRows = dashboard?.folklore?.awaiting_quorum_after_my_approval || []
 
   const queueSummary = [
@@ -77,9 +95,14 @@ export default function ReviewerDashboardPage({ currentUser, refreshToken = 0 })
     loadDashboard()
   }, [refreshToken])
 
+  function dismissReviewToast() {
+    setReviewToast(null)
+    setPreviewCloseToken((token) => token + 1)
+  }
+
   useEffect(() => {
     if (!reviewToast) return undefined
-    const timeoutId = window.setTimeout(() => setReviewToast(null), 4200)
+    const timeoutId = window.setTimeout(() => dismissReviewToast(), 4200)
     return () => window.clearTimeout(timeoutId)
   }, [reviewToast])
 
@@ -112,10 +135,7 @@ export default function ReviewerDashboardPage({ currentUser, refreshToken = 0 })
       folkloreRows.find((item) => item.revision_id === revisionId) ||
       folkloreRereviewRows.find((item) => item.revision_id === revisionId)
     const targetTitle = kind === 'dictionary' ? row?.term : row?.title
-    const path =
-      kind === 'dictionary'
-        ? '/api/reviews/dictionary/submit'
-        : '/api/reviews/folklore/submit'
+    const path = kind === 'dictionary' ? '/api/reviews/dictionary/submit' : '/api/reviews/folklore/submit'
 
     setActionBusyId(revisionId)
     setError('')
@@ -174,7 +194,7 @@ export default function ReviewerDashboardPage({ currentUser, refreshToken = 0 })
             <strong>{reviewToast.title}</strong>
             <p>{reviewToast.detail}</p>
           </div>
-          <button type="button" className="ghost compact-button" onClick={() => setReviewToast(null)}>
+          <button type="button" className="ghost compact-button" onClick={dismissReviewToast}>
             Close
           </button>
         </div>
@@ -182,14 +202,16 @@ export default function ReviewerDashboardPage({ currentUser, refreshToken = 0 })
 
       {!dashboard && !loading && (
         <section className="panel">
-          <p className="muted">Dashboard could not load yet. Check your reviewer/admin access, then refresh.</p>
+          <p className="muted">
+            Dashboard could not load yet. Check your reviewer/admin access, then refresh.
+          </p>
         </section>
       )}
 
       {dashboard && (
         <>
           <section className="panel">
-            <div className="stats-grid reviewer-stats-grid">
+            <div className="stats-grid reviewer-stats-grid desk-stats">
               {queueSummary.map((item) => (
                 <article key={item.label} className="stat-card">
                   <p className="stat-label">{item.label}</p>
@@ -215,6 +237,7 @@ export default function ReviewerDashboardPage({ currentUser, refreshToken = 0 })
                 submitDecision={submitDecision}
                 rowErrorByRevisionId={rowErrorByRevisionId}
                 rowResultByRevisionId={rowResultByRevisionId}
+                previewCloseToken={previewCloseToken}
               />
               <QueueSection
                 title="Re-review Queue"
@@ -227,6 +250,7 @@ export default function ReviewerDashboardPage({ currentUser, refreshToken = 0 })
                 submitDecision={submitDecision}
                 rowErrorByRevisionId={rowErrorByRevisionId}
                 rowResultByRevisionId={rowResultByRevisionId}
+                previewCloseToken={previewCloseToken}
               />
               <QueueSection
                 title="Awaiting Quorum"
@@ -239,6 +263,7 @@ export default function ReviewerDashboardPage({ currentUser, refreshToken = 0 })
                 submitDecision={submitDecision}
                 rowErrorByRevisionId={rowErrorByRevisionId}
                 rowResultByRevisionId={rowResultByRevisionId}
+                previewCloseToken={previewCloseToken}
               />
             </div>
 
@@ -257,6 +282,7 @@ export default function ReviewerDashboardPage({ currentUser, refreshToken = 0 })
                 submitDecision={submitDecision}
                 rowErrorByRevisionId={rowErrorByRevisionId}
                 rowResultByRevisionId={rowResultByRevisionId}
+                previewCloseToken={previewCloseToken}
               />
               <QueueSection
                 title="Re-review Queue"
@@ -269,6 +295,7 @@ export default function ReviewerDashboardPage({ currentUser, refreshToken = 0 })
                 submitDecision={submitDecision}
                 rowErrorByRevisionId={rowErrorByRevisionId}
                 rowResultByRevisionId={rowResultByRevisionId}
+                previewCloseToken={previewCloseToken}
               />
               <QueueSection
                 title="Awaiting Quorum"
@@ -281,6 +308,7 @@ export default function ReviewerDashboardPage({ currentUser, refreshToken = 0 })
                 submitDecision={submitDecision}
                 rowErrorByRevisionId={rowErrorByRevisionId}
                 rowResultByRevisionId={rowResultByRevisionId}
+                previewCloseToken={previewCloseToken}
               />
             </div>
           </section>

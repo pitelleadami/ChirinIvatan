@@ -41,9 +41,10 @@ Estimated time:
 - Admin test: 60-90 minutes
 
 Beta URL:
+Beta gate password:
 Assigned role:
-Assigned username:
-Temporary password:
+Platform username:
+Platform temporary password:
 Testing date/time:
 Contact person for questions:
 
@@ -125,19 +126,20 @@ Accessibility or device considerations:
 Please read before starting.
 
 1. Use only the assigned beta test URL.
-2. Use the account assigned to you, if one was provided.
-3. Do not upload private IDs, school records, legal documents, private family photos, or anything sensitive.
-4. Do not upload media unless you created it yourself or have permission to use it.
-5. If adding test dictionary or folklore entries, clearly mark them as beta test entries unless the coordinator asks for real content.
-6. Do not intentionally attack the website, guess other users' passwords, or try to bypass access controls.
-7. If something is confusing for more than 3 minutes, mark it as confusing and continue.
-8. If you encounter an error, copy the page URL, write what you clicked, and take a screenshot if possible.
-9. If a task cannot be completed, mark it as failed. That is useful feedback.
-10. Feedback can be honest. You are testing the system, not being tested yourself.
-11. Do not share your temporary password with anyone.
-12. Do not upload real private family stories, personal documents, or copyrighted media unless the coordinator specifically approved that content for beta testing.
-13. If you have a concern about test content, tell the coordinator. The coordinator must record the request but must not remove data without explicit project-owner approval.
-14. If a page says the site is under maintenance, report it unless the coordinator told you maintenance mode is part of the test.
+2. Enter the assigned beta password on the Chirin Ivatan beta access page.
+3. After the site opens, use your separately assigned Chirin Ivatan platform account.
+4. Do not upload private IDs, school records, legal documents, private family photos, or anything sensitive.
+5. Do not upload media unless you created it yourself or have permission to use it.
+6. If adding test dictionary or folklore entries, clearly mark them as beta test entries unless the coordinator asks for real content.
+7. Do not intentionally attack the website, guess other users' passwords, or try to bypass access controls.
+8. If something is confusing for more than 3 minutes, mark it as confusing and continue.
+9. If you encounter an error, copy the page URL, write what you clicked, and take a screenshot if possible.
+10. If a task cannot be completed, mark it as failed. That is useful feedback.
+11. Feedback can be honest. You are testing the system, not being tested yourself.
+12. Do not share either beta gate or platform credentials with anyone.
+13. Do not upload real private family stories, personal documents, or copyrighted media unless the coordinator specifically approved that content for beta testing.
+14. If you have a concern about test content, tell the coordinator. The coordinator must record the request but must not remove data without explicit project-owner approval.
+15. If a page says the site is under maintenance, report it unless the coordinator told you maintenance mode is part of the test.
 
 ---
 
@@ -202,6 +204,18 @@ Severity guide:
 ## 5. Bug Report Form
 
 Use one copy for each issue.
+
+For a shared spreadsheet, use `docs/SPEC-03_BETA_BUG_LOG_TEMPLATE.csv`. Open it in Excel or Google Sheets, delete the sample row, and let testers/coordinators add one row per issue.
+
+Suggested spreadsheet status values:
+
+- New
+- Needs review
+- Confirmed
+- Fixed
+- Retest
+- Closed
+- Deferred
 
 Issue number:
 
@@ -285,7 +299,40 @@ Issue numbers filed for this task:
 
 ---
 
-## 7. Pre-Test Questionnaire
+## 7. Pilot Tester Brief and Pre-Test Questionnaire
+
+Give this brief to every tester before they open the site.
+
+```text
+Thank you for joining the Chirin Ivatan pilot test.
+
+Chirin Ivatan is a digital dictionary and folklore archive for Ivatan language and cultural heritage.
+
+Please use the site as naturally as you can. We want to know what feels clear, confusing, trustworthy, broken, slow, or culturally off. You are not being tested; the system is.
+```
+
+### 7.1 What You Need Before Starting
+
+The coordinator should provide these details:
+
+- Beta website URL:
+- Beta gate password:
+- Your assigned role:
+- Platform username, if your role needs login:
+- Platform temporary password, if your role needs login:
+- Assigned test entries or review items, if any:
+- Where to send questions or bug reports:
+
+### 7.2 Quick Start
+
+1. Open the beta URL and enter the beta password on the access page if asked.
+2. Visitors stay logged out. Contributors/reviewers log in with the account provided.
+3. Do the tasks for your assigned role.
+4. Mark anything confusing, broken, slow, or culturally uncomfortable.
+5. Do not upload private files, copyrighted media, or real family stories unless approved.
+6. Answer your role's short questionnaire at the end.
+
+### 7.3 Pre-Test Questionnaire
 
 Answer before using the site.
 
@@ -321,7 +368,15 @@ Answer before using the site.
 
 ## 8. Visitor Test Instructions
 
-Use this if you are not logged in.
+Use this if you are testing as a regular visitor and should not log in.
+
+Visitor brief:
+
+```text
+Explore the site as a first-time visitor. Focus on whether the pages make sense, entries are easy to read, and the archive feels trustworthy.
+```
+
+Stay logged out. Complete at least Tasks V1 to V5. If time allows, continue through Tasks V6 to V7 for wider coverage. After testing, answer the Visitor Questionnaire in section 12.1.
 
 ### Task V1: Home Page
 
@@ -436,6 +491,49 @@ Result:
 
 Notes:
 
+### Task V6: Visitor Boundaries
+
+Optional if time allows.
+
+Steps:
+
+1. Open Join/Role Center.
+2. Open Login, but do not log in.
+3. Return to the public site.
+4. Check whether it is clear what visitors can do without an account.
+
+Check:
+
+- visitor access is clear
+- login/join prompts are understandable
+- contributor-only controls are not visible while logged out
+
+Result:
+
+- [ ] Completed
+- [ ] Completed with confusion
+- [ ] Failed
+
+Notes:
+
+### Task V7: Free Exploration
+
+Spend 5 minutes using the public site naturally.
+
+Look for:
+
+- anything you expected but could not find
+- anything confusing that was not part of the tasks
+- anything that feels missing before public visitors use the site
+
+Result:
+
+- [ ] Completed
+- [ ] Completed with confusion
+- [ ] Failed
+
+Notes:
+
 ---
 
 ## 9. Contributor Test Instructions
@@ -443,6 +541,14 @@ Notes:
 Use this if you are assigned a contributor account.
 
 Important: use beta test content unless the coordinator specifically asks for real Ivatan content.
+
+Contributor brief:
+
+```text
+Test what it feels like to help build the archive. Notice whether the forms are clear, sources are handled respectfully, and review status makes sense.
+```
+
+Log in with the assigned contributor account. Use beta test labels unless the coordinator gives approved real content. Complete at least Tasks C1 to C5. If time allows, continue through Tasks C6 to C9 for wider coverage. After testing, answer the Contributor Questionnaire in section 12.2.
 
 Suggested beta test labels:
 
@@ -551,7 +657,31 @@ Result:
 
 Notes:
 
-### Task C5: Apply as Reviewer
+### Task C5: Edit or Resume a Draft
+
+Steps:
+
+1. Open your draft/revision list.
+2. Reopen a saved dictionary or folklore draft.
+3. Change one field.
+4. Save again.
+5. Confirm the updated version appears correctly.
+
+Check:
+
+- draft/revision list is easy to find
+- editing does not erase previous work unexpectedly
+- save status is clear
+
+Result:
+
+- [ ] Completed
+- [ ] Completed with confusion
+- [ ] Failed
+
+Notes:
+
+### Task C6: Apply as Reviewer
 
 Only do this if instructed.
 
@@ -579,6 +709,74 @@ Result:
 
 Notes:
 
+### Task C7: Public View After Submission
+
+Optional if time allows.
+
+Steps:
+
+1. Open Dictionary or Folklore as a normal browser page.
+2. Search for the entry you submitted.
+3. Check whether the public page correctly hides or shows pending content.
+4. Open your public profile and check contribution/achievement display.
+
+Check:
+
+- pending submissions are not misleadingly public
+- profile contribution credit is understandable
+- public/private status is clear
+
+Result:
+
+- [ ] Completed
+- [ ] Completed with confusion
+- [ ] Failed
+
+Notes:
+
+### Task C8: Logout and Return
+
+Optional if time allows.
+
+Steps:
+
+1. Log out.
+2. Confirm contributor-only controls are no longer visible.
+3. Log back in.
+4. Return to your contributor area.
+
+Check:
+
+- logout works clearly
+- visitor view and contributor view are different in the right places
+- returning to contributor tools is easy
+
+Result:
+
+- [ ] Completed
+- [ ] Completed with confusion
+- [ ] Failed
+
+Notes:
+
+### Task C9: Free Exploration
+
+Spend 5 minutes using the contributor area naturally.
+
+Look for:
+
+- anything you expected but could not find
+- anything confusing that was not part of the tasks
+- anything that feels missing before real contributors use the site
+
+Result:
+
+- [ ] Completed
+- [ ] Completed with confusion
+- [ ] Failed
+
+Notes:
+
 ---
 
 ## 10. Reviewer Test Instructions
@@ -586,6 +784,14 @@ Notes:
 Use this if you are assigned a reviewer account.
 
 Do not approve/reject real cultural entries unless the coordinator explicitly asks you to. For beta, use assigned test submissions.
+
+Reviewer brief:
+
+```text
+Test whether reviewers have enough context to make fair decisions. Focus on source clarity, cultural respect, notes, queue status, and whether review actions feel safe.
+```
+
+Log in with the assigned reviewer account and review only assigned test items unless told otherwise. Complete at least Tasks R1 to R5. If time allows, continue through Tasks R6 to R9 for wider coverage. After testing, answer the Reviewer Questionnaire in section 12.3.
 
 ### Task R1: Reviewer Dashboard
 
@@ -660,9 +866,32 @@ Result:
 
 Notes:
 
-### Task R5: Role Application Screening
+### Task R5: Review Status and History
 
-If assigned.
+Steps:
+
+1. Open a test item you reviewed or was reviewed by others.
+2. Check its current status.
+3. Look for review notes, decision history, or quorum/progress details.
+4. Confirm it is clear what happened and what still needs to happen.
+
+Check:
+
+- status labels are understandable
+- review notes are visible where expected
+- quorum/progress text is not confusing
+
+Result:
+
+- [ ] Completed
+- [ ] Completed with confusion
+- [ ] Failed
+
+Notes:
+
+### Task R6: Role Application Screening
+
+Optional if assigned.
 
 Steps:
 
@@ -672,6 +901,74 @@ Steps:
 4. Approve or reject according to coordinator instruction.
 5. If rejecting, add notes.
 6. Check quorum/progress text.
+
+Result:
+
+- [ ] Completed
+- [ ] Completed with confusion
+- [ ] Failed
+
+Notes:
+
+### Task R7: Reviewer Boundary Check
+
+Optional if time allows.
+
+Steps:
+
+1. Open your own public profile or a test entry you submitted.
+2. Check whether self-review or inappropriate reviewer actions are hidden.
+3. Open a normal public dictionary or folklore entry.
+4. Confirm reviewer-only controls appear only where they make sense.
+
+Check:
+
+- own submissions are not available for self-review
+- reviewer/admin actions are not shown on unrelated pages by mistake
+- visitor-facing pages still look understandable
+
+Result:
+
+- [ ] Completed
+- [ ] Completed with confusion
+- [ ] Failed
+
+Notes:
+
+### Task R8: Logout and Return
+
+Optional if time allows.
+
+Steps:
+
+1. Log out.
+2. Confirm reviewer-only controls are no longer visible.
+3. Log back in.
+4. Return to the reviewer dashboard.
+
+Check:
+
+- logout works clearly
+- visitor view and reviewer view are different in the right places
+- returning to the review queue is easy
+
+Result:
+
+- [ ] Completed
+- [ ] Completed with confusion
+- [ ] Failed
+
+Notes:
+
+### Task R9: Free Exploration
+
+Spend 5 minutes using the reviewer area naturally.
+
+Look for:
+
+- anything you expected but could not find
+- anything confusing that was not part of the tasks
+- anything that feels missing before real reviewers use the site
 
 Result:
 
@@ -816,13 +1113,21 @@ Notes:
 
 ---
 
-## 12. Post-Test Questionnaire
+## 12. Role-Specific Post-Test Questionnaires
 
-Use 1-5 scale unless answer is written.
+Give each tester only the questionnaire for their assigned role.
 
-1 means strongly disagree or very poor. 5 means strongly agree or excellent.
+Scale: 1 = strongly disagree / very unclear, 5 = strongly agree / very clear.
 
-### 12.1 Overall Experience
+### 12.1 Visitor Questionnaire
+
+Use this for regular visitors who browsed the site while logged out.
+
+Tester name or code:
+
+Device/browser:
+
+Date:
 
 1. The purpose of Chirin Ivatan was clear.
    - [ ] 1
@@ -831,323 +1136,201 @@ Use 1-5 scale unless answer is written.
    - [ ] 4
    - [ ] 5
 
-2. The website was easy to navigate.
+2. I could find and browse the main pages easily.
    - [ ] 1
    - [ ] 2
    - [ ] 3
    - [ ] 4
    - [ ] 5
 
-3. The visual design felt appropriate for an Ivatan language and heritage archive.
+3. Dictionary and folklore entries were easy to understand.
    - [ ] 1
    - [ ] 2
    - [ ] 3
    - [ ] 4
    - [ ] 5
 
-4. The site felt trustworthy.
+4. Source, attribution, and contributor information felt clear and trustworthy.
    - [ ] 1
    - [ ] 2
    - [ ] 3
    - [ ] 4
    - [ ] 5
 
-5. The site loaded fast enough.
+5. The site worked well on my device.
    - [ ] 1
    - [ ] 2
    - [ ] 3
    - [ ] 4
    - [ ] 5
 
-6. The site worked well on my device.
-   - [ ] 1
-   - [ ] 2
-   - [ ] 3
-   - [ ] 4
-   - [ ] 5
+6. What confused you or slowed you down?
 
-7. What was your first impression?
+7. Did anything feel culturally unclear, inappropriate, or missing?
 
-8. What part felt most useful?
+8. What did you like most?
 
-9. What part felt most confusing?
+9. What should be fixed first?
 
-### 12.2 Public Archive
-
-1. Dictionary entries were easy to understand.
-   - [ ] 1
-   - [ ] 2
-   - [ ] 3
-   - [ ] 4
-   - [ ] 5
-
-2. Folklore entries were easy to browse and read.
-   - [ ] 1
-   - [ ] 2
-   - [ ] 3
-   - [ ] 4
-   - [ ] 5
-
-3. Source and attribution information was clear.
-   - [ ] 1
-   - [ ] 2
-   - [ ] 3
-   - [ ] 4
-   - [ ] 5
-
-4. Categories and subcategories made sense.
-   - [ ] 1
-   - [ ] 2
-   - [ ] 3
-   - [ ] 4
-   - [ ] 5
-
-5. Did any label, category, or wording feel culturally inappropriate or unclear?
-
-6. What dictionary information should be easier to find?
-
-7. What folklore information should be easier to find?
-
-### 12.3 Contribution Workflow
-
-Answer if you tested contributor tasks.
-
-1. Creating a dictionary draft was understandable.
-   - [ ] 1
-   - [ ] 2
-   - [ ] 3
-   - [ ] 4
-   - [ ] 5
-
-2. Creating a folklore draft was understandable.
-   - [ ] 1
-   - [ ] 2
-   - [ ] 3
-   - [ ] 4
-   - [ ] 5
-
-3. Source requirements were clear.
-   - [ ] 1
-   - [ ] 2
-   - [ ] 3
-   - [ ] 4
-   - [ ] 5
-
-4. Media upload/source requirements were clear.
-   - [ ] 1
-   - [ ] 2
-   - [ ] 3
-   - [ ] 4
-   - [ ] 5
-
-5. I understood what happened after submitting for review.
-   - [ ] 1
-   - [ ] 2
-   - [ ] 3
-   - [ ] 4
-   - [ ] 5
-
-6. What would make the contribution forms easier?
-
-7. Were there fields you did not understand?
-
-8. Did you know whether your draft was saved, pending, rejected, or approved?
-   - [ ] 1
-   - [ ] 2
-   - [ ] 3
-   - [ ] 4
-   - [ ] 5
-
-9. Did the reviewer application reason field feel easy to use?
-   - [ ] 1
-   - [ ] 2
-   - [ ] 3
-   - [ ] 4
-   - [ ] 5
-
-### 12.4 Review Workflow
-
-Answer if you tested reviewer/admin review tasks.
-
-1. Review queues were easy to understand.
-   - [ ] 1
-   - [ ] 2
-   - [ ] 3
-   - [ ] 4
-   - [ ] 5
-
-2. Approve/reject actions were clear.
-   - [ ] 1
-   - [ ] 2
-   - [ ] 3
-   - [ ] 4
-   - [ ] 5
-
-3. Notes requirements were clear.
-   - [ ] 1
-   - [ ] 2
-   - [ ] 3
-   - [ ] 4
-   - [ ] 5
-
-4. Re-review/flagging was understandable.
-   - [ ] 1
-   - [ ] 2
-   - [ ] 3
-   - [ ] 4
-   - [ ] 5
-
-5. Did you feel you had enough context to make a review decision?
-
-6. What extra information should reviewers see?
-
-7. Did the reviewer application show enough information to decide fairly?
-   - [ ] 1
-   - [ ] 2
-   - [ ] 3
-   - [ ] 4
-   - [ ] 5
-
-8. Did pending, quorum, approved, rejected, and re-review states make sense?
-   - [ ] 1
-   - [ ] 2
-   - [ ] 3
-   - [ ] 4
-   - [ ] 5
-
-### 12.5 Roles, Trust, and Privacy
-
-1. I understood the difference between visitor, contributor, reviewer, consultant, and admin.
-   - [ ] 1
-   - [ ] 2
-   - [ ] 3
-   - [ ] 4
-   - [ ] 5
-
-2. I understood who approves contributions.
-   - [ ] 1
-   - [ ] 2
-   - [ ] 3
-   - [ ] 4
-   - [ ] 5
-
-3. I understood how my profile/contributions would appear publicly.
-   - [ ] 1
-   - [ ] 2
-   - [ ] 3
-   - [ ] 4
-   - [ ] 5
-
-4. I felt comfortable with the source/attribution display.
-   - [ ] 1
-   - [ ] 2
-   - [ ] 3
-   - [ ] 4
-   - [ ] 5
-
-5. What privacy or attribution concern did you have, if any?
-
-6. Did you ever see a control that seemed meant for another role?
-
-7. Did the site explain enough about how submitted content is reviewed before publication?
-
-8. Would you feel comfortable contributing real Ivatan language or cultural content to this system?
-   - [ ] Yes
-   - [ ] Maybe
-   - [ ] No
+10. Would you recommend this site to someone interested in Ivatan language or culture?
+    - [ ] Yes
+    - [ ] Maybe
+    - [ ] No
 
 Why or why not?
 
-### 12.6 Recognition and Motivation
+11. How ready does the visitor experience feel for wider public use?
+    - [ ] 1 Not ready
+    - [ ] 2 Needs major fixes
+    - [ ] 3 Needs some fixes
+    - [ ] 4 Almost ready
+    - [ ] 5 Ready
 
-1. Badges and achievements were understandable.
+### 12.2 Contributor Questionnaire
+
+Use this for testers who logged in with a contributor account.
+
+Tester name or code:
+
+Device/browser:
+
+Date:
+
+Test entries submitted:
+
+1. Finding contributor tools was easy.
    - [ ] 1
    - [ ] 2
    - [ ] 3
    - [ ] 4
    - [ ] 5
 
-2. Badge progress felt motivating.
+2. Creating dictionary and folklore drafts was understandable.
    - [ ] 1
    - [ ] 2
    - [ ] 3
    - [ ] 4
    - [ ] 5
 
-3. Hall of Stewards rankings were understandable.
+3. Source, self-knowledge, attribution, and media ownership rules were clear.
    - [ ] 1
    - [ ] 2
    - [ ] 3
    - [ ] 4
    - [ ] 5
 
-4. Did any recognition/ranking feature feel discouraging or unfair?
-
-5. What would make recognition feel more meaningful?
-
-### 12.7 Accessibility, Mobile, and Performance
-
-1. Text was readable on my device.
+4. I understood whether my work was draft, pending, rejected, or approved.
    - [ ] 1
    - [ ] 2
    - [ ] 3
    - [ ] 4
    - [ ] 5
 
-2. Buttons and form controls were easy to tap or click.
+5. The contributor experience felt respectful of cultural knowledge and source ownership.
    - [ ] 1
    - [ ] 2
    - [ ] 3
    - [ ] 4
    - [ ] 5
 
-3. Tables, filters, badges, and cards fit on my screen.
+6. Which field or step confused you the most?
+
+7. What felt unnecessary, repetitive, or hard to answer?
+
+8. Did you understand how your name, profile, or contribution credit would appear publicly?
+
+9. Did you have any privacy, attribution, or cultural safety concern?
+
+10. Would you feel comfortable submitting real Ivatan language or folklore content through this system?
+    - [ ] Yes
+    - [ ] Maybe
+    - [ ] No
+
+Why or why not?
+
+11. What should be fixed first before real contributors use this?
+
+12. How ready does the contributor experience feel for wider beta use?
+    - [ ] 1 Not ready
+    - [ ] 2 Needs major fixes
+    - [ ] 3 Needs some fixes
+    - [ ] 4 Almost ready
+    - [ ] 5 Ready
+
+### 12.3 Reviewer Questionnaire
+
+Use this for testers who logged in with a reviewer account.
+
+Tester name or code:
+
+Device/browser:
+
+Date:
+
+Test submissions reviewed:
+
+1. Finding reviewer tools was easy.
    - [ ] 1
    - [ ] 2
    - [ ] 3
    - [ ] 4
    - [ ] 5
 
-4. I could tell when the site was loading or saving.
+2. Review queues were organized clearly.
    - [ ] 1
    - [ ] 2
    - [ ] 3
    - [ ] 4
    - [ ] 5
 
-5. Did any text overlap, get cut off, or become too small?
+3. Review items showed enough source, attribution, media, and contributor information.
+   - [ ] 1
+   - [ ] 2
+   - [ ] 3
+   - [ ] 4
+   - [ ] 5
 
-6. Did anything feel slow?
+4. Approve, reject, notes, and flag-for-re-review actions were clear.
+   - [ ] 1
+   - [ ] 2
+   - [ ] 3
+   - [ ] 4
+   - [ ] 5
 
-7. Did any alert or error message feel too technical for normal visitors?
+5. Pending, approved, rejected, quorum, and re-review states made sense.
+   - [ ] 1
+   - [ ] 2
+   - [ ] 3
+   - [ ] 4
+   - [ ] 5
 
-### 12.8 Final Questions
+6. What information did you need but could not find while reviewing?
 
-1. What are the top three things we should fix first?
+7. What made any review decision feel uncertain?
 
-2. What are the top three things you liked?
+8. Did any reviewer action feel risky, unclear, or too easy to misuse?
 
-3. What feature should be added in the future?
+9. Did you notice any wrong role permission or self-review issue?
 
-4. What should be removed, simplified, or hidden?
+10. What should reviewer notes include so contributors receive useful feedback?
 
-5. What screen needs the most improvement?
+11. What should be fixed first before real reviewers use this?
 
-6. Would you recommend this site to someone interested in Ivatan language or culture?
-   - [ ] Yes
-   - [ ] Maybe
-   - [ ] No
+12. How ready does the reviewer experience feel for wider beta use?
+    - [ ] 1 Not ready
+    - [ ] 2 Needs major fixes
+    - [ ] 3 Needs some fixes
+    - [ ] 4 Almost ready
+    - [ ] 5 Ready
 
-7. How ready does the site feel for a wider public launch?
-   - [ ] 1 Not ready
-   - [ ] 2 Needs major fixes
-   - [ ] 3 Needs some fixes
-   - [ ] 4 Almost ready
-   - [ ] 5 Ready
+### 12.4 Follow-Up Permission
 
-8. May we contact you for follow-up questions about your feedback?
-   - [ ] Yes
-   - [ ] No
+Ask every tester this final question after their role-specific questionnaire.
+
+May we contact you for follow-up questions about your feedback?
+
+- [ ] Yes
+- [ ] No
 
 Preferred contact, if yes:
 
@@ -1176,6 +1359,9 @@ This is a project feedback permission template, not a substitute for formal lega
 Before beta test:
 
 - [ ] choose staging/beta URL
+- [ ] enable the private beta gate on the frontend and direct API domain
+- [ ] distribute the current beta password only to approved testers
+- [ ] keep beta gate credentials separate from Chirin Ivatan platform credentials
 - [ ] confirm latest deployment is running
 - [ ] run smoke test
 - [ ] create visitor/contributor/reviewer/admin test accounts

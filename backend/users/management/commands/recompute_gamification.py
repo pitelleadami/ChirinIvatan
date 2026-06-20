@@ -13,7 +13,9 @@ from users.recognition import recompute_user_gamification
 
 
 class Command(BaseCommand):
-    help = "Recompute gamification stats, levels, badges, and municipality aggregates for all users."
+    help = (
+        "Recompute gamification stats, levels, badges, and municipality aggregates for all users."
+    )
 
     def handle(self, *args, **options):
         User = get_user_model()

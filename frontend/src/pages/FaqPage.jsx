@@ -1,20 +1,19 @@
 import { useEffect, useState } from 'react'
 
 import { apiRequest } from '../lib/api'
-import { ALL_FAQ_ROLES, DEFAULT_FAQ_SECTIONS, DICTIONARY_FIELD_GUIDES, ensureCoreFaqSections } from '../lib/faqContent'
+import {
+  ALL_FAQ_ROLES,
+  DEFAULT_FAQ_SECTIONS,
+  DICTIONARY_FIELD_GUIDES,
+  ensureCoreFaqSections,
+} from '../lib/faqContent'
 import { normalizeSiteContent } from '../lib/siteContent'
 
 const HIDDEN_FAQ_INTROS = new Set([
   'Use Chirin Ivatan as a public cultural reference. Visitors can read approved dictionary entries, browse folklore, learn about the project, and discover community contributors without needing an account.',
+  'A public trust guide explaining how dictionary and folklore contributions move from private draft to reviewed archive entry.',
+  'Reviewers protect quality and cultural integrity by validating submitted dictionary and folklore revisions before publication.',
 ])
-
-const ROLE_LABELS = {
-  admin: 'Admin',
-  consultant: 'Consultant',
-  contributor: 'Contributor',
-  reviewer: 'Reviewer',
-  visitor: 'Visitor',
-}
 
 function userRole(currentUser) {
   const groups = currentUser?.groups || []
@@ -84,7 +83,11 @@ export default function FaqPage({ currentUser }) {
   const [loadingContent, setLoadingContent] = useState(true)
   const groups = visibleGroupsForRole(role, faqSections)
   const showContributorGuides =
-    currentUser?.is_authenticated || role === 'contributor' || role === 'reviewer' || role === 'consultant' || role === 'admin'
+    currentUser?.is_authenticated ||
+    role === 'contributor' ||
+    role === 'reviewer' ||
+    role === 'consultant' ||
+    role === 'admin'
 
   useEffect(() => {
     apiRequest('/api/site-content')
@@ -120,14 +123,8 @@ export default function FaqPage({ currentUser }) {
         <div>
           <p className="profile-kicker">Help Center</p>
           <h1>FAQs and Guides</h1>
-          <p className="faq-hero-copy">
-            Find quick answers by role, then open only the details you need.
-          </p>
         </div>
-        <div className="faq-hero-meta" aria-label="FAQ view summary">
-          <span>{ROLE_LABELS[role]} View</span>
-          {loadingContent && <span>Updating...</span>}
-        </div>
+        {loadingContent && <span className="faq-updating-status">Updating...</span>}
       </header>
 
       <div className="faq-layout">
@@ -160,7 +157,9 @@ export default function FaqPage({ currentUser }) {
                     <h2>{group.title}</h2>
                   </div>
                 </div>
-                {group.intro && !HIDDEN_FAQ_INTROS.has(group.intro) && <p className="faq-group-intro">{group.intro}</p>}
+                {group.intro && !HIDDEN_FAQ_INTROS.has(group.intro) && (
+                  <p className="faq-group-intro">{group.intro}</p>
+                )}
                 <div className="faq-items">
                   {group.items.map((item) => (
                     <details key={item.q} className="faq-item">
@@ -181,10 +180,6 @@ export default function FaqPage({ currentUser }) {
                   <h2>Dictionary Field Guides</h2>
                 </div>
               </div>
-              <p className="faq-group-intro">
-                These guides explain the fields that often confuse first-time contributors. Builder Learn More links open this
-                section directly.
-              </p>
               <div className="faq-guide-grid">
                 {DICTIONARY_FIELD_GUIDES.map((guide) => (
                   <GuideCard key={guide.id} guide={guide} />

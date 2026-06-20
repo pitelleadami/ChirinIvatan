@@ -1,0 +1,6 @@
+# Saved login sessions (contain auth cookies) — never commit
+.auth/
+# Playwright artifacts
+.report/
+.shots/
+../test-results/

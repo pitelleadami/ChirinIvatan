@@ -7,6 +7,7 @@ This script is intentionally literal.
 Follow it in order.
 
 Canonical note:
+
 - Current app-wide rebuild rules live in `docs/SPEC-03_REBUILD_SPEC.md`.
 - Current screen inventory lives in `docs/SPEC-03_PLAIN_ENGLISH_PAGE_MAP.md`.
 - If this older first-page script conflicts with those files, use the rebuild spec and screen map.
@@ -14,10 +15,13 @@ Canonical note:
 ---
 
 ## 0) What you are building
+
 You are connecting this page:
+
 - `Reviewer Dashboard`
 
 To these backend endpoints:
+
 - `GET /api/reviews/dashboard`
 - `POST /api/reviews/dictionary/submit`
 - `POST /api/reviews/folklore/submit`
@@ -27,30 +31,36 @@ To these backend endpoints:
 ## 1) Open project and run servers
 
 ### 1.1 Terminal A (backend)
+
 ```bash
-cd /Users/admin/Documents/GitHub/ChirinIvatan/backend
+cd /path/to/ChirinIvatan/backend
 source ../venv/bin/activate
 python3 manage.py migrate
 python3 manage.py runserver
 ```
 
 Expected:
+
 - backend runs on `http://127.0.0.1:8000`
 
 ### 1.2 Terminal B (frontend)
+
 ```bash
-cd /Users/admin/Documents/GitHub/ChirinIvatan/frontend
+cd /path/to/ChirinIvatan/frontend
 npm install
 npm run dev
 ```
 
 Expected:
+
 - frontend runs on `http://localhost:5173`
 
 ---
 
 ## 2) Confirm required files exist
+
 In your editor, confirm these files are present:
+
 - `frontend/src/lib/api.js`
 - `frontend/src/components/QueueSection.jsx`
 - `frontend/src/pages/ReviewerDashboardPage.jsx`
@@ -63,24 +73,31 @@ If missing, stop and create/fix these first.
 ## 3) Step-by-step code workflow
 
 ## Step 3.1: API wrapper check (`api.js`)
+
 Open:
+
 - `frontend/src/lib/api.js`
 
 Confirm it has:
+
 - CSRF token logic
 - `credentials: 'include'`
 - error throw when response is not ok
 
 Why this matters:
+
 - all POST requests for approve/reject/flag need CSRF + session cookie.
 
 ---
 
 ## Step 3.2: Reusable queue card (`QueueSection.jsx`)
+
 Open:
+
 - `frontend/src/components/QueueSection.jsx`
 
 Confirm the component supports:
+
 - row title + status
 - notes textarea
 - Approve button
@@ -89,15 +106,19 @@ Confirm the component supports:
 - row-level success/result message
 
 Why this matters:
+
 - dashboard has pending/re-review queues and this avoids repeating large JSX blocks.
 
 ---
 
 ## Step 3.3: Dashboard page logic (`ReviewerDashboardPage.jsx`)
+
 Open:
+
 - `frontend/src/pages/ReviewerDashboardPage.jsx`
 
 Make sure page has these states:
+
 - `dashboard`
 - `loading`
 - `error`
@@ -107,6 +128,7 @@ Make sure page has these states:
 - `rowErrorByRevisionId`
 
 Make sure page has these functions:
+
 - `loadDashboard()` -> GET dashboard endpoint
 - `submitDecision({ kind, revisionId, decision })` -> POST dictionary/folklore decision
 - local note validation: reject/flag requires notes
@@ -114,10 +136,13 @@ Make sure page has these functions:
 ---
 
 ## Step 3.4: Route visibility in app shell
+
 Open:
+
 - `frontend/src/App.jsx`
 
 Confirm:
+
 - there is a tab/button labeled `Reviewer Dashboard`
 - route is wired to render `<ReviewerDashboardPage />`
 
@@ -132,11 +157,13 @@ If route is not wired, add it before testing.
 3. Click `Load Dashboard`
 
 Expected:
+
 - no crash
 - queues render (or empty-state messages)
 - if not logged in: clear auth error message
 
 If error is `Authentication required`:
+
 1. open `http://127.0.0.1:8000/admin/`
 2. log in as reviewer/admin user
 3. return to dashboard page and reload
@@ -146,11 +173,13 @@ If error is `Authentication required`:
 ## 5) Decision action test (approve/reject/flag)
 
 ### 5.1 Approve test
+
 1. choose one pending row
 2. click `Approve`
 3. expect success row message and queue refresh
 
 ### 5.2 Reject test (with required notes)
+
 1. choose one pending row
 2. click `Reject` **without notes**
 3. expect UI error: reject requires notes
@@ -159,6 +188,7 @@ If error is `Authentication required`:
 6. expect success + refreshed queue
 
 ### 5.3 Flag test (live entry detail)
+
 1. open a live Dictionary or Folklore entry as a reviewer/admin
 2. confirm a flaggable entry shows `Flag for re-review`
 3. click it and submit without notes -> expect UI error
@@ -169,6 +199,7 @@ If error is `Authentication required`:
 ---
 
 ## 6) Exact payload the page must send
+
 For dictionary:
 
 ```json
@@ -180,18 +211,22 @@ For dictionary:
 ```
 
 Path:
+
 - `/api/reviews/dictionary/submit`
 
 For folklore:
+
 - same payload format
 - path: `/api/reviews/folklore/submit`
 
 ---
 
 ## 7) DevTools verification (required)
+
 Open browser DevTools -> Network tab.
 
 For each action confirm:
+
 1. method is `POST`
 2. endpoint is correct
 3. request body has revision_id/decision/notes
@@ -199,6 +234,7 @@ For each action confirm:
 5. UI displays returned result
 
 If request fails:
+
 - copy exact response `detail`
 - fix based on detail (do not guess)
 
@@ -207,7 +243,9 @@ If request fails:
 ## 8) Common errors and direct fixes
 
 ## Error: `403 CSRF verification failed`
+
 Fix:
+
 1. backend running on `127.0.0.1:8000`
 2. frontend on `localhost:5173`
 3. check `backend/backend/settings.py` has trusted origins for 5173
@@ -215,40 +253,52 @@ Fix:
 5. log in again and refresh page
 
 ## Error: `401 Authentication required`
+
 Fix:
+
 - login first as reviewer/admin, then retry
 
 ## Error: `Invalid revision_id UUID`
+
 Fix:
+
 - ensure selected row has real UUID
 - do not use placeholder text
 
 ## Error: row state does not refresh
+
 Fix:
+
 - ensure `submitDecision` calls `await loadDashboard()` after success
 
 ---
 
 ## 9) Style pass (connect Figma look)
+
 After behavior works, style to match Figma:
 
 Files:
+
 - `frontend/src/App.css`
 - `frontend/src/index.css`
 
 Checklist:
+
 - panel background and border match Figma
 - button colors match status (approve/reject in queues; flag on live detail pages)
 - note textarea spacing and readability
 - mobile layout stacks buttons/fields
 
 Important:
+
 - behavior first, style second
 
 ---
 
 ## 10) Done checklist for Page 1
+
 Mark done only if all are true:
+
 - [ ] Dashboard loads from backend endpoint
 - [ ] Approve works
 - [ ] Reject requires notes and works
@@ -261,25 +311,31 @@ Mark done only if all are true:
 ---
 
 ## 11) Commit this page
+
 Run:
+
 ```bash
-cd /Users/admin/Documents/GitHub/ChirinIvatan/frontend
+cd /path/to/ChirinIvatan/frontend
 npm run build
 ```
 
 Then backend sanity check:
+
 ```bash
-cd /Users/admin/Documents/GitHub/ChirinIvatan/backend
+cd /path/to/ChirinIvatan/backend
 python3 manage.py check
 ```
 
 Commit message suggestion:
+
 - `feat(frontend): integrate reviewer dashboard with review endpoints`
 
 ---
 
 ## 12) What to do next
+
 After this first page is stable, move in this order:
+
 1. Folklore Viewer
 2. Dictionary Viewer
 3. Folklore Draft Builder
@@ -288,4 +344,5 @@ After this first page is stable, move in this order:
 6. Role Center
 
 Do the same pattern per page:
+
 - load -> render -> submit -> handle errors -> style -> test -> commit

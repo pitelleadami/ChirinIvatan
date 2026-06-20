@@ -309,6 +309,8 @@ TSWLatexianTemp*
 
 # Virtual environment
 venv/
+.venv/
+.cache/
 
 # Python / Django generated files
 __pycache__/
@@ -320,6 +322,23 @@ backend/staticfiles/
 
 # Local uploads and generated media should be handled by production storage/backups.
 backend/media/
+
+# Node / frontend generated files
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+
+# Local environment files
+.env
+.env.*
+backend/.env.local
+backend/.env.staging
+backend/.env.production
+frontend/.env.local
+frontend/.env.staging
+frontend/.env.production
 
 # macOS / editor noise
 .DS_Store

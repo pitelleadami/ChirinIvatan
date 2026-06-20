@@ -2,6 +2,7 @@
 
 Use this when the table format is hard to manage.  
 Fill each item with:
+
 - `Status:` `PASS` / `FAIL` / `BLOCKED` / `N/A`
 - `Remarks:` your notes
 - `Evidence:` screenshot path, URL, JSON snippet, or admin page note
@@ -11,6 +12,7 @@ Fill each item with:
 ## Coverage and Confidence
 
 This worksheet is comprehensive for SPEC-03 backend behavior:
+
 - state transitions
 - review/re-review/admin override
 - dictionary mother/variant logic
@@ -19,6 +21,7 @@ This worksheet is comprehensive for SPEC-03 backend behavior:
 - role access and public masking
 
 What it does not fully guarantee by itself:
+
 - custom frontend UI polish/usability
 - frontend-only controls not yet implemented
 
@@ -142,8 +145,8 @@ If all items below pass and no item is blocked, you can reasonably mark backend/
   - Remarks:
   - Evidence:
 
-- [ ] `DI-08` Re-review reject once: entry `rejected`
-  - How to check: While entry is under review, submit one reject in that round; confirm entry goes rejected.
+- [ ] `DI-08` Re-review Reject/Archive once: entry `archived`
+  - How to check: While entry is under review, submit one Reject/Archive in that round; confirm entry is removed from public view and archived.
   - Status:
   - Remarks:
   - Evidence:
@@ -302,8 +305,8 @@ If all items below pass and no item is blocked, you can reasonably mark backend/
   - Remarks:
   - Evidence:
 
-- [ ] `FO-15` Re-review reject once: entry `rejected`
-  - How to check: In active folklore re-review round, submit one reject; entry should become rejected immediately.
+- [ ] `FO-15` Re-review Reject/Archive once: entry `archived`
+  - How to check: In active folklore re-review round, submit one Reject/Archive; entry should be removed from public view and archived immediately.
   - Status:
   - Remarks:
   - Evidence:

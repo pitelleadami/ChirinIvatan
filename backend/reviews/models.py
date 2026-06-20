@@ -10,10 +10,12 @@ Contains:
 """
 
 import uuid
+
 from django.conf import settings
 from django.db import models
+
 from dictionary.models import EntryRevision
-from folklore.models import FolkloreEntry, FolkloreRevision
+from folklore.models import FolkloreRevision
 
 
 class Review(models.Model):
@@ -24,11 +26,12 @@ class Review(models.Model):
     - round 0: initial review
     - round N>0: re-review rounds triggered by flags
     """
+
     class Decision(models.TextChoices):
         APPROVE = "approve", "Approve"
         REJECT = "reject", "Reject"
         FLAG = "flag", "Flag for Re-review"
-
+        RETURN = "return", "Return for Fixing"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
@@ -36,8 +39,8 @@ class Review(models.Model):
         EntryRevision,
         on_delete=models.CASCADE,
         related_name="reviews",
-        null=True,      # kept nullable for migration/backward compatibility
-        blank=True,     # kept nullable for migration/backward compatibility
+        null=True,  # kept nullable for migration/backward compatibility
+        blank=True,  # kept nullable for migration/backward compatibility
     )
 
     reviewer = models.ForeignKey(
@@ -75,6 +78,7 @@ class ReviewAdminOverride(models.Model):
 
     Used for high-priority moderation decisions that supersede normal quorum flow.
     """
+
     class TargetType(models.TextChoices):
         DICTIONARY = "dictionary", "Dictionary"
         FOLKLORE = "folklore", "Folklore"
@@ -121,10 +125,7 @@ class ReviewAdminOverride(models.Model):
         ordering = ["-created_at"]
 
     def __str__(self):
-        return (
-            f"{self.target_type}:{self.action} "
-            f"{self.status_before}->{self.status_after}"
-        )
+        return f"{self.target_type}:{self.action} " f"{self.status_before}->{self.status_after}"
 
 
 class FolkloreReview(models.Model):
@@ -133,10 +134,12 @@ class FolkloreReview(models.Model):
 
     Mirrors dictionary review model semantics.
     """
+
     class Decision(models.TextChoices):
         APPROVE = "approve", "Approve"
         REJECT = "reject", "Reject"
         FLAG = "flag", "Flag for Re-review"
+        RETURN = "return", "Return for Fixing"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
@@ -173,3 +176,75 @@ class FolkloreReview(models.Model):
 
     def __str__(self):
         return f"{self.reviewer} → {self.decision} (folklore)"
+
+
+class CorrectionAssignment(models.Model):
+    """
+    Audited handoff created when a flagged public item needs contributor fixes.
+
+    The source snapshot remains immutable. The assigned correction revision is
+    a separate draft that follows the normal review workflow.
+    """
+
+    class TargetType(models.TextChoices):
+        DICTIONARY = "dictionary", "Dictionary"
+        FOLKLORE = "folklore", "Folklore"
+
+    class Scope(models.TextChoices):
+        ORIGINAL = "original", "Original Entry"
+        REVISION = "revision", "Approved Revision"
+
+    class Status(models.TextChoices):
+        OPEN = "open", "Open"
+        SUBMITTED = "submitted", "Submitted"
+        RESOLVED = "resolved", "Resolved"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    target_type = models.CharField(max_length=20, choices=TargetType.choices)
+    scope = models.CharField(max_length=20, choices=Scope.choices)
+    assigned_to = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="correction_assignments",
+    )
+    returned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="corrections_returned",
+    )
+    notes = models.TextField()
+    source_snapshot = models.JSONField(default=dict)
+    dictionary_source_revision = models.ForeignKey(
+        EntryRevision,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="source_correction_assignments",
+    )
+    dictionary_correction_revision = models.OneToOneField(
+        EntryRevision,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="correction_assignment",
+    )
+    folklore_source_revision = models.ForeignKey(
+        FolkloreRevision,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="source_correction_assignments",
+    )
+    folklore_correction_revision = models.OneToOneField(
+        FolkloreRevision,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="correction_assignment",
+    )
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.OPEN)
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]

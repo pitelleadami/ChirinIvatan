@@ -7,24 +7,44 @@
   - reviewer/admin direct invitations
 */
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
+import TurnstileWidget from '../components/TurnstileWidget'
 import { apiRequest } from '../lib/api'
 import { emailValidationMessage } from '../lib/emailValidation'
 import { ROUTES, navigate } from '../lib/router'
 import { DEFAULT_SITE_CONTENT, normalizeSiteContent } from '../lib/siteContent'
 
+function PasswordEyeIcon({ visible }) {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+      <path
+        d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" strokeWidth="1.8" />
+      {!visible && (
+        <path d="M4 4l16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      )}
+    </svg>
+  )
+}
+
 const MUNICIPALITIES = ['Basco', 'Mahatao', 'Ivana', 'Uyugan', 'Sabtang', 'Itbayat']
 const EMPTY_CULTURAL_AFFILIATION = { role: '', organization: '' }
 const EMPTY_OTHER_AFFILIATION = { designation: '', institution: '' }
-const EMPTY_CAPTCHA = { question: '', token: '', expires_in_seconds: 0 }
+const USERNAME_PATTERN = /^[\w.@+-]+$/
+const USERNAME_HELP_TEXT = 'Use letters, numbers, and @/./+/-/_ only. Do not use spaces.'
 
 const ROLE_OPTIONS = [
   {
     value: 'contributor',
     title: 'Contributor',
     summary: 'Share words, stories, and media that help preserve Ivatan language and heritage.',
-    approval: 'Review flow: approved by any two reviewers/admins.',
     whoCanJoin: 'Anyone who cares to contribute and learn.',
     details: [
       'Add Ivatan words, meanings, pronunciations, and usage notes',
@@ -36,7 +56,6 @@ const ROLE_OPTIONS = [
     value: 'reviewer',
     title: 'Reviewer',
     summary: 'Help keep published entries accurate, respectful, and culturally grounded.',
-    approval: 'Review flow: approved by any two reviewers/admins.',
     whoCanJoin: 'Language stewards, educators, and cultural advocates.',
     details: [
       'Review dictionary terms, folklore entries, and revisions',
@@ -76,6 +95,7 @@ function applicationHelp(row) {
 }
 
 function publicStatusLabel(row) {
+  if (row.public_status === 'approved_pending_activation') return 'Awaiting activation'
   if (row.public_status === 'approved_final' || row.status === 'approved') return 'Approved final'
   if (row.public_status === 'rejected' || row.status === 'rejected') return 'Rejected'
   if (row.approval_count > 0) return `Approved by ${row.approval_count}`
@@ -99,15 +119,20 @@ export default function RoleCenterPage({ currentUser = {} }) {
   const [invitationClaimForm, setInvitationClaimForm] = useState({
     first_name: '',
     last_name: '',
+    name_extension: '',
     municipality: '',
     username: '',
     password: '',
     passwordConfirm: '',
   })
   const [inviteCelebration, setInviteCelebration] = useState(null)
+  const [activationCelebration, setActivationCelebration] = useState(null)
+  const [showInvitePassword, setShowInvitePassword] = useState(false)
+  const [showInvitePasswordConfirm, setShowInvitePasswordConfirm] = useState(false)
   const [applicantForm, setApplicantForm] = useState({
     first_name: '',
     last_name: '',
+    name_extension: '',
     email: '',
     municipality: '',
     cultural_affiliations: [{ ...EMPTY_CULTURAL_AFFILIATION }],
@@ -115,11 +140,10 @@ export default function RoleCenterPage({ currentUser = {} }) {
     bio: '',
     reviewer_reason: '',
   })
-  const [captchaChallenge, setCaptchaChallenge] = useState(EMPTY_CAPTCHA)
-  const [captchaAnswer, setCaptchaAnswer] = useState('')
-  const [loadingCaptcha, setLoadingCaptcha] = useState(false)
+  const [turnstileToken, setTurnstileToken] = useState('')
   const [siteContent, setSiteContent] = useState(DEFAULT_SITE_CONTENT)
   const [applicantPolicyAccepted, setApplicantPolicyAccepted] = useState(false)
+  const [policyModal, setPolicyModal] = useState(null)
   const [invitationPolicyAccepted, setInvitationPolicyAccepted] = useState(false)
 
   // Shared request/feedback state used across all sections.
@@ -137,10 +161,12 @@ export default function RoleCenterPage({ currentUser = {} }) {
   const currentUserApplicationKey = isAuthenticated
     ? String(currentUser.username || currentUser.email || currentUser.id || 'authenticated-user')
     : ''
-  const ownsMyApplications = Boolean(currentUserApplicationKey) && myApplicationsUserKey === currentUserApplicationKey
+  const ownsMyApplications =
+    Boolean(currentUserApplicationKey) && myApplicationsUserKey === currentUserApplicationKey
   const visibleMyApplications = isAuthenticated && ownsMyApplications ? myApplications : []
   const hasPendingSelectedRole =
-    Boolean(applyRole) && visibleMyApplications.some((row) => row.target_role === applyRole && row.status === 'pending')
+    Boolean(applyRole) &&
+    visibleMyApplications.some((row) => row.target_role === applyRole && row.status === 'pending')
   const alreadyHasSelectedRole =
     applyRole === 'reviewer'
       ? isReviewerUser || isAdminUser
@@ -163,17 +189,6 @@ export default function RoleCenterPage({ currentUser = {} }) {
     if (!applyRole) return null
     return (
       <div className="policy-consent-panel compact-policy-consent">
-        <div className="policy-consent-copy">
-          <p className="profile-kicker">Policy & Consent</p>
-          <h4>Contributor Agreement</h4>
-          {siteContent.contributor_agreement_paragraphs.map((paragraph) => (
-            <p key={paragraph}>{paragraph}</p>
-          ))}
-          <h4>Privacy Notice</h4>
-          {siteContent.privacy_notice_paragraphs.map((paragraph) => (
-            <p key={paragraph}>{paragraph}</p>
-          ))}
-        </div>
         <label className="checkbox-inline policy-consent-check" htmlFor="role-application-policy-consent">
           <input
             id="role-application-policy-consent"
@@ -184,8 +199,83 @@ export default function RoleCenterPage({ currentUser = {} }) {
               if (event.target.checked && applicantFormError.includes('policy')) setApplicantFormError('')
             }}
           />
-          <span>I have read and accept these terms before submitting my application.</span>
+          <span>
+            I have read the{' '}
+            <button
+              type="button"
+              className="inline-link-button policy-modal-link"
+              onClick={() => setPolicyModal('agreement')}
+            >
+              Agreement
+            </button>{' '}
+            and{' '}
+            <button
+              type="button"
+              className="inline-link-button policy-modal-link"
+              onClick={() => setPolicyModal('privacy')}
+            >
+              Privacy Policy
+            </button>
+            .
+          </span>
         </label>
+      </div>
+    )
+  }
+
+  function renderPolicyModal() {
+    if (!policyModal) return null
+    const isAgreement = policyModal === 'agreement'
+    const title = isAgreement ? 'Contributor Agreement' : 'Privacy Policy'
+    const paragraphs = isAgreement
+      ? siteContent.contributor_agreement_paragraphs
+      : siteContent.privacy_notice_paragraphs
+    return (
+      <div
+        className="celebration-backdrop policy-modal-backdrop"
+        role="presentation"
+        onClick={() => setPolicyModal(null)}
+      >
+        <article
+          className="policy-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="policy-modal-title"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="section-heading">
+            <div>
+              <p className="profile-kicker">Policy</p>
+              <h2 id="policy-modal-title">{title}</h2>
+            </div>
+          </div>
+          <div className="policy-modal-copy">
+            {paragraphs.map((paragraph) => (
+              <p key={paragraph}>{paragraph}</p>
+            ))}
+          </div>
+          <div className="actions">
+            <button type="button" onClick={() => setPolicyModal(null)}>
+              Close
+            </button>
+          </div>
+        </article>
+      </div>
+    )
+  }
+
+  function renderVerification({ idPrefix, helpText }) {
+    return (
+      <div className="captcha-panel">
+        <div>
+          <p className="profile-kicker">Verification</p>
+          <p className="muted">{helpText}</p>
+        </div>
+        <TurnstileWidget
+          action={idPrefix}
+          onToken={setTurnstileToken}
+          onError={(message) => setError(message)}
+        />
       </div>
     )
   }
@@ -193,9 +283,7 @@ export default function RoleCenterPage({ currentUser = {} }) {
   function updateApplicantAffiliation(group, index, field, value) {
     setApplicantForm((current) => ({
       ...current,
-      [group]: current[group].map((row, rowIndex) => (
-        rowIndex === index ? { ...row, [field]: value } : row
-      )),
+      [group]: current[group].map((row, rowIndex) => (rowIndex === index ? { ...row, [field]: value } : row)),
     }))
   }
 
@@ -216,9 +304,7 @@ export default function RoleCenterPage({ currentUser = {} }) {
   }
 
   function addApplicantAffiliation(group) {
-    const emptyRow = group === 'cultural_affiliations'
-      ? EMPTY_CULTURAL_AFFILIATION
-      : EMPTY_OTHER_AFFILIATION
+    const emptyRow = group === 'cultural_affiliations' ? EMPTY_CULTURAL_AFFILIATION : EMPTY_OTHER_AFFILIATION
     setApplicantForm((current) => ({
       ...current,
       [group]: [...current[group], { ...emptyRow }],
@@ -226,9 +312,7 @@ export default function RoleCenterPage({ currentUser = {} }) {
   }
 
   function removeApplicantAffiliation(group, index) {
-    const emptyRow = group === 'cultural_affiliations'
-      ? EMPTY_CULTURAL_AFFILIATION
-      : EMPTY_OTHER_AFFILIATION
+    const emptyRow = group === 'cultural_affiliations' ? EMPTY_CULTURAL_AFFILIATION : EMPTY_OTHER_AFFILIATION
     setApplicantForm((current) => {
       const nextRows = current[group].filter((_, rowIndex) => rowIndex !== index)
       return {
@@ -267,21 +351,12 @@ export default function RoleCenterPage({ currentUser = {} }) {
     }
   }
 
-  async function loadCaptchaChallenge() {
-    setLoadingCaptcha(true)
-    try {
-      const payload = await apiRequest('/api/captcha/challenge')
-      setCaptchaChallenge({
-        question: payload.question || '',
-        token: payload.token || '',
-        expires_in_seconds: payload.expires_in_seconds || 0,
-      })
-      setCaptchaAnswer('')
-    } catch (requestError) {
-      setError(requestError.message)
-    } finally {
-      setLoadingCaptcha(false)
-    }
+  function hasCaptchaResponse() {
+    return Boolean(turnstileToken)
+  }
+
+  function captchaPayload() {
+    return { turnstile_token: turnstileToken }
   }
 
   async function fetchMyApplications() {
@@ -308,18 +383,25 @@ export default function RoleCenterPage({ currentUser = {} }) {
       setError(`You already have a pending ${roleLabel(applyRole)} application.`)
       return
     }
-    if (applyRole === 'reviewer' && !applicantForm.reviewer_reason.trim()) {
+    if (
+      applyRole === 'reviewer' &&
+      isAuthenticated &&
+      isContributorUser &&
+      !applicantForm.reviewer_reason.trim()
+    ) {
       setApplicantFormError('Please share why you want to become a reviewer.')
       setError('')
       return
     }
     if (!applicantPolicyAccepted) {
-      setApplicantFormError('Review and accept the policy and contributor agreement before submitting your application.')
+      setApplicantFormError(
+        'Review and accept the policy and contributor agreement before submitting your application.',
+      )
       setError('')
       return
     }
-    if (!captchaChallenge.token || !captchaAnswer.trim()) {
-      setApplicantFormError('Complete the CAPTCHA before submitting your application.')
+    if (!hasCaptchaResponse()) {
+      setApplicantFormError('Complete the verification before submitting your application.')
       setError('')
       return
     }
@@ -353,8 +435,7 @@ export default function RoleCenterPage({ currentUser = {} }) {
           body: JSON.stringify({
             target_role: applyRole,
             ...applicantForm,
-            captcha_token: captchaChallenge.token,
-            captcha_answer: captchaAnswer,
+            ...captchaPayload(),
           }),
         })
         setStatusEmail(applicantForm.email)
@@ -365,7 +446,7 @@ export default function RoleCenterPage({ currentUser = {} }) {
         setApplicantFormError(detail)
         setApplicantMissingFields(detail.toLowerCase().includes('email') ? ['email'] : [])
         setError('')
-        loadCaptchaChallenge()
+        setTurnstileToken('')
       } finally {
         setLoading(false)
       }
@@ -374,18 +455,17 @@ export default function RoleCenterPage({ currentUser = {} }) {
 
     // Applicant sends target role; backend enforces role validity + pending state.
     await run(async () => {
+      const requiresReviewerReason = applyRole === 'reviewer' && isContributorUser
       const requestBody = isAuthenticated
         ? {
             target_role: applyRole,
-            reviewer_reason: applicantForm.reviewer_reason,
-            captcha_token: captchaChallenge.token,
-            captcha_answer: captchaAnswer,
+            ...(requiresReviewerReason ? { reviewer_reason: applicantForm.reviewer_reason } : {}),
+            ...captchaPayload(),
           }
         : {
             target_role: applyRole,
             ...applicantForm,
-            captcha_token: captchaChallenge.token,
-            captcha_answer: captchaAnswer,
+            ...captchaPayload(),
           }
       const payload = await apiRequest('/api/users/role-applications', {
         method: 'POST',
@@ -401,60 +481,67 @@ export default function RoleCenterPage({ currentUser = {} }) {
         setPublicApplications([payload])
       }
       setSubmittedApplication(payload)
+      setTurnstileToken('')
       if (isAuthenticated) {
         setShowAuthenticatedApplicationSubmitted(true)
       }
       setMessage(isAuthenticated ? 'Application submitted.' : '')
-      loadCaptchaChallenge()
+      setTurnstileToken('')
     })
   }
 
-  async function lookupPublicApplications() {
-    const email = statusEmail.trim().toLowerCase()
-    setStatusLookupFeedback({ tone: '', text: '' })
-    if (!email) {
-      setStatusLookupFeedback({ tone: 'error', text: 'Enter the email address used in your application.' })
-      return
-    }
-    const emailError = emailValidationMessage(email)
-    if (emailError) {
-      setStatusLookupFeedback({ tone: 'error', text: emailError })
-      return
-    }
-
-    setLoading(true)
-    setError('')
-    setMessage('')
-    try {
-      const payload = await apiRequest('/api/users/role-applications/status', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      })
-      const rows = payload.rows || []
-      setPublicApplications(rows)
-      setSubmittedApplication(null)
-      if (rows.length) {
-        setStatusLookupFeedback({
-          tone: 'ok',
-          text: `Found ${rows.length} application${rows.length === 1 ? '' : 's'} for ${email}.`,
-        })
-      } else {
-        setStatusLookupFeedback({
-          tone: 'neutral',
-          text: `No application found for ${email}. Check spelling or try the exact email used during application.`,
-        })
+  const lookupPublicApplications = useCallback(
+    async (emailOverride = '') => {
+      const email = String(emailOverride || statusEmail)
+        .trim()
+        .toLowerCase()
+      setStatusLookupFeedback({ tone: '', text: '' })
+      if (!email) {
+        setStatusLookupFeedback({ tone: 'error', text: 'Enter the email address used in your application.' })
+        return
       }
-    } catch (requestError) {
-      setPublicApplications([])
-      setStatusLookupFeedback({
-        tone: 'error',
-        text: requestError.message || 'Could not check status right now. Please try again.',
-      })
-    } finally {
-      setLoading(false)
-    }
-  }
+      const emailError = emailValidationMessage(email)
+      if (emailError) {
+        setStatusLookupFeedback({ tone: 'error', text: emailError })
+        return
+      }
+
+      setLoading(true)
+      setError('')
+      setMessage('')
+      setStatusEmail(email)
+      try {
+        const payload = await apiRequest('/api/users/role-applications/status', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email }),
+        })
+        const rows = payload.rows || []
+        setPublicApplications(rows)
+        setSubmittedApplication(null)
+        if (rows.length) {
+          setStatusLookupFeedback({
+            tone: 'ok',
+            text: `Found ${rows.length} application${rows.length === 1 ? '' : 's'} for ${email}.`,
+          })
+        } else {
+          setStatusLookupFeedback({
+            tone: 'neutral',
+            text: `No application found for ${email}. Check spelling or try the exact email used during application.`,
+          })
+        }
+      } catch (requestError) {
+        setPublicApplications([])
+        setStatusLookupFeedback({
+          tone: 'error',
+          text: requestError.message || 'Could not check status right now. Please try again.',
+        })
+      } finally {
+        setLoading(false)
+      }
+    },
+    [statusEmail],
+  )
 
   async function claimRoleAccess(row) {
     const email = statusEmail.trim().toLowerCase()
@@ -476,12 +563,12 @@ export default function RoleCenterPage({ currentUser = {} }) {
       setError('Username, password, and confirmation are required.')
       return
     }
-    if (password !== passwordConfirm) {
-      setError('Password confirmation does not match.')
+    if (!USERNAME_PATTERN.test(username)) {
+      setError(USERNAME_HELP_TEXT)
       return
     }
-    if (!invitationPolicyAccepted) {
-      setError('Review and accept the contributor agreement before activating this invitation.')
+    if (password !== passwordConfirm) {
+      setError('Password confirmation does not match.')
       return
     }
 
@@ -512,6 +599,9 @@ export default function RoleCenterPage({ currentUser = {} }) {
           passwordConfirm: '',
         },
       }))
+      setActivationCelebration({
+        username: claimPayload.username,
+      })
       setStatusLookupFeedback({
         tone: 'ok',
         text: `Account setup complete. You can now log in as @${claimPayload.username}.`,
@@ -531,6 +621,7 @@ export default function RoleCenterPage({ currentUser = {} }) {
         ...current,
         first_name: current.first_name || payload.first_name || '',
         last_name: current.last_name || payload.last_name || '',
+        name_extension: current.name_extension || payload.name_extension || '',
         municipality: current.municipality || payload.municipality || '',
         username: current.username || (payload.email ? payload.email.split('@')[0] : ''),
       }))
@@ -550,6 +641,7 @@ export default function RoleCenterPage({ currentUser = {} }) {
     const username = invitationClaimForm.username.trim()
     const firstName = invitationClaimForm.first_name.trim()
     const lastName = invitationClaimForm.last_name.trim()
+    const nameExtension = invitationClaimForm.name_extension.trim()
     const municipality = invitationClaimForm.municipality.trim()
     const password = invitationClaimForm.password || ''
     const passwordConfirm = invitationClaimForm.passwordConfirm || ''
@@ -557,8 +649,16 @@ export default function RoleCenterPage({ currentUser = {} }) {
       setError('First name, last name, municipality, username, password, and confirmation are required.')
       return
     }
+    if (!USERNAME_PATTERN.test(username)) {
+      setError(USERNAME_HELP_TEXT)
+      return
+    }
     if (password !== passwordConfirm) {
       setError('Password confirmation does not match.')
+      return
+    }
+    if (!hasCaptchaResponse()) {
+      setError('Complete the verification before accepting this invitation.')
       return
     }
 
@@ -570,27 +670,33 @@ export default function RoleCenterPage({ currentUser = {} }) {
         body: JSON.stringify({
           first_name: firstName,
           last_name: lastName,
+          name_extension: nameExtension,
           municipality,
           username,
           password,
           password_confirm: passwordConfirm,
+          ...captchaPayload(),
         }),
       })
-      setInvitationDetails((current) => current ? { ...current, status: 'accepted' } : current)
+      setInvitationDetails((current) => (current ? { ...current, status: 'accepted' } : current))
       setInvitationClaimForm({
         first_name: '',
         last_name: '',
+        name_extension: '',
         municipality: '',
         username: '',
         password: '',
         passwordConfirm: '',
       })
+      setTurnstileToken('')
       setInviteCelebration({
         username: payload.username,
         role: invitationDetails?.role || payload.role,
         label: payload.accountability_label || 'Invitation accepted.',
       })
-      setMessage(`${payload.accountability_label || 'Invitation accepted.'} You can now log in as @${payload.username}.`)
+      setMessage(
+        `${payload.accountability_label || 'Invitation accepted.'} You can now log in as @${payload.username}.`,
+      )
     })
   }
 
@@ -641,14 +747,14 @@ export default function RoleCenterPage({ currentUser = {} }) {
   }, [])
 
   useEffect(() => {
-    setApplicantPolicyAccepted(false)
-  }, [applyRole])
+    if (isAuthenticated) return
+    const requestedStatusEmail = new URLSearchParams(window.location.search).get('status_email') || ''
+    if (!requestedStatusEmail) return
+    lookupPublicApplications(requestedStatusEmail)
+  }, [isAuthenticated, lookupPublicApplications])
 
   useEffect(() => {
-    if (!applyRole) return
-    if (!captchaChallenge.token) loadCaptchaChallenge()
-    // Fetch a fresh CAPTCHA when the application form becomes actionable.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setApplicantPolicyAccepted(false)
   }, [applyRole])
 
   useEffect(() => {
@@ -677,6 +783,34 @@ export default function RoleCenterPage({ currentUser = {} }) {
 
   return (
     <section className="role-center-page">
+      {activationCelebration && (
+        <div className="celebration-backdrop" role="presentation">
+          <section
+            className="celebration-modal milestone role-invite-celebration"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="role-activation-celebration-title"
+            aria-describedby="role-activation-celebration-message"
+          >
+            <div className="celebration-badge-mark" aria-hidden="true">
+              ✓
+            </div>
+            <p className="profile-kicker">Account Activated</p>
+            <h2 id="role-activation-celebration-title">
+              Welcome to Chirin Ivatan, @{activationCelebration.username}.
+            </h2>
+            <p id="role-activation-celebration-message">
+              Your login credentials are ready. After logging in, we will show you the best next steps for
+              your new role.
+            </p>
+            <div className="actions">
+              <button type="button" onClick={() => navigate(ROUTES.login)}>
+                Go to Login
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
       {inviteCelebration && (
         <div className="celebration-backdrop" role="presentation">
           <section
@@ -697,8 +831,9 @@ export default function RoleCenterPage({ currentUser = {} }) {
             <p className="profile-kicker">First step unlocked</p>
             <h2 id="role-invite-celebration-title">Cultural Steward Path Started</h2>
             <p id="role-invite-celebration-message">
-              Your {roleLabel(inviteCelebration.role).toLowerCase()} access is active. This first step joins you to the
-              shared work of protecting Ivatan language, folklore, and cultural memory.
+              Your {roleLabel(inviteCelebration.role).toLowerCase()} access is active. This first step joins
+              you to the shared work of protecting Ivatan language, folklore, and cultural memory. Log in next
+              for a short, guided start.
             </p>
             <div className="celebration-stats" aria-label="Invitation acceptance details">
               <span>{roleLabel(inviteCelebration.role)}</span>
@@ -727,18 +862,18 @@ export default function RoleCenterPage({ currentUser = {} }) {
             aria-describedby="role-application-submitted-message"
           >
             <p className="profile-kicker">Application submitted</p>
-            <h2 id="role-application-submitted-title">Thank you for your interest in becoming a Cultural Bearer.</h2>
+            <h2 id="role-application-submitted-title">
+              Thank you for your interest in becoming a Cultural Bearer.
+            </h2>
             <p id="role-application-submitted-message">
-              Your application has been received. Once approved, you will receive an email with instructions for
-              activating your access and joining the Digital Yaru.
+              Your application has been received. Once approved, you will receive an email with instructions
+              for activating your access and joining the Digital Yaru.
             </p>
             <div className="celebration-stats" aria-label="Application details">
               <span>{roleLabel(submittedApplication.target_role)}</span>
               <span>{applicantForm.email}</span>
             </div>
-            <button onClick={() => setSubmittedApplication(null)}>
-              Got it
-            </button>
+            <button onClick={() => setSubmittedApplication(null)}>Got it</button>
           </section>
         </div>
       )}
@@ -755,15 +890,14 @@ export default function RoleCenterPage({ currentUser = {} }) {
             <p className="profile-kicker">Application submitted</p>
             <h2 id="role-application-submitted-title">Your reviewer application is now pending.</h2>
             <p id="role-application-submitted-message">
-              Thank you for sharing why you want to help review submissions. Your application is now visible in My Applications.
+              Thank you for sharing why you want to help review submissions. Your application is now visible
+              in My Applications.
             </p>
             <div className="celebration-stats" aria-label="Application details">
               <span>{roleLabel(submittedApplication.target_role)}</span>
               <span>{submittedApplication.status}</span>
             </div>
-            <button onClick={() => setShowAuthenticatedApplicationSubmitted(false)}>
-              Got it
-            </button>
+            <button onClick={() => setShowAuthenticatedApplicationSubmitted(false)}>Got it</button>
           </section>
         </div>
       )}
@@ -805,36 +939,12 @@ export default function RoleCenterPage({ currentUser = {} }) {
                     ))}
                   </ul>
                   <p className="muted">
-                    Accepting this invitation activates your {invitedRole.title.toLowerCase()} access directly because a
-                    platform steward has already endorsed you.
+                    Accepting this invitation activates your {invitedRole.title.toLowerCase()} access directly
+                    because a platform steward has already endorsed you.
                   </p>
                 </div>
               )}
-              <div className="policy-consent-panel">
-                <div>
-                  <p className="profile-kicker">Before You Accept</p>
-                  <h4>Contributor Agreement</h4>
-                  {siteContent.contributor_agreement_paragraphs.map((paragraph) => (
-                    <p key={paragraph}>{paragraph}</p>
-                  ))}
-                </div>
-                <div>
-                  <h4>Privacy Notice</h4>
-                  {siteContent.privacy_notice_paragraphs.map((paragraph) => (
-                    <p key={paragraph}>{paragraph}</p>
-                  ))}
-                </div>
-                <label className="checkbox-inline policy-consent-check" htmlFor="invitation-policy-consent">
-                  <input
-                    id="invitation-policy-consent"
-                    type="checkbox"
-                    checked={invitationPolicyAccepted}
-                    onChange={(event) => setInvitationPolicyAccepted(event.target.checked)}
-                  />
-                  <span>I have read and accept these terms before activating this role.</span>
-                </label>
-              </div>
-              <div className="field-grid">
+              <div className="field-grid invitation-claim-grid">
                 <label className="field" htmlFor="invite-claim-first-name">
                   <span>First Name</span>
                   <input
@@ -853,6 +963,26 @@ export default function RoleCenterPage({ currentUser = {} }) {
                     onChange={(event) => updateInvitationClaimField('last_name', event.target.value)}
                   />
                 </label>
+                <label className="field" htmlFor="invite-claim-name-extension">
+                  <span>Name Extension</span>
+                  <input
+                    id="invite-claim-name-extension"
+                    value={invitationClaimForm.name_extension}
+                    onChange={(event) => updateInvitationClaimField('name_extension', event.target.value)}
+                    placeholder="e.g., Jr., Sr., III"
+                  />
+                </label>
+                <label className="field" htmlFor="invite-claim-username">
+                  <span>Create Username</span>
+                  <input
+                    id="invite-claim-username"
+                    autoComplete="username"
+                    value={invitationClaimForm.username}
+                    onChange={(event) => updateInvitationClaimField('username', event.target.value)}
+                    placeholder="Choose your username"
+                  />
+                  <small>{USERNAME_HELP_TEXT}</small>
+                </label>
                 <label className="field" htmlFor="invite-claim-municipality">
                   <span>Municipality</span>
                   <select
@@ -868,41 +998,93 @@ export default function RoleCenterPage({ currentUser = {} }) {
                     ))}
                   </select>
                 </label>
-                <label className="field" htmlFor="invite-claim-username">
-                  <span>Create Username</span>
-                  <input
-                    id="invite-claim-username"
-                    autoComplete="username"
-                    value={invitationClaimForm.username}
-                    onChange={(event) => updateInvitationClaimField('username', event.target.value)}
-                    placeholder="Choose your username"
-                  />
-                </label>
               </div>
               <div className="field-grid">
                 <label className="field" htmlFor="invite-claim-password">
                   <span>Create Password</span>
-                  <input
-                    id="invite-claim-password"
-                    type="password"
-                    autoComplete="new-password"
-                    value={invitationClaimForm.password}
-                    onChange={(event) => updateInvitationClaimField('password', event.target.value)}
-                  />
+                  <span className="password-field-control">
+                    <input
+                      id="invite-claim-password"
+                      type={showInvitePassword ? 'text' : 'password'}
+                      autoComplete="new-password"
+                      value={invitationClaimForm.password}
+                      onChange={(event) => updateInvitationClaimField('password', event.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="password-visibility-button"
+                      onClick={() => setShowInvitePassword((v) => !v)}
+                      aria-pressed={showInvitePassword}
+                    >
+                      <PasswordEyeIcon visible={showInvitePassword} />
+                      <span className="sr-only">
+                        {showInvitePassword ? 'Hide password' : 'Show password'}
+                      </span>
+                    </button>
+                  </span>
                 </label>
                 <label className="field" htmlFor="invite-claim-password-confirm">
                   <span>Confirm Password</span>
-                  <input
-                    id="invite-claim-password-confirm"
-                    type="password"
-                    autoComplete="new-password"
-                    value={invitationClaimForm.passwordConfirm}
-                    onChange={(event) => updateInvitationClaimField('passwordConfirm', event.target.value)}
-                  />
+                  <span className="password-field-control">
+                    <input
+                      id="invite-claim-password-confirm"
+                      type={showInvitePasswordConfirm ? 'text' : 'password'}
+                      autoComplete="new-password"
+                      value={invitationClaimForm.passwordConfirm}
+                      onChange={(event) => updateInvitationClaimField('passwordConfirm', event.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="password-visibility-button"
+                      onClick={() => setShowInvitePasswordConfirm((v) => !v)}
+                      aria-pressed={showInvitePasswordConfirm}
+                    >
+                      <PasswordEyeIcon visible={showInvitePasswordConfirm} />
+                      <span className="sr-only">
+                        {showInvitePasswordConfirm ? 'Hide password' : 'Show password'}
+                      </span>
+                    </button>
+                  </span>
                 </label>
               </div>
+              <div className="policy-consent-panel compact-policy-consent">
+                <label className="checkbox-inline policy-consent-check" htmlFor="invitation-policy-consent">
+                  <input
+                    id="invitation-policy-consent"
+                    type="checkbox"
+                    checked={invitationPolicyAccepted}
+                    onChange={(event) => setInvitationPolicyAccepted(event.target.checked)}
+                  />
+                  <span>
+                    I have read the{' '}
+                    <button
+                      type="button"
+                      className="inline-link-button policy-modal-link"
+                      onClick={() => setPolicyModal('agreement')}
+                    >
+                      Agreement
+                    </button>{' '}
+                    and{' '}
+                    <button
+                      type="button"
+                      className="inline-link-button policy-modal-link"
+                      onClick={() => setPolicyModal('privacy')}
+                    >
+                      Privacy Policy
+                    </button>
+                    .
+                  </span>
+                </label>
+              </div>
+              {renderVerification({
+                idPrefix: 'invite-claim',
+                helpText: 'Complete this before accepting the invitation.',
+              })}
               <div className="actions">
-                <button disabled={loading || !invitationPolicyAccepted} onClick={() => acceptInvitation()}>
+                <button
+                  disabled={loading || !invitationPolicyAccepted || !hasCaptchaResponse()}
+                  onClick={() => acceptInvitation()}
+                >
                   {loading ? 'Activating...' : 'Accept Invitation'}
                 </button>
                 <button className="ghost" disabled={loading} onClick={() => navigate(ROUTES.login)}>
@@ -921,440 +1103,498 @@ export default function RoleCenterPage({ currentUser = {} }) {
       )}
 
       {!invitationToken && (
-      <section className="role-work-grid">
-        <section className="role-work-panel role-apply-panel">
-          <div className="section-heading">
-            <div>
-              <h3>Choose Your Community Role</h3>
-              {isAuthenticated && isContributorUser && applyRole === 'reviewer' && !alreadyHasSelectedRole && (
-                <p className="muted">You are applying to grow from Contributor into Reviewer access.</p>
-              )}
+        <section className="role-work-grid">
+          <section className="role-work-panel role-apply-panel">
+            <div className="section-heading">
+              <div>
+                <h3>Choose Your Community Role</h3>
+                {isAuthenticated &&
+                  isContributorUser &&
+                  applyRole === 'reviewer' &&
+                  !alreadyHasSelectedRole && (
+                    <p className="muted">You are applying to grow from Contributor into Reviewer access.</p>
+                  )}
+              </div>
             </div>
-          </div>
 
-          <div
-            className={applyRole ? 'role-choice-list role-choice-list-has-selection' : 'role-choice-list'}
-            role="radiogroup"
-            aria-label="Role to apply for"
-          >
-            {ROLE_OPTIONS.map((role) => (
-              <button
-                key={role.value}
-                type="button"
-                className={applyRole === role.value ? 'role-choice-card selected' : 'role-choice-card'}
-                onClick={() => setApplyRole(role.value)}
-                aria-pressed={applyRole === role.value}
-              >
-                <span>
-                  <strong>{role.title}</strong>
-                  <small>{role.approval}</small>
-                </span>
-                <span>{role.summary}</span>
-                <ul>
-                  {role.details.map((detail) => (
-                    <li key={detail}>{detail}</li>
-                  ))}
-                </ul>
-                <div className="role-who-can-join">
-                  <span>Who can join?</span>
-                  <p>{role.whoCanJoin}</p>
-                </div>
-              </button>
-            ))}
-          </div>
-
-          {applyRole === 'reviewer' && (
-            <label className="field role-reviewer-reason-field" htmlFor="role-reviewer-reason">
-              <span>Why do you want to become a reviewer? *</span>
-              <textarea
-                id="role-reviewer-reason"
-                value={applicantForm.reviewer_reason}
-                onChange={(event) => updateApplicantField('reviewer_reason', event.target.value)}
-                placeholder="Share your motivation, language or cultural background, and how you hope to help review submissions."
-              />
-            </label>
-          )}
-          {isAuthenticated && applicantFormError && <p className="inline-error role-public-form-error">{applicantFormError}</p>}
-
-          {!isAuthenticated && applyRole && (
-            <div className="role-public-form">
-              <div className="field-grid role-public-identity-grid">
-                <label className={applicantMissingFields.includes('first_name') ? 'field field-error' : 'field'} htmlFor="role-first-name">
-                  <span>First Name *</span>
-                  <input
-                    id="role-first-name"
-                    value={applicantForm.first_name}
-                    onChange={(event) => updateApplicantField('first_name', event.target.value)}
-                    aria-invalid={applicantMissingFields.includes('first_name')}
-                  />
-                </label>
-                <label className={applicantMissingFields.includes('last_name') ? 'field field-error' : 'field'} htmlFor="role-last-name">
-                  <span>Last Name *</span>
-                  <input
-                    id="role-last-name"
-                    value={applicantForm.last_name}
-                    onChange={(event) => updateApplicantField('last_name', event.target.value)}
-                    aria-invalid={applicantMissingFields.includes('last_name')}
-                  />
-                </label>
-              </div>
-              <div className="field-grid role-public-contact-grid">
-                <label className={applicantMissingFields.includes('email') ? 'field field-error' : 'field'} htmlFor="role-email">
-                  <span>Email *</span>
-                  <input
-                    id="role-email"
-                    type="email"
-                    value={applicantForm.email}
-                    onChange={(event) => updateApplicantField('email', event.target.value)}
-                    aria-invalid={applicantMissingFields.includes('email')}
-                  />
-                </label>
-                <label className={applicantMissingFields.includes('municipality') ? 'field field-error' : 'field'} htmlFor="role-municipality">
-                  <span>Municipality *</span>
-                  <select
-                    id="role-municipality"
-                    value={applicantForm.municipality}
-                    onChange={(event) => updateApplicantField('municipality', event.target.value)}
-                    aria-invalid={applicantMissingFields.includes('municipality')}
-                  >
-                    <option value="">Select municipality</option>
-                    {MUNICIPALITIES.map((municipality) => (
-                      <option key={municipality} value={municipality}>
-                        {municipality}
-                      </option>
-                      ))}
-                  </select>
-                  <small className="muted municipality-helper">
-                    Pick origin, residency, or spoken language. Contributions are credited to this municipality.
-                  </small>
-                </label>
-              </div>
-
-              <div className="affiliation-editor">
-                <div className="affiliation-editor-heading">
-                  <h4>Cultural / Community Affiliation</h4>
-                  <button
-                    type="button"
-                    className="ghost compact-button"
-                    onClick={() => addApplicantAffiliation('cultural_affiliations')}
-                  >
-                    Add another
-                  </button>
-                </div>
-                {applicantForm.cultural_affiliations.map((row, index) => (
-                  <div className="affiliation-row" key={`cultural-${index}`}>
-                    <label className="field" htmlFor={`role-cultural-role-${index}`}>
-                      <span>Position / Role</span>
-                      <input
-                        id={`role-cultural-role-${index}`}
-                        placeholder="e.g., Resident, Member etc."
-                        value={row.role}
-                        onChange={(event) => updateApplicantAffiliation('cultural_affiliations', index, 'role', event.target.value)}
-                      />
-                    </label>
-                    <label className="field" htmlFor={`role-cultural-organization-${index}`}>
-                      <span>Agency/ Organization/ Group</span>
-                      <input
-                        id={`role-cultural-organization-${index}`}
-                        placeholder="e.g., Brgy. San Antonio, Ivatan Cultural Council, etc."
-                        value={row.organization}
-                        onChange={(event) => updateApplicantAffiliation('cultural_affiliations', index, 'organization', event.target.value)}
-                      />
-                    </label>
-                    {applicantForm.cultural_affiliations.length > 1 && (
-                      <button
-                        type="button"
-                        className="ghost compact-button"
-                        onClick={() => removeApplicantAffiliation('cultural_affiliations', index)}
-                      >
-                        Remove
-                      </button>
-                    )}
+            <div
+              className={applyRole ? 'role-choice-list role-choice-list-has-selection' : 'role-choice-list'}
+              role="radiogroup"
+              aria-label="Role to apply for"
+            >
+              {ROLE_OPTIONS.map((role) => (
+                <button
+                  key={role.value}
+                  type="button"
+                  className={applyRole === role.value ? 'role-choice-card selected' : 'role-choice-card'}
+                  onClick={() => setApplyRole(role.value)}
+                  aria-pressed={applyRole === role.value}
+                >
+                  <span>
+                    <strong>{role.title}</strong>
+                  </span>
+                  <span>{role.summary}</span>
+                  <ul>
+                    {role.details.map((detail) => (
+                      <li key={detail}>{detail}</li>
+                    ))}
+                  </ul>
+                  <div className="role-who-can-join">
+                    <span>Who can join?</span>
+                    <p>{role.whoCanJoin}</p>
                   </div>
-                ))}
-              </div>
-
-              <div className="affiliation-editor">
-                <div className="affiliation-editor-heading">
-                  <h4>Professional / Other Affiliation</h4>
-                  <button
-                    type="button"
-                    className="ghost compact-button"
-                    onClick={() => addApplicantAffiliation('other_affiliations')}
-                  >
-                    Add another
-                  </button>
-                </div>
-                {applicantForm.other_affiliations.map((row, index) => (
-                  <div className="affiliation-row" key={`other-${index}`}>
-                    <label className="field" htmlFor={`role-other-designation-${index}`}>
-                      <span>Position / Role</span>
-                      <input
-                        id={`role-other-designation-${index}`}
-                        placeholder="e.g., Student, Clerk, etc."
-                        value={row.designation}
-                        onChange={(event) => updateApplicantAffiliation('other_affiliations', index, 'designation', event.target.value)}
-                      />
-                    </label>
-                    <label className="field" htmlFor={`role-other-institution-${index}`}>
-                      <span>Agency/ Organization/ Group</span>
-                      <input
-                        id={`role-other-institution-${index}`}
-                        placeholder="e.g., Batanes State College, LGU Basco, etc"
-                        value={row.institution}
-                        onChange={(event) => updateApplicantAffiliation('other_affiliations', index, 'institution', event.target.value)}
-                      />
-                    </label>
-                    {applicantForm.other_affiliations.length > 1 && (
-                      <button
-                        type="button"
-                        className="ghost compact-button"
-                        onClick={() => removeApplicantAffiliation('other_affiliations', index)}
-                      >
-                        Remove
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-
-              {renderApplicationPolicyConsent()}
-
-              <div className="captcha-panel">
-                <div>
-                  <p className="profile-kicker">Verification</p>
-                  <strong>{captchaChallenge.question || 'Loading CAPTCHA...'}</strong>
-                  <p className="muted">Answer this before submitting your role application.</p>
-                </div>
-                <label className="field" htmlFor="role-application-captcha-public">
-                  <span>CAPTCHA answer</span>
-                  <input
-                    id="role-application-captcha-public"
-                    inputMode="numeric"
-                    value={captchaAnswer}
-                    onChange={(event) => setCaptchaAnswer(event.target.value)}
-                    placeholder="Your answer"
-                  />
-                </label>
-                <button type="button" className="ghost compact-button" disabled={loadingCaptcha} onClick={loadCaptchaChallenge}>
-                  {loadingCaptcha ? 'Refreshing...' : 'New CAPTCHA'}
                 </button>
-              </div>
+              ))}
+            </div>
 
-              {applicantFormError && <p className="inline-error role-public-form-error">{applicantFormError}</p>}
-              <div className="actions role-public-form-actions">
-                <button disabled={loading || alreadyHasSelectedRole || hasPendingSelectedRole || !captchaAnswer.trim() || !applicantPolicyAccepted} onClick={() => createApplication()}>
+            {applyRole === 'reviewer' && isAuthenticated && isContributorUser && (
+              <label className="field role-reviewer-reason-field" htmlFor="role-reviewer-reason">
+                <span>Why do you want to become a reviewer? *</span>
+                <textarea
+                  id="role-reviewer-reason"
+                  value={applicantForm.reviewer_reason}
+                  onChange={(event) => updateApplicantField('reviewer_reason', event.target.value)}
+                  placeholder="Share your motivation, language or cultural background, and how you hope to help review submissions."
+                />
+              </label>
+            )}
+            {isAuthenticated && applicantFormError && (
+              <p className="inline-error role-public-form-error">{applicantFormError}</p>
+            )}
+
+            {!isAuthenticated && applyRole && (
+              <div className="role-public-form">
+                <div className="field-grid role-public-identity-grid">
+                  <label
+                    className={applicantMissingFields.includes('first_name') ? 'field field-error' : 'field'}
+                    htmlFor="role-first-name"
+                  >
+                    <span>First Name *</span>
+                    <input
+                      id="role-first-name"
+                      value={applicantForm.first_name}
+                      onChange={(event) => updateApplicantField('first_name', event.target.value)}
+                      aria-invalid={applicantMissingFields.includes('first_name')}
+                    />
+                  </label>
+                  <label
+                    className={applicantMissingFields.includes('last_name') ? 'field field-error' : 'field'}
+                    htmlFor="role-last-name"
+                  >
+                    <span>Last Name *</span>
+                    <input
+                      id="role-last-name"
+                      value={applicantForm.last_name}
+                      onChange={(event) => updateApplicantField('last_name', event.target.value)}
+                      aria-invalid={applicantMissingFields.includes('last_name')}
+                    />
+                  </label>
+                  <label className="field" htmlFor="role-name-extension">
+                    <span>Name Extension</span>
+                    <input
+                      id="role-name-extension"
+                      value={applicantForm.name_extension}
+                      onChange={(event) => updateApplicantField('name_extension', event.target.value)}
+                      placeholder="e.g., Jr., Sr., III"
+                    />
+                  </label>
+                </div>
+                <div className="field-grid role-public-contact-grid">
+                  <label
+                    className={applicantMissingFields.includes('email') ? 'field field-error' : 'field'}
+                    htmlFor="role-email"
+                  >
+                    <span>Email *</span>
+                    <input
+                      id="role-email"
+                      type="email"
+                      value={applicantForm.email}
+                      onChange={(event) => updateApplicantField('email', event.target.value)}
+                      aria-invalid={applicantMissingFields.includes('email')}
+                    />
+                  </label>
+                  <label
+                    className={
+                      applicantMissingFields.includes('municipality') ? 'field field-error' : 'field'
+                    }
+                    htmlFor="role-municipality"
+                  >
+                    <span>Municipality *</span>
+                    <select
+                      id="role-municipality"
+                      value={applicantForm.municipality}
+                      onChange={(event) => updateApplicantField('municipality', event.target.value)}
+                      aria-invalid={applicantMissingFields.includes('municipality')}
+                    >
+                      <option value="">Select municipality</option>
+                      {MUNICIPALITIES.map((municipality) => (
+                        <option key={municipality} value={municipality}>
+                          {municipality}
+                        </option>
+                      ))}
+                    </select>
+                    <small className="muted municipality-helper">
+                      Pick origin, residency, or spoken language. Contributions are credited to this
+                      municipality.
+                    </small>
+                  </label>
+                </div>
+
+                <div className="affiliation-editor">
+                  <div className="affiliation-editor-heading">
+                    <h4>Cultural / Community Affiliation</h4>
+                    <button
+                      type="button"
+                      className="ghost compact-button"
+                      onClick={() => addApplicantAffiliation('cultural_affiliations')}
+                    >
+                      Add another
+                    </button>
+                  </div>
+                  {applicantForm.cultural_affiliations.map((row, index) => (
+                    <div className="affiliation-row" key={`cultural-${index}`}>
+                      <label className="field" htmlFor={`role-cultural-role-${index}`}>
+                        <span>Position / Role</span>
+                        <input
+                          id={`role-cultural-role-${index}`}
+                          placeholder="e.g., Resident, Member etc."
+                          value={row.role}
+                          onChange={(event) =>
+                            updateApplicantAffiliation(
+                              'cultural_affiliations',
+                              index,
+                              'role',
+                              event.target.value,
+                            )
+                          }
+                        />
+                      </label>
+                      <label className="field" htmlFor={`role-cultural-organization-${index}`}>
+                        <span>Agency/ Organization/ Group</span>
+                        <input
+                          id={`role-cultural-organization-${index}`}
+                          placeholder="e.g., Brgy. San Antonio, Ivatan Cultural Council, etc."
+                          value={row.organization}
+                          onChange={(event) =>
+                            updateApplicantAffiliation(
+                              'cultural_affiliations',
+                              index,
+                              'organization',
+                              event.target.value,
+                            )
+                          }
+                        />
+                      </label>
+                      {applicantForm.cultural_affiliations.length > 1 && (
+                        <button
+                          type="button"
+                          className="ghost compact-button"
+                          onClick={() => removeApplicantAffiliation('cultural_affiliations', index)}
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="affiliation-editor">
+                  <div className="affiliation-editor-heading">
+                    <h4>Professional / Other Affiliation</h4>
+                    <button
+                      type="button"
+                      className="ghost compact-button"
+                      onClick={() => addApplicantAffiliation('other_affiliations')}
+                    >
+                      Add another
+                    </button>
+                  </div>
+                  {applicantForm.other_affiliations.map((row, index) => (
+                    <div className="affiliation-row" key={`other-${index}`}>
+                      <label className="field" htmlFor={`role-other-designation-${index}`}>
+                        <span>Position / Role</span>
+                        <input
+                          id={`role-other-designation-${index}`}
+                          placeholder="e.g., Student, Clerk, etc."
+                          value={row.designation}
+                          onChange={(event) =>
+                            updateApplicantAffiliation(
+                              'other_affiliations',
+                              index,
+                              'designation',
+                              event.target.value,
+                            )
+                          }
+                        />
+                      </label>
+                      <label className="field" htmlFor={`role-other-institution-${index}`}>
+                        <span>Agency/ Organization/ Group</span>
+                        <input
+                          id={`role-other-institution-${index}`}
+                          placeholder="e.g., Batanes State College, LGU Basco, etc"
+                          value={row.institution}
+                          onChange={(event) =>
+                            updateApplicantAffiliation(
+                              'other_affiliations',
+                              index,
+                              'institution',
+                              event.target.value,
+                            )
+                          }
+                        />
+                      </label>
+                      {applicantForm.other_affiliations.length > 1 && (
+                        <button
+                          type="button"
+                          className="ghost compact-button"
+                          onClick={() => removeApplicantAffiliation('other_affiliations', index)}
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {renderApplicationPolicyConsent()}
+
+                {renderVerification({
+                  idPrefix: 'role-application-public',
+                  helpText: 'Complete this before submitting your role application.',
+                })}
+
+                {applicantFormError && (
+                  <p className="inline-error role-public-form-error">{applicantFormError}</p>
+                )}
+                <div className="actions role-public-form-actions">
+                  <button
+                    disabled={
+                      loading ||
+                      alreadyHasSelectedRole ||
+                      hasPendingSelectedRole ||
+                      !hasCaptchaResponse() ||
+                      !applicantPolicyAccepted
+                    }
+                    onClick={() => createApplication()}
+                  >
+                    {hasPendingSelectedRole
+                      ? 'Application Pending'
+                      : alreadyHasSelectedRole
+                        ? 'Access Already Active'
+                        : `Apply as ${roleLabel(applyRole)}`}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {isAuthenticated && applyRole && !alreadyHasSelectedRole && !hasPendingSelectedRole && (
+              <>
+                {renderApplicationPolicyConsent()}
+                {renderVerification({
+                  idPrefix: 'role-application',
+                  helpText: 'Complete this before submitting your role application.',
+                })}
+                {applicantFormError && (
+                  <p className="inline-error role-public-form-error">{applicantFormError}</p>
+                )}
+              </>
+            )}
+
+            <div className="actions">
+              {isAuthenticated && applyRole && (
+                <button
+                  disabled={
+                    loading ||
+                    alreadyHasSelectedRole ||
+                    hasPendingSelectedRole ||
+                    !hasCaptchaResponse() ||
+                    !applicantPolicyAccepted
+                  }
+                  onClick={() => createApplication()}
+                >
                   {hasPendingSelectedRole
                     ? 'Application Pending'
                     : alreadyHasSelectedRole
                       ? 'Access Already Active'
                       : `Apply as ${roleLabel(applyRole)}`}
                 </button>
-              </div>
-            </div>
-          )}
-
-          {isAuthenticated && applyRole && !alreadyHasSelectedRole && !hasPendingSelectedRole && (
-            <>
-              {renderApplicationPolicyConsent()}
-              <div className="captcha-panel">
-                <div>
-                  <p className="profile-kicker">Verification</p>
-                  <strong>{captchaChallenge.question || 'Loading CAPTCHA...'}</strong>
-                  <p className="muted">Answer this before submitting your role application.</p>
-                </div>
-                <label className="field" htmlFor="role-application-captcha">
-                  <span>CAPTCHA answer</span>
-                  <input
-                    id="role-application-captcha"
-                    inputMode="numeric"
-                    value={captchaAnswer}
-                    onChange={(event) => setCaptchaAnswer(event.target.value)}
-                    placeholder="Your answer"
-                  />
-                </label>
-                <button type="button" className="ghost compact-button" disabled={loadingCaptcha} onClick={loadCaptchaChallenge}>
-                  {loadingCaptcha ? 'Refreshing...' : 'New CAPTCHA'}
+              )}
+              {isAuthenticated && (
+                <button className="ghost" disabled={loading} onClick={() => loadMyApplications()}>
+                  Refresh My Applications
                 </button>
-              </div>
-              {applicantFormError && <p className="inline-error role-public-form-error">{applicantFormError}</p>}
-            </>
-          )}
-
-          <div className="actions">
-            {isAuthenticated && applyRole && (
-              <button disabled={loading || alreadyHasSelectedRole || hasPendingSelectedRole || !captchaAnswer.trim() || !applicantPolicyAccepted} onClick={() => createApplication()}>
-                {hasPendingSelectedRole
-                  ? 'Application Pending'
-                  : alreadyHasSelectedRole
-                    ? 'Access Already Active'
-                    : `Apply as ${roleLabel(applyRole)}`}
-              </button>
-            )}
-            {isAuthenticated && (
-              <button className="ghost" disabled={loading} onClick={() => loadMyApplications()}>
-                Refresh My Applications
-              </button>
-            )}
-          </div>
-        </section>
-
-        <section className="role-work-panel">
-          <div className="section-heading">
-            <div>
-              <h3>My Applications</h3>
+              )}
             </div>
-          </div>
-
-          {!isAuthenticated && (
-            <form
-              className="role-status-lookup"
-              onSubmit={(event) => {
-                event.preventDefault()
-                lookupPublicApplications()
-              }}
-            >
-              <p className="muted">
-                Enter the email address you used to apply.
-              </p>
-              <div className="role-status-search">
-                <label className="field" htmlFor="role-status-email">
-                  <span>Email Address</span>
-                  <input
-                    id="role-status-email"
-                    type="email"
-                    value={statusEmail}
-                    onChange={(event) => setStatusEmail(event.target.value)}
-                    placeholder="name@example.com"
-                  />
-                </label>
-                {statusLookupFeedback.text && (
-                  <p
-                    className={
-                      statusLookupFeedback.tone === 'error'
-                        ? 'inline-error role-status-feedback-box'
-                        : statusLookupFeedback.tone === 'ok'
-                          ? 'inline-ok role-status-feedback-box'
-                          : 'muted role-status-feedback role-status-feedback-box'
-                    }
-                  >
-                    {statusLookupFeedback.text}
-                  </p>
-                )}
-                <button type="submit" disabled={loading}>
-                  Check Status
-                </button>
-              </div>
-            </form>
-          )}
-
-          {!isAuthenticated && publicApplications.length > 0 && (
-            <div className="role-application-list role-public-status-list">
-              {publicApplications.map((row) => (
-                <article key={row.application_id} className="role-application-card">
-                  <div className="queue-header">
-                    <strong>{roleLabel(row.target_role)}</strong>
-                    <span className={`badge status-${row.status}`}>{publicStatusLabel(row)}</span>
-                  </div>
-                  <p className="role-application-help">{applicationHelp(row)}</p>
-                  {row.reviewer_reason && <p className="role-application-reason">{row.reviewer_reason}</p>}
-                  <p className="meta">Submitted {formatDate(row.created_at)}</p>
-                  {row.decided_at && <p className="meta">Decided {formatDate(row.decided_at)}</p>}
-                  {row.can_claim_credentials && (
-                    <div className="role-claim-access">
-                      <div className="field-grid">
-                        <label className="field" htmlFor={`claim-username-${row.application_id}`}>
-                          <span>Create Username</span>
-                          <input
-                            id={`claim-username-${row.application_id}`}
-                            autoComplete="username"
-                            value={claimForms[row.application_id]?.username || ''}
-                            onChange={(event) => updateClaimField(row.application_id, 'username', event.target.value)}
-                            placeholder="Choose your username"
-                          />
-                        </label>
-                      </div>
-                      <div className="field-grid">
-                        <label className="field" htmlFor={`claim-password-${row.application_id}`}>
-                          <span>Create Password</span>
-                          <input
-                            id={`claim-password-${row.application_id}`}
-                            type="password"
-                            autoComplete="new-password"
-                            value={claimForms[row.application_id]?.password || ''}
-                            onChange={(event) => updateClaimField(row.application_id, 'password', event.target.value)}
-                          />
-                        </label>
-                        <label className="field" htmlFor={`claim-password-confirm-${row.application_id}`}>
-                          <span>Confirm Password</span>
-                          <input
-                            id={`claim-password-confirm-${row.application_id}`}
-                            type="password"
-                            autoComplete="new-password"
-                            value={claimForms[row.application_id]?.passwordConfirm || ''}
-                            onChange={(event) => updateClaimField(row.application_id, 'passwordConfirm', event.target.value)}
-                          />
-                        </label>
-                      </div>
-                      <div className="actions">
-                        <button disabled={loading} onClick={() => claimRoleAccess(row)}>
-                          {loading ? 'Saving...' : 'Set My Login Credentials'}
-                        </button>
-                        <button className="ghost" disabled={loading} onClick={() => navigate(ROUTES.login)}>
-                          Go to Login
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </article>
-              ))}
-            </div>
-          )}
-
-          {isAuthenticated && ownsMyApplications && loading && visibleMyApplications.length === 0 && (
-            <p className="muted">Loading applications...</p>
-          )}
-          {isAuthenticated && ownsMyApplications && hasRequestedMyApplications && !loading && visibleMyApplications.length === 0 && (
-            <p className="muted">No applications yet.</p>
-          )}
-          {isAuthenticated && (
-            <div className="role-application-list">
-              {visibleMyApplications.map((row) => (
-                <article key={row.application_id} className="role-application-card">
-                  <div className="queue-header">
-                    <strong>{roleLabel(row.target_role)}</strong>
-                    <span className={`badge status-${row.status}`}>{row.status}</span>
-                  </div>
-                  <p className="role-application-help">{applicationHelp(row)}</p>
-                  {row.reviewer_reason && <p className="role-application-reason">{row.reviewer_reason}</p>}
-                  <p className="meta">Submitted {formatDate(row.created_at)}</p>
-                  {row.decided_at && <p className="meta">Decided {formatDate(row.decided_at)}</p>}
-                  <details className="technical-details">
-                    <summary>Application reference</summary>
-                    <p className="meta">{row.application_id}</p>
-                    <button className="ghost" onClick={() => copyText(row.application_id, 'Application ID')}>
-                      Copy Reference
-                    </button>
-                  </details>
-                </article>
-              ))}
-            </div>
-          )}
           </section>
-      </section>
+
+          <section className="role-work-panel">
+            <div className="section-heading">
+              <div>
+                <h3>My Applications</h3>
+              </div>
+            </div>
+
+            {!isAuthenticated && (
+              <form
+                className="role-status-lookup"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  lookupPublicApplications()
+                }}
+              >
+                <p className="muted">Enter the email address you used to apply.</p>
+                <div className="role-status-search">
+                  <label className="field" htmlFor="role-status-email">
+                    <span>Email Address</span>
+                    <input
+                      id="role-status-email"
+                      type="email"
+                      value={statusEmail}
+                      onChange={(event) => setStatusEmail(event.target.value)}
+                      placeholder="name@example.com"
+                    />
+                  </label>
+                  {statusLookupFeedback.text && (
+                    <p
+                      className={
+                        statusLookupFeedback.tone === 'error'
+                          ? 'inline-error role-status-feedback-box'
+                          : statusLookupFeedback.tone === 'ok'
+                            ? 'inline-ok role-status-feedback-box'
+                            : 'muted role-status-feedback role-status-feedback-box'
+                      }
+                    >
+                      {statusLookupFeedback.text}
+                    </p>
+                  )}
+                  <button type="submit" disabled={loading}>
+                    Check Status
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {!isAuthenticated && publicApplications.length > 0 && (
+              <div className="role-application-list role-public-status-list">
+                {publicApplications.map((row) => (
+                  <article key={row.application_id} className="role-application-card">
+                    <div className="queue-header">
+                      <strong>{roleLabel(row.target_role)}</strong>
+                      <span className={`badge status-${row.status}`}>{publicStatusLabel(row)}</span>
+                    </div>
+                    <p className="role-application-help">{applicationHelp(row)}</p>
+                    {row.reviewer_reason && <p className="role-application-reason">{row.reviewer_reason}</p>}
+                    <p className="meta">Submitted {formatDate(row.created_at)}</p>
+                    {row.decided_at && <p className="meta">Decided {formatDate(row.decided_at)}</p>}
+                    {row.can_claim_credentials && (
+                      <div className="role-claim-access">
+                        <div className="field-grid">
+                          <label className="field" htmlFor={`claim-username-${row.application_id}`}>
+                            <span>Create Username</span>
+                            <input
+                              id={`claim-username-${row.application_id}`}
+                              autoComplete="username"
+                              value={claimForms[row.application_id]?.username || ''}
+                              onChange={(event) =>
+                                updateClaimField(row.application_id, 'username', event.target.value)
+                              }
+                              placeholder="Choose your username"
+                            />
+                            <small>{USERNAME_HELP_TEXT}</small>
+                          </label>
+                        </div>
+                        <div className="field-grid">
+                          <label className="field" htmlFor={`claim-password-${row.application_id}`}>
+                            <span>Create Password</span>
+                            <input
+                              id={`claim-password-${row.application_id}`}
+                              type="password"
+                              autoComplete="new-password"
+                              value={claimForms[row.application_id]?.password || ''}
+                              onChange={(event) =>
+                                updateClaimField(row.application_id, 'password', event.target.value)
+                              }
+                            />
+                          </label>
+                          <label className="field" htmlFor={`claim-password-confirm-${row.application_id}`}>
+                            <span>Confirm Password</span>
+                            <input
+                              id={`claim-password-confirm-${row.application_id}`}
+                              type="password"
+                              autoComplete="new-password"
+                              value={claimForms[row.application_id]?.passwordConfirm || ''}
+                              onChange={(event) =>
+                                updateClaimField(row.application_id, 'passwordConfirm', event.target.value)
+                              }
+                            />
+                          </label>
+                        </div>
+                        <div className="actions">
+                          <button disabled={loading} onClick={() => claimRoleAccess(row)}>
+                            {loading ? 'Saving...' : 'Set My Login Credentials'}
+                          </button>
+                          <button className="ghost" disabled={loading} onClick={() => navigate(ROUTES.login)}>
+                            Go to Login
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </article>
+                ))}
+              </div>
+            )}
+
+            {isAuthenticated && ownsMyApplications && loading && visibleMyApplications.length === 0 && (
+              <p className="muted">Loading applications...</p>
+            )}
+            {isAuthenticated &&
+              ownsMyApplications &&
+              hasRequestedMyApplications &&
+              !loading &&
+              visibleMyApplications.length === 0 && <p className="muted">No applications yet.</p>}
+            {isAuthenticated && (
+              <div className="role-application-list">
+                {visibleMyApplications.map((row) => (
+                  <article key={row.application_id} className="role-application-card">
+                    <div className="queue-header">
+                      <strong>{roleLabel(row.target_role)}</strong>
+                      <span className={`badge status-${row.status}`}>{row.status}</span>
+                    </div>
+                    <p className="role-application-help">{applicationHelp(row)}</p>
+                    {row.reviewer_reason && <p className="role-application-reason">{row.reviewer_reason}</p>}
+                    <p className="meta">Submitted {formatDate(row.created_at)}</p>
+                    {row.decided_at && <p className="meta">Decided {formatDate(row.decided_at)}</p>}
+                    <details className="technical-details">
+                      <summary>Application reference</summary>
+                      <p className="meta">{row.application_id}</p>
+                      <button
+                        className="ghost"
+                        onClick={() => copyText(row.application_id, 'Application ID')}
+                      >
+                        Copy Reference
+                      </button>
+                    </details>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+        </section>
       )}
 
       {!isCommunityMember && (
         <section className="role-final">
           <p className="role-final-text">
-            Thank you for your willingness to apply to the Digital Yaru. Your intentions to lend your voice, knowledge,
-            and care already helps strengthen the shared work of preserving Ivatan language and heritage!
+            Thank you for your willingness to apply to the Digital Yaru. Your intentions to lend your voice,
+            knowledge, and care already helps strengthen the shared work of preserving Ivatan language and
+            heritage!
           </p>
         </section>
       )}
 
       {error && <section className="alert error">{error}</section>}
       {message && <section className="alert ok">{message}</section>}
+      {renderPolicyModal()}
     </section>
   )
 }

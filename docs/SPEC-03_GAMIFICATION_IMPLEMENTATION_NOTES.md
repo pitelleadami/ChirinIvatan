@@ -5,15 +5,17 @@ This file summarizes what is implemented in backend for the v2 cultural stewards
 ## Implemented Core
 
 1. Deterministic backend computation
+
 - Contributor level track is backend computed from approved contribution totals.
 - Reviewer level track is backend computed from completed reviews.
 - Dictionary, folklore, and quality badges are backend computed.
 - No client authority.
 
 2. Aggregate stats table
-Model: `UserContributionStats`
+   Model: `UserContributionStats`
 
 Tracks:
+
 - `combined_total`
 - `dictionary_original_total`
 - `folklore_original_total`
@@ -28,23 +30,26 @@ Tracks:
 - `unlocked_badges`
 
 3. Municipality aggregate table
-Model: `MunicipalityStats`
+   Model: `MunicipalityStats`
 
 Tracks:
+
 - all-time totals (dictionary/folklore/combined)
 - monthly totals (dictionary/folklore/combined)
 - month marker for lazy monthly handling
 
 4. Recognition event log (immutable)
-Model: `RecognitionEvent`
+   Model: `RecognitionEvent`
 
 Types:
+
 - `level_up`
 - `badge_unlock`
 - `municipality_win`
 
 5. Event-driven recalculation
-Signals recalculate stats/levels/badges on:
+   Signals recalculate stats/levels/badges on:
+
 - `ContributionEvent` creation
 - `Review` creation
 - `FolkloreReview` creation
@@ -54,9 +59,10 @@ Signals recalculate stats/levels/badges on:
 ## Implemented Advanced (requested)
 
 1. Admin-editable thresholds
-Model: `GamificationConfig`
+   Model: `GamificationConfig`
 
 Admin can edit:
+
 - contributor levels
 - reviewer levels
 - dictionary badge thresholds
@@ -66,11 +72,13 @@ Admin can edit:
 Default/fallback rules apply if config is missing or invalid.
 
 2. Automatic monthly municipality winner events
-Models:
+   Models:
+
 - `GamificationRuntimeState`
 - `MunicipalityMonthlyWinner`
 
 Behavior:
+
 - On first recompute in a new month, system computes previous month winners.
 - Winners are generated for:
   - dictionary monthly
@@ -83,6 +91,7 @@ Behavior:
 ## API Surface
 
 1. Public profile
+
 - `GET /api/users/<username>`
 - Includes `gamification` block:
   - contributor_level
@@ -94,26 +103,33 @@ Behavior:
   - framing/language
 
 2. Stewardship/gamification payload
+
 - `GET /api/users/<username>/cultural-stewardship`
 
 3. Recognition events feed
+
 - `GET /api/users/<username>/recognition-events`
 
 4. Global leaderboard with dimensions
+
 - `GET /leaderboard/global?metric=dictionary|folklore|combined&period=all_time|monthly`
 
 5. Municipality leaderboard with dimensions
+
 - `GET /leaderboard/municipality?municipality=<name>&metric=dictionary|folklore|combined&period=all_time|monthly`
 
 6. Municipality aggregate list
+
 - `GET /leaderboard/municipalities`
 
 7. Municipality monthly winners
+
 - `GET /leaderboard/municipality-winners?month=YYYY-MM` (month filter optional)
 
 ## Management Commands
 
 1. Full recompute/backfill
+
 - `python3 manage.py recompute_gamification`
 
 Use this after migration to initialize all user stats and recognition states.
@@ -127,15 +143,28 @@ Use this after migration to initialize all user stats and recognition states.
 ## Test Status
 
 Ran:
+
 - `python3 manage.py test users`
 - `python3 manage.py test users reviews dictionary folklore`
 
 Result:
+
 - all passing
 
 ## Remaining Optional Enhancements
 
 1. Admin UI helper for validating JSON threshold schema.
 2. Scheduled nightly integrity audit command comparing aggregates vs raw events.
-3. Richer frontend milestone charts and share-card visuals.
+3. Richer frontend milestone charts.
 4. Additional recognition-event timeline visualizations.
+
+## Share Export UX
+
+The beta sharing flow intentionally avoids direct Facebook/Instagram composer attachment because browser share dialogs cannot reliably attach generated local images. Shareable achievements use a uniform export flow:
+
+- one Share button per earned badge, profile leaderboard card, and municipality leaderboard card
+- modal format choice between square post image and vertical story image
+- generated card preview before export
+- primary action downloads the PNG and copies a culturally affirming caption plus the relevant Chirin Ivatan link
+- badge captions vary by achievement family: dictionary, folklore, reviewer, quality, or generic contribution
+- leaderboard captions frame individual and municipality recognition as cultural stewardship

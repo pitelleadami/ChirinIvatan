@@ -1,10 +1,11 @@
 from django.contrib import admin
+
 from users.models import (
     ContributionEvent,
     GamificationConfig,
     GamificationRuntimeState,
-    MunicipalityStats,
     MunicipalityMonthlyWinner,
+    MunicipalityStats,
     RecognitionEvent,
     RoleApplication,
     RoleApplicationDecision,
@@ -34,6 +35,7 @@ class UserProfileAdmin(admin.ModelAdmin):
 
     list_display = (
         "user",
+        "name_extension",
         "post_nominals",
         "municipality",
         "include_in_leaderboard",
@@ -43,7 +45,14 @@ class UserProfileAdmin(admin.ModelAdmin):
         "occupation",
     )
     list_filter = ("include_in_leaderboard", "show_on_yaru_chart", "show_live_contributions")
-    search_fields = ("user__username", "post_nominals", "municipality", "affiliation", "occupation")
+    search_fields = (
+        "user__username",
+        "name_extension",
+        "post_nominals",
+        "municipality",
+        "affiliation",
+        "occupation",
+    )
 
 
 @admin.register(SiteContentSettings)
@@ -95,7 +104,15 @@ class RoleOnboardingRecordAdmin(admin.ModelAdmin):
 class RoleInvitationAdmin(admin.ModelAdmin):
     """Inspect email invitations that bypass role application quorum."""
 
-    list_display = ("email", "role", "status", "invited_by", "created_at", "expires_at", "accepted_at")
+    list_display = (
+        "email",
+        "role",
+        "status",
+        "invited_by",
+        "created_at",
+        "expires_at",
+        "accepted_at",
+    )
     list_filter = ("role", "status")
     search_fields = ("email", "invited_by__username", "accepted_by__username")
 

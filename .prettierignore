@@ -1,0 +1,12 @@
+frontend/dist/
+frontend/node_modules/
+frontend/package-lock.json
+backend/media/
+backend/staticfiles/
+docs/IS295A_FROZEN/
+manuscript/
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.pdf
