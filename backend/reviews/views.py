@@ -11,6 +11,7 @@ Design intent:
 import json
 
 from django.core.exceptions import ValidationError
+from django.core.files.storage import default_storage
 from django.db.models import Q
 from django.http import JsonResponse
 from django.views.decorators.http import require_GET, require_POST
@@ -23,9 +24,104 @@ from reviews.services import (
     admin_override_folklore_entry,
     is_admin,
     is_reviewer,
-    submit_review,
     submit_folklore_review,
+    submit_review,
 )
+from users.names import normalize_username
+
+
+def _stored_media_url(request, stored_path):
+    if not stored_path:
+        return ""
+    try:
+        return request.build_absolute_uri(default_storage.url(stored_path))
+    except Exception:
+        return ""
+
+
+def _file_media_url(request, file_field):
+    if not file_field:
+        return ""
+    try:
+        return request.build_absolute_uri(file_field.url)
+    except Exception:
+        return ""
+
+
+def _dictionary_preview_payload(proposed_data, request):
+    variants = []
+    for item in proposed_data.get("variants", []) or []:
+        if not isinstance(item, dict):
+            continue
+        audio_path = item.get("audio_pronunciation", "")
+        variants.append(
+            {
+                **item,
+                "audio_pronunciation_url": _stored_media_url(request, audio_path),
+            }
+        )
+    audio_path = proposed_data.get("audio_pronunciation", "")
+    photo_path = proposed_data.get("photo", "")
+    return {
+        "meaning": proposed_data.get("meaning", ""),
+        "part_of_speech": proposed_data.get("part_of_speech", ""),
+        "variant_type": proposed_data.get("variant_type", ""),
+        "phonetic": proposed_data.get("phonetic", ""),
+        "pronunciation": proposed_data.get("pronunciation_text", ""),
+        "example_sentence": proposed_data.get("example_sentence", ""),
+        "example_translation": proposed_data.get("example_translation", ""),
+        "usage_notes": proposed_data.get("usage_notes", ""),
+        "etymology": proposed_data.get("etymology", ""),
+        "english_synonym": proposed_data.get("english_synonym", ""),
+        "ivatan_synonym": proposed_data.get("ivatan_synonym", ""),
+        "english_antonym": proposed_data.get("english_antonym", ""),
+        "ivatan_antonym": proposed_data.get("ivatan_antonym", ""),
+        "inflected_forms": proposed_data.get("inflected_forms", ""),
+        "source": proposed_data.get("source_text", ""),
+        "term_source_is_self_knowledge": proposed_data.get("term_source_is_self_knowledge", None),
+        "audio_pronunciation": audio_path,
+        "audio_pronunciation_url": _stored_media_url(request, audio_path),
+        "audio_source": proposed_data.get("audio_source", ""),
+        "audio_source_is_self_recorded": proposed_data.get("audio_source_is_self_recorded", None),
+        "audio_license": proposed_data.get("audio_license", ""),
+        "photo": photo_path,
+        "photo_url": _stored_media_url(request, photo_path),
+        "photo_source": proposed_data.get("photo_source", ""),
+        "photo_source_is_contributor_owned": proposed_data.get(
+            "photo_source_is_contributor_owned", None
+        ),
+        "photo_license": proposed_data.get("photo_license", ""),
+        "variants": variants,
+    }
+
+
+def _folklore_preview_payload(revision, request):
+    proposed_data = revision.proposed_data or {}
+    return {
+        "content": proposed_data.get("content", ""),
+        "municipality_source": proposed_data.get("municipality_source", ""),
+        "source": proposed_data.get("source", ""),
+        "self_knowledge": proposed_data.get("self_knowledge", None),
+        "media_url": proposed_data.get("media_url", ""),
+        "media_source": proposed_data.get("media_source", ""),
+        "self_produced_media": proposed_data.get("self_produced_media", None),
+        "copyright_usage": proposed_data.get("copyright_usage", ""),
+        "photo_upload_url": _file_media_url(request, revision.photo_upload),
+        "audio_upload_url": _file_media_url(request, revision.audio_upload),
+    }
+
+
+def _contributor_display_name(user):
+    from users.names import name_with_extension
+
+    profile = getattr(user, "profile", None)
+    base = name_with_extension(user, profile) or user.username
+    post_nominals = str(getattr(profile, "post_nominals", "") or "").strip()
+    if post_nominals:
+        parts = [p.strip() for p in post_nominals.split(",") if p.strip()]
+        trimmed = ", ".join(parts[-2:])
+        return f"{base}, {trimmed}"
+    return base
 
 
 def _active_rereview_round(revision: EntryRevision):
@@ -105,31 +201,59 @@ def _quorum_progress(reviewer_ids, admin_ids):
     }
 
 
-def _serialize_pending_revision(revision: EntryRevision):
+def _serialize_pending_revision(revision: EntryRevision, request=None):
     # Queue serializer for dictionary pending workflow.
     proposed_data = revision.proposed_data or {}
     proposed_term = proposed_data.get("term", "")
-    return {
+    payload = {
         "revision_id": str(revision.id),
         "entry_id": str(revision.entry_id) if revision.entry_id else None,
         "term": proposed_term,
-        "preview": {
-            "meaning": proposed_data.get("meaning", ""),
-            "part_of_speech": proposed_data.get("part_of_speech", ""),
-            "phonetic": proposed_data.get("phonetic", ""),
-            "pronunciation": proposed_data.get("pronunciation_text", ""),
-            "example_sentence": proposed_data.get("example_sentence", ""),
-            "example_translation": proposed_data.get("example_translation", ""),
-            "usage_notes": proposed_data.get("usage_notes", ""),
-            "source": proposed_data.get("source_text", ""),
-        },
-        "contributor_username": revision.contributor.username,
+        "preview": _dictionary_preview_payload(proposed_data, request),
+        "contributor_username": normalize_username(revision.contributor.username),
+        "contributor_display_name": _contributor_display_name(revision.contributor),
         "created_at": revision.created_at.isoformat(),
         "status": revision.status,
     }
+    if revision.entry_id:
+        snapshots = list(
+            revision.entry.revisions.filter(status=EntryRevision.Status.APPROVED)
+            .select_related("contributor", "contributor__profile")
+            .order_by("created_at")
+        )
+        payload["revision_log"] = [
+            {
+                "revision_id": str(item.id),
+                "label": (
+                    "Original approved entry" if item.is_base_snapshot else "Approved revision"
+                ),
+                "contributor_username": normalize_username(item.contributor.username),
+                "created_at": item.created_at.isoformat(),
+                "approved_at": item.approved_at.isoformat() if item.approved_at else None,
+                "is_base_snapshot": item.is_base_snapshot,
+                "snapshot": item.proposed_data or {},
+            }
+            for item in snapshots
+        ]
+        payload["contributor_options"] = sorted(
+            {
+                normalize_username(item.contributor.username)
+                for item in snapshots
+                if item.contributor_id
+            }
+        )
+        latest_flag = (
+            revision.reviews.filter(
+                decision=Review.Decision.FLAG,
+            )
+            .order_by("-review_round", "-created_at")
+            .first()
+        )
+        payload["flag_notes"] = latest_flag.notes if latest_flag else ""
+    return payload
 
 
-def _serialize_published_revision(revision: EntryRevision):
+def _serialize_published_revision(revision: EntryRevision, request=None):
     # Queue serializer for approved dictionary revisions (flag candidates).
     proposed_data = revision.proposed_data or {}
     proposed_term = proposed_data.get("term", "")
@@ -137,17 +261,9 @@ def _serialize_published_revision(revision: EntryRevision):
         "revision_id": str(revision.id),
         "entry_id": str(revision.entry_id) if revision.entry_id else None,
         "term": proposed_term,
-        "preview": {
-            "meaning": proposed_data.get("meaning", ""),
-            "part_of_speech": proposed_data.get("part_of_speech", ""),
-            "phonetic": proposed_data.get("phonetic", ""),
-            "pronunciation": proposed_data.get("pronunciation_text", ""),
-            "example_sentence": proposed_data.get("example_sentence", ""),
-            "example_translation": proposed_data.get("example_translation", ""),
-            "usage_notes": proposed_data.get("usage_notes", ""),
-            "source": proposed_data.get("source_text", ""),
-        },
-        "contributor_username": revision.contributor.username,
+        "preview": _dictionary_preview_payload(proposed_data, request),
+        "contributor_username": normalize_username(revision.contributor.username),
+        "contributor_display_name": _contributor_display_name(revision.contributor),
         "created_at": revision.created_at.isoformat(),
         "approved_at": revision.approved_at.isoformat() if revision.approved_at else None,
         "status": revision.status,
@@ -155,29 +271,60 @@ def _serialize_published_revision(revision: EntryRevision):
     }
 
 
-def _serialize_pending_folklore(revision: FolkloreRevision):
+def _serialize_pending_folklore(revision: FolkloreRevision, request=None):
     # Queue serializer for folklore pending workflow.
     proposed_data = revision.proposed_data or {}
-    return {
+    payload = {
         "revision_id": str(revision.id),
         "entry_id": str(revision.entry_id) if revision.entry_id else None,
         "title": proposed_data.get("title", ""),
         "category": proposed_data.get("category", ""),
         "subcategory": proposed_data.get("subcategory", ""),
-        "preview": {
-            "content": proposed_data.get("content", ""),
-            "municipality_source": proposed_data.get("municipality_source", ""),
-            "source": proposed_data.get("source", ""),
-            "media_source": proposed_data.get("media_source", ""),
-            "copyright_usage": proposed_data.get("copyright_usage", ""),
-        },
-        "contributor_username": revision.contributor.username,
+        "preview": _folklore_preview_payload(revision, request),
+        "contributor_username": normalize_username(revision.contributor.username),
+        "contributor_display_name": _contributor_display_name(revision.contributor),
         "created_at": revision.created_at.isoformat(),
         "status": revision.status,
     }
+    if revision.entry_id:
+        snapshots = list(
+            revision.entry.revisions.filter(status=FolkloreRevision.Status.APPROVED)
+            .select_related("contributor", "contributor__profile")
+            .order_by("created_at")
+        )
+        payload["revision_log"] = [
+            {
+                "revision_id": str(item.id),
+                "label": (
+                    "Original approved entry" if item.is_base_snapshot else "Approved revision"
+                ),
+                "contributor_username": normalize_username(item.contributor.username),
+                "created_at": item.created_at.isoformat(),
+                "approved_at": item.approved_at.isoformat() if item.approved_at else None,
+                "is_base_snapshot": item.is_base_snapshot,
+                "snapshot": item.proposed_data or {},
+            }
+            for item in snapshots
+        ]
+        payload["contributor_options"] = sorted(
+            {
+                normalize_username(item.contributor.username)
+                for item in snapshots
+                if item.contributor_id
+            }
+        )
+        latest_flag = (
+            revision.reviews.filter(
+                decision=FolkloreReview.Decision.FLAG,
+            )
+            .order_by("-review_round", "-created_at")
+            .first()
+        )
+        payload["flag_notes"] = latest_flag.notes if latest_flag else ""
+    return payload
 
 
-def _serialize_published_folklore(revision: FolkloreRevision):
+def _serialize_published_folklore(revision: FolkloreRevision, request=None):
     # Queue serializer for approved folklore revisions (flag candidates).
     proposed_data = revision.proposed_data or {}
     return {
@@ -186,14 +333,9 @@ def _serialize_published_folklore(revision: FolkloreRevision):
         "title": proposed_data.get("title", ""),
         "category": proposed_data.get("category", ""),
         "subcategory": proposed_data.get("subcategory", ""),
-        "preview": {
-            "content": proposed_data.get("content", ""),
-            "municipality_source": proposed_data.get("municipality_source", ""),
-            "source": proposed_data.get("source", ""),
-            "media_source": proposed_data.get("media_source", ""),
-            "copyright_usage": proposed_data.get("copyright_usage", ""),
-        },
-        "contributor_username": revision.contributor.username,
+        "preview": _folklore_preview_payload(revision, request),
+        "contributor_username": normalize_username(revision.contributor.username),
+        "contributor_display_name": _contributor_display_name(revision.contributor),
         "created_at": revision.created_at.isoformat(),
         "approved_at": revision.approved_at.isoformat() if revision.approved_at else None,
         "status": revision.status,
@@ -231,7 +373,8 @@ def _serialize_review(review: Review):
         "final_outcome": final_outcome,
     }
 
-def _latest_approved_dictionary_revisions(*, user):
+
+def _latest_approved_dictionary_revisions(*, user, request=None):
     """
     Return one approved revision per approved dictionary entry.
     Includes only entries currently in APPROVED state (flaggable).
@@ -241,7 +384,7 @@ def _latest_approved_dictionary_revisions(*, user):
             status=EntryRevision.Status.APPROVED,
             entry__status=EntryStatus.APPROVED,
         )
-        .select_related("contributor", "entry")
+        .select_related("contributor", "contributor__profile", "entry")
         .order_by("-approved_at", "-created_at")
     )
 
@@ -254,11 +397,11 @@ def _latest_approved_dictionary_revisions(*, user):
     for revision in latest_by_entry.values():
         if revision.contributor_id == user.id:
             continue
-        rows.append(_serialize_published_revision(revision))
+        rows.append(_serialize_published_revision(revision, request=request))
     return rows
 
 
-def _latest_approved_folklore_revisions(*, user):
+def _latest_approved_folklore_revisions(*, user, request=None):
     """
     Return one approved revision per approved folklore entry.
     Includes only entries currently in APPROVED state (flaggable).
@@ -268,7 +411,7 @@ def _latest_approved_folklore_revisions(*, user):
             status=FolkloreRevision.Status.APPROVED,
             entry__status=FolkloreEntry.Status.APPROVED,
         )
-        .select_related("contributor", "entry")
+        .select_related("contributor", "contributor__profile", "entry")
         .order_by("-approved_at", "-created_at")
     )
 
@@ -281,7 +424,7 @@ def _latest_approved_folklore_revisions(*, user):
     for revision in latest_by_entry.values():
         if revision.contributor_id == user.id:
             continue
-        rows.append(_serialize_published_folklore(revision))
+        rows.append(_serialize_published_folklore(revision, request=request))
     return rows
 
 
@@ -307,23 +450,25 @@ def reviewer_dashboard_view(request):
     # Queue view excludes items the current reviewer/admin already reviewed in this round.
     pending_initial_qs = EntryRevision.objects.filter(
         status=EntryRevision.Status.PENDING,
-    ).select_related("contributor", "entry")
+    ).select_related("contributor", "contributor__profile", "entry")
     pending_initial_qs = pending_initial_qs.exclude(
         reviews__reviewer=user,
         reviews__review_round=0,
     )
 
-    pending_initial = [_serialize_pending_revision(rev) for rev in pending_initial_qs]
+    pending_initial = [
+        _serialize_pending_revision(rev, request=request) for rev in pending_initial_qs
+    ]
 
     pending_folklore_qs = FolkloreRevision.objects.filter(
         status=FolkloreRevision.Status.PENDING
-    ).select_related("contributor", "entry")
+    ).select_related("contributor", "contributor__profile", "entry")
     pending_folklore_qs = pending_folklore_qs.exclude(
         reviews__reviewer=user,
         reviews__review_round=0,
     )
     pending_folklore = [
-        _serialize_pending_folklore(revision) for revision in pending_folklore_qs
+        _serialize_pending_folklore(revision, request=request) for revision in pending_folklore_qs
     ]
 
     # 2) Pending re-review queue:
@@ -333,7 +478,7 @@ def reviewer_dashboard_view(request):
             status=EntryRevision.Status.APPROVED,
             entry__status=EntryStatus.APPROVED_UNDER_REVIEW,
         )
-        .select_related("contributor", "entry")
+        .select_related("contributor", "contributor__profile", "entry")
         .distinct()
     )
     pending_rereview = []
@@ -347,14 +492,14 @@ def reviewer_dashboard_view(request):
             review_round=current_round,
         ).exists():
             continue
-        item = _serialize_pending_revision(rev)
+        item = _serialize_pending_revision(rev, request=request)
         item["review_round"] = current_round
         pending_rereview.append(item)
 
     pending_folklore_rereview_qs = FolkloreRevision.objects.filter(
         status=FolkloreRevision.Status.APPROVED,
         entry__status=FolkloreEntry.Status.APPROVED_UNDER_REVIEW,
-    ).select_related("contributor", "entry")
+    ).select_related("contributor", "contributor__profile", "entry")
     pending_folklore_rereview = []
     for revision in pending_folklore_rereview_qs:
         current_round = (
@@ -370,19 +515,29 @@ def reviewer_dashboard_view(request):
             review_round=current_round,
         ).exists():
             continue
-        item = _serialize_pending_folklore(revision)
+        item = _serialize_pending_folklore(revision, request=request)
         item["review_round"] = current_round
         pending_folklore_rereview.append(item)
 
     # 2b) Published approved entries eligible to be flagged.
-    dictionary_published = _latest_approved_dictionary_revisions(user=user)
-    folklore_published = _latest_approved_folklore_revisions(user=user)
+    dictionary_published = _latest_approved_dictionary_revisions(
+        user=user,
+        request=request,
+    )
+    folklore_published = _latest_approved_folklore_revisions(
+        user=user,
+        request=request,
+    )
 
     # 3) My reviews + outcomes
-    my_reviews_qs = Review.objects.filter(reviewer=user).select_related(
-        "revision",
-        "revision__entry",
-    ).order_by("-created_at")
+    my_reviews_qs = (
+        Review.objects.filter(reviewer=user)
+        .select_related(
+            "revision",
+            "revision__entry",
+        )
+        .order_by("-created_at")
+    )
     my_reviews = [_serialize_review(r) for r in my_reviews_qs]
 
     # 4) Read-only status rows after this user approved but quorum is still open.
@@ -396,7 +551,7 @@ def reviewer_dashboard_view(request):
             if rev.status != EntryRevision.Status.PENDING:
                 continue
             reviewer_ids, admin_ids = _approval_sets_for_round(rev, 0)
-            item = _serialize_pending_revision(rev)
+            item = _serialize_pending_revision(rev, request=request)
             item.update(
                 {
                     "review_round": 0,
@@ -423,7 +578,7 @@ def reviewer_dashboard_view(request):
         if _quorum_met(reviewer_ids, admin_ids):
             continue
 
-        item = _serialize_pending_revision(rev)
+        item = _serialize_pending_revision(rev, request=request)
         item.update(
             {
                 "review_round": active_round,
@@ -433,13 +588,17 @@ def reviewer_dashboard_view(request):
         )
         awaiting_dictionary_quorum.append(item)
 
-    my_folklore_reviews_qs = FolkloreReview.objects.filter(
-        reviewer=user,
-    ).select_related(
-        "folklore_revision",
-        "folklore_revision__entry",
-        "folklore_revision__contributor",
-    ).order_by("-created_at")
+    my_folklore_reviews_qs = (
+        FolkloreReview.objects.filter(
+            reviewer=user,
+        )
+        .select_related(
+            "folklore_revision",
+            "folklore_revision__entry",
+            "folklore_revision__contributor",
+        )
+        .order_by("-created_at")
+    )
     awaiting_folklore_quorum = []
     for review in my_folklore_reviews_qs.filter(
         decision=FolkloreReview.Decision.APPROVE,
@@ -453,7 +612,7 @@ def reviewer_dashboard_view(request):
                 revision,
                 0,
             )
-            item = _serialize_pending_folklore(revision)
+            item = _serialize_pending_folklore(revision, request=request)
             item.update(
                 {
                     "review_round": 0,
@@ -486,7 +645,7 @@ def reviewer_dashboard_view(request):
         if _quorum_met(reviewer_ids, admin_ids):
             continue
 
-        item = _serialize_pending_folklore(revision)
+        item = _serialize_pending_folklore(revision, request=request)
         item.update(
             {
                 "review_round": active_round,
@@ -497,10 +656,7 @@ def reviewer_dashboard_view(request):
         awaiting_folklore_quorum.append(item)
 
     awaiting_quorum = [
-        *(
-            {"kind": "dictionary", **item}
-            for item in awaiting_dictionary_quorum
-        ),
+        *({"kind": "dictionary", **item} for item in awaiting_dictionary_quorum),
         *({"kind": "folklore", **item} for item in awaiting_folklore_quorum),
     ]
 
@@ -565,14 +721,22 @@ def admin_archive_entries_view(request):
     ).select_related("contributor")
 
     if search:
-        dictionary_filter = Q(term__icontains=search) | Q(initial_contributor__username__icontains=search)
+        dictionary_filter = Q(term__icontains=search) | Q(
+            initial_contributor__username__icontains=search
+        )
         folklore_filter = Q(title__icontains=search) | Q(contributor__username__icontains=search)
         dictionary_archived = dictionary_archived.filter(dictionary_filter)
         folklore_archived = folklore_archived.filter(folklore_filter)
 
     archived = [
-        *[_serialize_archive_entry(row, "dictionary") for row in dictionary_archived.order_by("-archived_at")[:200]],
-        *[_serialize_archive_entry(row, "folklore") for row in folklore_archived.order_by("-archived_at")[:200]],
+        *[
+            _serialize_archive_entry(row, "dictionary")
+            for row in dictionary_archived.order_by("-archived_at")[:200]
+        ],
+        *[
+            _serialize_archive_entry(row, "folklore")
+            for row in folklore_archived.order_by("-archived_at")[:200]
+        ],
     ]
     archived.sort(key=lambda row: row.get("archived_at") or "", reverse=True)
 
@@ -677,6 +841,8 @@ def submit_folklore_review_view(request):
     entry_id = (payload.get("entry_id") or "").strip()
     decision = (payload.get("decision") or "").strip()
     notes = (payload.get("notes") or "").strip()
+    assigned_to_username = (payload.get("assigned_to_username") or "").strip()
+    source_revision_id = (payload.get("source_revision_id") or "").strip()
 
     if not decision or (not revision_id and not entry_id):
         return JsonResponse(
@@ -715,6 +881,8 @@ def submit_folklore_review_view(request):
             reviewer=user,
             decision=decision,
             notes=notes,
+            assigned_to_username=assigned_to_username,
+            source_revision_id=source_revision_id,
         )
     except ValidationError as exc:
         return JsonResponse({"detail": exc.messages[0]}, status=400)
@@ -745,6 +913,8 @@ def submit_dictionary_review_view(request):
     revision_id = (payload.get("revision_id") or "").strip()
     decision = (payload.get("decision") or "").strip()
     notes = (payload.get("notes") or "").strip()
+    assigned_to_username = (payload.get("assigned_to_username") or "").strip()
+    source_revision_id = (payload.get("source_revision_id") or "").strip()
 
     if not revision_id or not decision:
         return JsonResponse(
@@ -772,6 +942,8 @@ def submit_dictionary_review_view(request):
             reviewer=user,
             decision=decision,
             notes=notes,
+            assigned_to_username=assigned_to_username,
+            source_revision_id=source_revision_id,
         )
     except ValidationError as exc:
         return JsonResponse({"detail": exc.messages[0]}, status=400)

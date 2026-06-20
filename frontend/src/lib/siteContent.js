@@ -1,8 +1,10 @@
 export const DEFAULT_SITE_CONTENT = {
   brand_name: 'Chirin Ivatan',
   brand_logo_url: '',
-  landing_intro_text: '— from "Chirin", meaning language, and "nu Ivatan," referring to the people and culture of Batanes — is an online dictionary and folklore archive dedicated to preserving the Ivatan language, stories, and cultural heritage in the digital age.',
-  landing_body_text: 'Developed as a community-centered initiative for cultural preservation, it welcomes Ivatans and all who wish to contribute or learn about the language and heritage to take part in safeguarding the words, stories, and living traditions that continue to shape the identity of the Ivatans.',
+  landing_intro_text:
+    '— from "Chirin", meaning language, and "nu Ivatan," referring to the people and culture of Batanes — is an online dictionary and folklore archive dedicated to preserving the Ivatan language, stories, and cultural heritage in the digital age.',
+  landing_body_text:
+    'Developed as a community-centered initiative for cultural preservation, it welcomes Ivatans and all who wish to contribute or learn about the language and heritage to take part in safeguarding the words, stories, and living traditions that continue to shape the identity of the Ivatans.',
   footer_left_text: '© 2026 Chirin Ivatan.',
   footer_center_text: 'Developed for the preservation and continuity of the Ivatan language and heritage.',
   footer_right_text: 'Contact: chirinivatan@gmail.com',
@@ -21,14 +23,15 @@ export const DEFAULT_SITE_CONTENT = {
   ],
   about_future_paragraphs: [
     'Chirin Ivatan is envisioned as a living and evolving archive that continues to grow alongside its community. Future development may include expanded collections, interactive learning tools, and stronger collaboration with schools, cultural institutions, researchers, and heritage organizations.',
-    'To support long-term sustainability, the project welcomes partnerships and collaborative support for continued innovation, maintenance, and capacity building. Chirin Ivatan also aims to become a mobile-friendly and multilingual platform that connects Ivatans across the islands and the global diaspora.',
+    'To support long-term sustainability, the project welcomes supporting organizations and collaborative support for continued innovation, maintenance, and capacity building. Chirin Ivatan also aims to become a mobile-friendly and multilingual platform that connects Ivatans across the islands and the global diaspora.',
     'Looking ahead, the project aspires to evolve into an open-source model that other ethnolinguistic communities may adapt, contributing to a broader movement for digital heritage preservation across the Philippines and beyond.',
   ],
-  about_final_quote: '"Chirin Ivatan is more than just a project. It is a shared act of remembrance built in the spirit of Yaru, where every word remembered and every story told helps keep the Ivatan heritage alive."',
+  about_final_quote:
+    '"Chirin Ivatan is more than just a project. It is a shared act of remembrance built in the spirit of Yaru, where every word remembered and every story told helps keep the Ivatan heritage alive."',
   yaru_heading: 'The Digital Yaru',
   yaru_intro_paragraphs: [
     'Chirin Ivatan is built in the spirit of Yaru, the Ivatan embodiment of collective strength and shared purpose.',
-    'The project welcomes contributors, reviewers, consultants, and partners who can lend their hands, voices, and knowledge. Whether you are a student, storyteller, educator, or simply someone who cares to help, you are invited to be part of this digital yaru.',
+    'The project welcomes contributors, reviewers, consultants, and supporting organizations who can lend their hands, voices, and knowledge. Whether you are a student, storyteller, educator, or simply someone who cares to help, you are invited to be part of this digital yaru.',
   ],
   support_statements: [],
   partner_details: [],
@@ -61,9 +64,7 @@ const PARAGRAPH_KEYS = [
 ]
 
 export function normalizeParagraphs(value, fallback = []) {
-  return Array.isArray(value)
-    ? value.map((item) => String(item || '').trim()).filter(Boolean)
-    : fallback
+  return Array.isArray(value) ? value.map((item) => String(item || '').trim()).filter(Boolean) : fallback
 }
 
 export function normalizeSiteContent(payload = {}) {

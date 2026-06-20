@@ -17,7 +17,6 @@ from reviews.views import (
     submit_folklore_review_view,
 )
 
-
 urlpatterns = [
     path("api/reviews/dashboard", reviewer_dashboard_view, name="reviewer_dashboard"),
     path("api/reviews/admin/archive", admin_archive_entries_view, name="admin_archive_entries"),

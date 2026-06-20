@@ -32,16 +32,22 @@ class MaintenanceModeMiddleware:
             return self.get_response(request)
 
         user = getattr(request, "user", None)
-        if user and user.is_authenticated and (
-            user.is_superuser or user.groups.filter(name="Admin").exists()
+        if (
+            user
+            and user.is_authenticated
+            and (user.is_superuser or user.groups.filter(name="Admin").exists())
         ):
             return self.get_response(request)
 
         try:
-            settings = SiteContentSettings.objects.filter(key="default").only(
-                "maintenance_enabled",
-                "maintenance_message",
-            ).first()
+            settings = (
+                SiteContentSettings.objects.filter(key="default")
+                .only(
+                    "maintenance_enabled",
+                    "maintenance_message",
+                )
+                .first()
+            )
         except (OperationalError, ProgrammingError):
             return self.get_response(request)
 

@@ -47,9 +47,7 @@ class Command(BaseCommand):
         for entry in Entry.objects.filter(status=EntryStatus.REJECTED):
             # "Auto-archive: rejected entries with no revision for 1 year."
             last_revision_at = (
-                entry.revisions.order_by("-created_at")
-                .values_list("created_at", flat=True)
-                .first()
+                entry.revisions.order_by("-created_at").values_list("created_at", flat=True).first()
             )
             last_activity = last_revision_at or entry.created_at
             if last_activity > cutoff:

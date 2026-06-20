@@ -1,15 +1,17 @@
 import json
+import tempfile
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError
-from django.test import TestCase
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import TestCase, override_settings
 
 from dictionary.models import Entry, EntryRevision, EntryStatus
 from folklore.models import FolkloreEntry, FolkloreRevision
-from reviews.models import FolkloreReview, Review, ReviewAdminOverride
+from reviews.models import CorrectionAssignment, FolkloreReview, Review, ReviewAdminOverride
 from reviews.services import submit_folklore_review, submit_review
-
+from users.models import Notification
 
 User = get_user_model()
 
@@ -18,11 +20,19 @@ class ReviewServicesTests(TestCase):
     def setUp(self):
         self.reviewer_group, _ = Group.objects.get_or_create(name="Reviewer")
         self.admin_group, _ = Group.objects.get_or_create(name="Admin")
+        self.contributor_group, _ = Group.objects.get_or_create(name="Contributor")
+        self.consultant_group, _ = Group.objects.get_or_create(name="Consultant")
 
         self.contributor = User.objects.create_user(
             username="contributor",
             password="testpass123",
         )
+        self.contributor.groups.add(self.contributor_group)
+        self.consultant = User.objects.create_user(
+            username="consultant",
+            password="testpass123",
+        )
+        self.consultant.groups.add(self.consultant_group)
         self.reviewer1 = User.objects.create_user(
             username="reviewer1",
             password="testpass123",
@@ -74,7 +84,33 @@ class ReviewServicesTests(TestCase):
         entry.refresh_from_db()
         self.assertEqual(entry.status, EntryStatus.APPROVED_UNDER_REVIEW)
 
-    def test_rereview_reject_moves_entry_to_rejected(self):
+    def test_contributor_can_flag_own_approved_entry(self):
+        entry, revision = self._approved_entry_with_revision()
+
+        submit_review(
+            revision=revision,
+            reviewer=self.contributor,
+            decision=Review.Decision.FLAG,
+            notes="I noticed a correction is needed.",
+        )
+
+        entry.refresh_from_db()
+        self.assertEqual(entry.status, EntryStatus.APPROVED_UNDER_REVIEW)
+
+    def test_consultant_can_flag_approved_entry(self):
+        entry, revision = self._approved_entry_with_revision()
+
+        submit_review(
+            revision=revision,
+            reviewer=self.consultant,
+            decision=Review.Decision.FLAG,
+            notes="Cultural context needs another check.",
+        )
+
+        entry.refresh_from_db()
+        self.assertEqual(entry.status, EntryStatus.APPROVED_UNDER_REVIEW)
+
+    def test_rereview_reject_archives_entry(self):
         entry, revision = self._approved_entry_with_revision()
 
         submit_review(
@@ -91,7 +127,114 @@ class ReviewServicesTests(TestCase):
         )
 
         entry.refresh_from_db()
+        self.assertEqual(entry.status, EntryStatus.ARCHIVED)
+        notification = Notification.objects.get(
+            user=self.contributor,
+            notif_type=Notification.Type.REVISION_REJECTED,
+        )
+        self.assertIn("rejected after re-review", notification.message)
+        self.assertIn("Confirmed issue.", notification.message)
+        self.assertEqual(notification.target_url, "/admin-applications?tab=contributions")
+
+    def test_rereview_can_return_revision_to_selected_contributor_and_restore_previous_snapshot(
+        self,
+    ):
+        entry = Entry.objects.create(
+            term="vahay",
+            meaning="house",
+            status=EntryStatus.APPROVED,
+            initial_contributor=self.contributor,
+            last_revised_by=self.contributor,
+        )
+        base = EntryRevision.objects.create(
+            entry=entry,
+            contributor=self.contributor,
+            proposed_data={"term": "vahay", "meaning": "house"},
+            status=EntryRevision.Status.APPROVED,
+            is_base_snapshot=True,
+        )
+        latest = EntryRevision.objects.create(
+            entry=entry,
+            contributor=self.reviewer2,
+            proposed_data={"term": "vahay", "meaning": "incorrect meaning"},
+            status=EntryRevision.Status.APPROVED,
+        )
+        entry.meaning = "incorrect meaning"
+        entry.save(update_fields=["meaning"])
+
+        submit_review(
+            revision=latest,
+            reviewer=self.reviewer1,
+            decision=Review.Decision.FLAG,
+            notes="Meaning is disputed.",
+        )
+        submit_review(
+            revision=latest,
+            reviewer=self.admin,
+            decision=Review.Decision.RETURN,
+            notes="Verify the meaning with another source.",
+            assigned_to_username=self.reviewer2.username,
+            source_revision_id=str(latest.id),
+        )
+
+        entry.refresh_from_db()
+        self.assertEqual(entry.status, EntryStatus.APPROVED)
+        self.assertEqual(entry.meaning, "House")
+        assignment = CorrectionAssignment.objects.get(dictionary_source_revision=latest)
+        self.assertEqual(assignment.assigned_to, self.reviewer2)
+        self.assertEqual(
+            assignment.dictionary_correction_revision.status, EntryRevision.Status.DRAFT
+        )
+        self.assertEqual(assignment.source_snapshot["meaning"], "incorrect meaning")
+        self.assertEqual(base.entry_id, entry.id)
+
+    def test_returning_original_entry_hides_it_until_correction_is_approved(self):
+        entry, revision = self._approved_entry_with_revision()
+        revision.is_base_snapshot = True
+        revision.save(update_fields=["is_base_snapshot"])
+
+        submit_review(
+            revision=revision,
+            reviewer=self.reviewer1,
+            decision=Review.Decision.FLAG,
+            notes="Original entry needs correction.",
+        )
+        submit_review(
+            revision=revision,
+            reviewer=self.admin,
+            decision=Review.Decision.RETURN,
+            notes="Correct the original term evidence.",
+            assigned_to_username=self.contributor.username,
+            source_revision_id=str(revision.id),
+        )
+
+        entry.refresh_from_db()
         self.assertEqual(entry.status, EntryStatus.REJECTED)
+        assignment = CorrectionAssignment.objects.get(dictionary_source_revision=revision)
+        self.assertEqual(assignment.scope, CorrectionAssignment.Scope.ORIGINAL)
+
+        correction = assignment.dictionary_correction_revision
+        correction.status = EntryRevision.Status.PENDING
+        correction.proposed_data = {"term": "vahay", "meaning": "corrected meaning"}
+        correction.save(update_fields=["status", "proposed_data"])
+        submit_review(
+            revision=correction,
+            reviewer=self.reviewer1,
+            decision=Review.Decision.APPROVE,
+            notes="Correction verified.",
+        )
+        submit_review(
+            revision=correction,
+            reviewer=self.admin,
+            decision=Review.Decision.APPROVE,
+            notes="Correction approved.",
+        )
+
+        entry.refresh_from_db()
+        assignment.refresh_from_db()
+        self.assertEqual(entry.status, EntryStatus.APPROVED)
+        self.assertEqual(entry.meaning, "Corrected meaning")
+        self.assertEqual(assignment.status, CorrectionAssignment.Status.RESOLVED)
 
     def test_rereview_quorum_restores_entry_to_approved(self):
         entry, revision = self._approved_entry_with_revision()
@@ -117,6 +260,15 @@ class ReviewServicesTests(TestCase):
 
         entry.refresh_from_db()
         self.assertEqual(entry.status, EntryStatus.APPROVED)
+        notification = Notification.objects.get(
+            user=self.contributor,
+            notif_type=Notification.Type.REVISION_APPROVED,
+        )
+        self.assertIn("completed re-review", notification.message)
+        self.assertEqual(
+            notification.target_url,
+            f"/dictionary-view?entry_id={entry.id}",
+        )
 
     def test_dictionary_quorum_accepts_two_admins(self):
         revision = EntryRevision.objects.create(
@@ -309,8 +461,7 @@ class ReviewerDashboardApiTests(TestCase):
         payload = json.loads(response.content)
 
         awaiting_ids = {
-            item["revision_id"]
-            for item in payload["awaiting_quorum_after_my_approval"]
+            item["revision_id"] for item in payload["awaiting_quorum_after_my_approval"]
         }
         self.assertIn(str(rev.id), awaiting_ids)
         awaiting_row = next(
@@ -364,10 +515,115 @@ class ReviewerDashboardApiTests(TestCase):
         self.assertIn("my_reviews", payload)
         self.assertIn("awaiting_quorum_after_my_approval", payload)
 
-        pending_ids = {
-            item["revision_id"] for item in payload["dictionary"]["pending_submissions"]
-        }
+        pending_ids = {item["revision_id"] for item in payload["dictionary"]["pending_submissions"]}
         self.assertIn(str(rev.id), pending_ids)
+
+    def test_dictionary_review_preview_includes_submitted_media_and_metadata(self):
+        revision = EntryRevision.objects.create(
+            contributor=self.contributor,
+            proposed_data={
+                "term": "media-term",
+                "meaning": "Meaning",
+                "part_of_speech": "Noun (N)",
+                "variant_type": "Ivatan (Common Usage)",
+                "pronunciation_text": "MEH-dee-ah",
+                "phonetic": "/media/",
+                "example_sentence": "Mangu ka.",
+                "example_translation": "How are you.",
+                "usage_notes": "Used in review.",
+                "etymology": "Community memory.",
+                "english_synonym": "sample",
+                "ivatan_synonym": "patulasen",
+                "english_antonym": "opposite",
+                "ivatan_antonym": "contra",
+                "inflected_forms": "mediaen",
+                "source_text": "Term Source: Interview",
+                "audio_pronunciation": "dictionary/audio/sample.mp3",
+                "audio_source": "Audio Source: Contributor recording",
+                "audio_license": "CC BY-NC 4.0",
+                "photo": "dictionary/photos/sample.jpg",
+                "photo_source": "Photo Source: Field photo",
+                "photo_license": "CC BY-NC 4.0",
+                "variants": [
+                    {
+                        "term": "Media Variant",
+                        "variant_type": "Isamurungen",
+                        "audio_pronunciation": "dictionary/audio/variant.mp3",
+                        "audio_source": "Variant audio source",
+                    }
+                ],
+            },
+            status=EntryRevision.Status.PENDING,
+        )
+
+        self.client.force_login(self.reviewer1)
+        response = self.client.get("/api/reviews/dashboard")
+
+        self.assertEqual(response.status_code, 200)
+        row = next(
+            item
+            for item in response.json()["dictionary"]["pending_submissions"]
+            if item["revision_id"] == str(revision.id)
+        )
+        preview = row["preview"]
+        self.assertIn("/media/dictionary/audio/sample.mp3", preview["audio_pronunciation_url"])
+        self.assertIn("/media/dictionary/photos/sample.jpg", preview["photo_url"])
+        self.assertEqual(preview["audio_source"], "Audio Source: Contributor recording")
+        self.assertEqual(preview["photo_source"], "Photo Source: Field photo")
+        self.assertEqual(preview["audio_license"], "CC BY-NC 4.0")
+        self.assertEqual(preview["etymology"], "Community memory.")
+        self.assertEqual(preview["english_synonym"], "sample")
+        self.assertIn(
+            "/media/dictionary/audio/variant.mp3",
+            preview["variants"][0]["audio_pronunciation_url"],
+        )
+
+    @override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+    def test_folklore_review_preview_includes_uploaded_media_and_metadata(self):
+        revision = FolkloreRevision.objects.create(
+            contributor=self.contributor,
+            proposed_data={
+                "title": "Media folklore",
+                "content": "<p>Story content.</p>",
+                "category": FolkloreEntry.Category.MYTH,
+                "subcategory": FolkloreEntry.Subcategory.MYTHS,
+                "municipality_source": FolkloreEntry.MunicipalitySource.BASCO,
+                "source": "Community interview",
+                "self_knowledge": False,
+                "media_url": "https://example.com/video",
+                "media_source": "Archive collection",
+                "self_produced_media": False,
+                "copyright_usage": "CC BY-NC 4.0",
+            },
+            photo_upload=SimpleUploadedFile(
+                "preview.jpg",
+                b"fake-image",
+                content_type="image/jpeg",
+            ),
+            audio_upload=SimpleUploadedFile(
+                "preview.mp3",
+                b"fake-audio",
+                content_type="audio/mpeg",
+            ),
+            status=FolkloreRevision.Status.PENDING,
+        )
+
+        self.client.force_login(self.reviewer1)
+        response = self.client.get("/api/reviews/dashboard")
+
+        self.assertEqual(response.status_code, 200)
+        row = next(
+            item
+            for item in response.json()["folklore"]["pending_submissions"]
+            if item["revision_id"] == str(revision.id)
+        )
+        preview = row["preview"]
+        self.assertIn("/media/folklore/photos/", preview["photo_upload_url"])
+        self.assertIn("/media/folklore/audio/", preview["audio_upload_url"])
+        self.assertEqual(preview["media_url"], "https://example.com/video")
+        self.assertEqual(preview["media_source"], "Archive collection")
+        self.assertEqual(preview["copyright_usage"], "CC BY-NC 4.0")
+        self.assertEqual(preview["content"], "<p>Story content.</p>")
 
     def test_dashboard_includes_latest_approved_entries_for_flagging(self):
         dictionary_entry = Entry.objects.create(
@@ -408,13 +664,9 @@ class ReviewerDashboardApiTests(TestCase):
         payload = json.loads(response.content)
 
         dictionary_ids = {
-            item["revision_id"]
-            for item in payload["dictionary"]["published_entries"]
+            item["revision_id"] for item in payload["dictionary"]["published_entries"]
         }
-        folklore_ids = {
-            item["revision_id"]
-            for item in payload["folklore"]["published_entries"]
-        }
+        folklore_ids = {item["revision_id"] for item in payload["folklore"]["published_entries"]}
 
         self.assertIn(str(dictionary_revision.id), dictionary_ids)
         self.assertIn(str(folklore_revision.id), folklore_ids)
@@ -788,7 +1040,7 @@ class FolkloreReviewFlowTests(TestCase):
         revision.refresh_from_db()
         self.assertEqual(revision.status, FolkloreRevision.Status.APPROVED)
 
-    def test_flag_then_reject_sets_under_review_then_rejected(self):
+    def test_flag_then_reject_sets_under_review_then_archived(self):
         revision = self._pending_folklore()
         submit_folklore_review(
             revision=revision,
@@ -823,7 +1075,104 @@ class FolkloreReviewFlowTests(TestCase):
             notes="Reject on re-review",
         )
         entry.refresh_from_db()
+        self.assertEqual(entry.status, FolkloreEntry.Status.ARCHIVED)
+        notification = Notification.objects.get(
+            user=self.contributor,
+            notif_type=Notification.Type.REVISION_REJECTED,
+        )
+        self.assertIn("rejected after re-review", notification.message)
+        self.assertIn("Reject on re-review", notification.message)
+        self.assertEqual(notification.target_url, "/admin-applications?tab=contributions")
+
+    def test_folklore_rereview_quorum_notifies_that_entry_remains_approved(self):
+        revision = self._pending_folklore()
+        submit_folklore_review(
+            revision=revision,
+            reviewer=self.reviewer1,
+            decision=FolkloreReview.Decision.APPROVE,
+            notes="Looks good",
+        )
+        submit_folklore_review(
+            revision=revision,
+            reviewer=self.admin,
+            decision=FolkloreReview.Decision.APPROVE,
+            notes="Approve publish",
+        )
+        revision.refresh_from_db()
+        entry = revision.entry
+        Notification.objects.filter(user=self.contributor).delete()
+
+        submit_folklore_review(
+            revision=revision,
+            reviewer=self.reviewer1,
+            decision=FolkloreReview.Decision.FLAG,
+            notes="Needs another review.",
+        )
+        submit_folklore_review(
+            revision=revision,
+            reviewer=self.reviewer2,
+            decision=FolkloreReview.Decision.APPROVE,
+            notes="Looks valid.",
+        )
+        submit_folklore_review(
+            revision=revision,
+            reviewer=self.admin2,
+            decision=FolkloreReview.Decision.APPROVE,
+            notes="Approved after re-review.",
+        )
+
+        entry.refresh_from_db()
+        self.assertEqual(entry.status, FolkloreEntry.Status.APPROVED)
+        notification = Notification.objects.get(
+            user=self.contributor,
+            notif_type=Notification.Type.REVISION_APPROVED,
+        )
+        self.assertIn("completed re-review", notification.message)
+        self.assertEqual(
+            notification.target_url,
+            f"/folklore-view?entry_id={entry.id}",
+        )
+
+    def test_flagged_folklore_can_be_returned_as_an_assigned_correction_draft(self):
+        revision = self._pending_folklore()
+        submit_folklore_review(
+            revision=revision,
+            reviewer=self.reviewer1,
+            decision=FolkloreReview.Decision.APPROVE,
+            notes="Looks good",
+        )
+        submit_folklore_review(
+            revision=revision,
+            reviewer=self.admin,
+            decision=FolkloreReview.Decision.APPROVE,
+            notes="Approve publish",
+        )
+        revision.refresh_from_db()
+        entry = revision.entry
+
+        submit_folklore_review(
+            revision=revision,
+            reviewer=self.reviewer1,
+            decision=FolkloreReview.Decision.FLAG,
+            notes="The original account needs clarification.",
+        )
+        submit_folklore_review(
+            revision=revision,
+            reviewer=self.admin,
+            decision=FolkloreReview.Decision.RETURN,
+            notes="Clarify the source and narrative.",
+            assigned_to_username=self.reviewer2.username,
+            source_revision_id=str(revision.id),
+        )
+
+        entry.refresh_from_db()
+        assignment = CorrectionAssignment.objects.get(folklore_source_revision=revision)
         self.assertEqual(entry.status, FolkloreEntry.Status.REJECTED)
+        self.assertEqual(assignment.assigned_to, self.reviewer2)
+        self.assertEqual(
+            assignment.folklore_correction_revision.status,
+            FolkloreRevision.Status.DRAFT,
+        )
 
     def test_folklore_submit_endpoint_updates_status(self):
         revision = self._pending_folklore()
@@ -849,9 +1198,7 @@ class FolkloreReviewFlowTests(TestCase):
         response = self.client.get("/api/reviews/dashboard")
         self.assertEqual(response.status_code, 200)
         payload = json.loads(response.content)
-        pending_ids = {
-            row["revision_id"] for row in payload["pending_folklore_submissions"]
-        }
+        pending_ids = {row["revision_id"] for row in payload["pending_folklore_submissions"]}
         self.assertIn(str(revision.id), pending_ids)
 
     def test_dashboard_excludes_pending_folklore_already_reviewed_by_user(self):
@@ -867,9 +1214,7 @@ class FolkloreReviewFlowTests(TestCase):
         response = self.client.get("/api/reviews/dashboard")
         self.assertEqual(response.status_code, 200)
         payload = json.loads(response.content)
-        pending_ids = {
-            row["revision_id"] for row in payload["pending_folklore_submissions"]
-        }
+        pending_ids = {row["revision_id"] for row in payload["pending_folklore_submissions"]}
         self.assertNotIn(str(revision.id), pending_ids)
 
     def test_dashboard_lists_my_folklore_approval_awaiting_quorum(self):

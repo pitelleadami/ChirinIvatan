@@ -23,7 +23,7 @@ set -euo pipefail
 APP_USER="ubuntu"
 APP_GROUP="ubuntu"
 PROJECT_NAME="chirin"
-PROJECT_ROOT="<app-root>"
+PROJECT_ROOT="/opt/chirin-app"
 REPO_URL="https://github.com/<your-org-or-user>/ChirinIvatan.git"
 REPO_BRANCH="main"
 
@@ -101,12 +101,13 @@ npm ci
 npm run build
 
 # Copy frontend build to a stable Nginx path.
-sudo mkdir -p <public-root>/frontend
-sudo rsync -a --delete "${FRONTEND_ROOT}/dist/" <public-root>/frontend/dist/
+PUBLIC_ROOT="/var/www/example-app"
+sudo mkdir -p "${PUBLIC_ROOT}/frontend"
+sudo rsync -a --delete "${FRONTEND_ROOT}/dist/" "${PUBLIC_ROOT}/frontend/dist/"
 
 # Ensure static/media roots exist.
-sudo mkdir -p <public-root>/static <public-root>/media
-sudo chown -R "${APP_USER}:${APP_GROUP}" <public-root>
+sudo mkdir -p "${PUBLIC_ROOT}/static" "${PUBLIC_ROOT}/media"
+sudo chown -R "${APP_USER}:${APP_GROUP}" "${PUBLIC_ROOT}"
 
 echo "[8/10] Running backend migrate + collectstatic"
 cd "${BACKEND_ROOT}"
@@ -140,9 +141,9 @@ sudo cp "${PROJECT_ROOT}/deploy/nginx/chirin.conf.example" "${NGINX_TARGET}"
 sudo sed -i "s#yourdomain.com#${DOMAIN_FRONTEND}#g" "${NGINX_TARGET}"
 sudo sed -i "s#www.yourdomain.com#${DOMAIN_FRONTEND_WWW}#g" "${NGINX_TARGET}"
 sudo sed -i "s#api.yourdomain.com#${DOMAIN_API}#g" "${NGINX_TARGET}"
-sudo sed -i "s#<public-root>/frontend/dist#<public-root>/frontend/dist#g" "${NGINX_TARGET}"
-sudo sed -i "s#<public-root>/static#<public-root>/static#g" "${NGINX_TARGET}"
-sudo sed -i "s#<public-root>/media#<public-root>/media#g" "${NGINX_TARGET}"
+sudo sed -i "s#<FRONTEND_DIST_ROOT>#${PUBLIC_ROOT}/frontend/dist#g" "${NGINX_TARGET}"
+sudo sed -i "s#<DJANGO_STATIC_ROOT>#${PUBLIC_ROOT}/static#g" "${NGINX_TARGET}"
+sudo sed -i "s#<DJANGO_MEDIA_ROOT>#${PUBLIC_ROOT}/media#g" "${NGINX_TARGET}"
 
 # enable nginx site
 if [[ ! -L /etc/nginx/sites-enabled/chirin.conf ]]; then
@@ -166,4 +167,4 @@ echo "  sudo certbot --nginx -d ${DOMAIN_FRONTEND} -d ${DOMAIN_FRONTEND_WWW}"
 echo "  sudo certbot --nginx -d ${DOMAIN_API}"
 
 echo "Bootstrap complete."
-echo "Next: follow docs/PUBLIC_DEPLOYMENT_TEMPLATE.md smoke tests."
+echo "Next: follow your private smoke-test checklist and the public docs/PUBLIC_DEPLOYMENT_TEMPLATE.md overview."

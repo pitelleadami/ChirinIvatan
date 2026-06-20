@@ -2,9 +2,9 @@
 #
 # Copy and adjust domain names + file paths.
 # Assumes:
-# - frontend build output: <public-root>/frontend/dist
-# - django static: <public-root>/static
-# - django media: <public-root>/media
+# - frontend build output: <FRONTEND_DIST_ROOT>
+# - django static: <DJANGO_STATIC_ROOT>
+# - django media: <DJANGO_MEDIA_ROOT>
 # - gunicorn backend: 127.0.0.1:8000
 
 server {
@@ -12,7 +12,7 @@ server {
     listen [::]:80;
     server_name yourdomain.com www.yourdomain.com;
 
-    root <public-root>/frontend/dist;
+    root <FRONTEND_DIST_ROOT>;
     index index.html;
 
     location / {
@@ -36,11 +36,11 @@ server {
     }
 
     location /media/ {
-        alias <public-root>/media/;
+        alias <DJANGO_MEDIA_ROOT>/;
     }
 
     location /static/ {
-        alias <public-root>/static/;
+        alias <DJANGO_STATIC_ROOT>/;
     }
 }
 
@@ -60,11 +60,11 @@ server {
     }
 
     location /media/ {
-        alias <public-root>/media/;
+        alias <DJANGO_MEDIA_ROOT>/;
     }
 
     location /static/ {
-        alias <public-root>/static/;
+        alias <DJANGO_STATIC_ROOT>/;
     }
 }
 

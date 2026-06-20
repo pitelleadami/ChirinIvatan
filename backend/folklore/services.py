@@ -171,6 +171,14 @@ def publish_revision(*, revision: FolkloreRevision) -> FolkloreEntry:
         revision.save(update_fields=["entry"])
     else:
         entry = revision.entry
+        is_assigned_correction = hasattr(revision, "correction_assignment")
+        if not (is_assigned_correction and entry.status == FolkloreEntry.Status.REJECTED):
+            validate_transition(
+                entry.status,
+                FolkloreEntry.Status.APPROVED,
+                allow_same=True,
+                entity_name="FolkloreEntry",
+            )
         for field in FOLKLORE_SNAPSHOT_FIELDS:
             if field in data:
                 setattr(entry, field, data[field])
@@ -188,6 +196,7 @@ def publish_revision(*, revision: FolkloreRevision) -> FolkloreEntry:
 @transaction.atomic
 def create_revision_from_entry(*, entry: FolkloreEntry, contributor) -> FolkloreRevision:
     # Preferred path for starting edits on approved folklore entries.
+    # Caller is responsible for enforcing that contributor owns the entry.
     if entry is None:
         raise ValueError("Cannot create folklore revision without an existing entry.")
 
@@ -197,5 +206,29 @@ def create_revision_from_entry(*, entry: FolkloreEntry, contributor) -> Folklore
         proposed_data=_snapshot_entry(entry),
         photo_upload=entry.photo_upload,
         audio_upload=entry.audio_upload,
+        revision_type=FolkloreRevision.RevisionType.REVISION,
+        status=FolkloreRevision.Status.DRAFT,
+    )
+
+
+@transaction.atomic
+def create_variant_from_entry(*, entry: FolkloreEntry, contributor) -> FolkloreRevision:
+    """
+    Create a variant revision seeded from an existing entry.
+
+    Variants are submitted by contributors who do not own the original entry.
+    On approval, publish_revision creates a new FolkloreEntry rather than
+    overwriting the original (because entry=None on the revision).
+    variant_of tracks the lineage back to the source entry.
+    """
+    if entry is None:
+        raise ValueError("Cannot create folklore variant without an existing entry.")
+
+    return FolkloreRevision.objects.create(
+        entry=None,
+        variant_of=entry,
+        contributor=contributor,
+        proposed_data={},
+        revision_type=FolkloreRevision.RevisionType.VARIANT,
         status=FolkloreRevision.Status.DRAFT,
     )

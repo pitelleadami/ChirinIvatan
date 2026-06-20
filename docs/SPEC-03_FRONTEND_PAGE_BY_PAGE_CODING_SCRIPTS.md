@@ -1,6 +1,7 @@
 # SPEC-03 Frontend Page-by-Page Coding Scripts (Beginner, No Guesswork)
 
 Use this after:
+
 - `docs/SPEC-03_REBUILD_SPEC.md`
 - `docs/SPEC-03_PLAIN_ENGLISH_PAGE_MAP.md`
 - `docs/SPEC-03_FRONTEND_FIGMA_HANDOFF.md`
@@ -13,16 +14,18 @@ This document gives practical coding steps. For current screen contents, permiss
 ## Global Setup (do once)
 
 ### Terminal A (backend)
+
 ```bash
-cd /Users/admin/Documents/GitHub/ChirinIvatan/backend
+cd /path/to/ChirinIvatan/backend
 source ../venv/bin/activate
 python3 manage.py migrate
 python3 manage.py runserver
 ```
 
 ### Terminal B (frontend)
+
 ```bash
-cd /Users/admin/Documents/GitHub/ChirinIvatan/frontend
+cd /path/to/ChirinIvatan/frontend
 npm install
 npm run dev
 ```
@@ -30,6 +33,7 @@ npm run dev
 ---
 
 ## Page Order (finish in this sequence)
+
 1. Reviewer Dashboard (already documented in first-page script)
 2. Folklore Viewer
 3. Dictionary Viewer
@@ -44,13 +48,16 @@ npm run dev
 ## Script A: Folklore Viewer
 
 ### API endpoints
+
 - `GET /api/folklore/entries`
 - `GET /api/folklore/entries/<entry_uuid>`
 
 ### File to edit
+
 - `frontend/src/pages/FolkloreViewerPage.jsx`
 
 ### Build steps
+
 1. Add states:
    - `listRows`, `detail`, `loadingList`, `loadingDetail`, `error`, `entryId`
 2. Add `loadPublicList()` for list endpoint.
@@ -66,6 +73,7 @@ npm run dev
    - media_source can be hidden
 
 ### Manual check
+
 - list loads
 - clicking “Load Detail” works
 - invalid UUID shows readable error
@@ -76,12 +84,15 @@ npm run dev
 ## Script B: Dictionary Viewer
 
 ### API endpoint
+
 - `GET /api/dictionary/entries/<entry_uuid>`
 
 ### File to edit
+
 - `frontend/src/pages/DictionaryViewerPage.jsx`
 
 ### Build steps
+
 1. Add states:
    - `entryId`, `result`, `loading`, `error`
 2. Add `loadEntry()` using `apiRequest`.
@@ -97,6 +108,7 @@ npm run dev
 5. Do not dump raw JSON as final UI.
 
 ### Manual check
+
 - valid UUID shows all sections
 - invalid UUID gives controlled error
 - variant entry shows semantic core from mother source entry
@@ -106,6 +118,7 @@ npm run dev
 ## Script C: Folklore Draft Builder
 
 ### API endpoints
+
 - `POST /api/folklore/revisions/create`
 - `PATCH /api/folklore/revisions/<revision_uuid>`
 - `POST /api/folklore/revisions/<revision_uuid>` (browser-safe multipart update fallback)
@@ -113,9 +126,11 @@ npm run dev
 - `GET /api/folklore/revisions/my`
 
 ### File to edit
+
 - `frontend/src/pages/FolkloreDraftBuilderPage.jsx`
 
 ### Build steps
+
 1. Add form state with fields:
    - title, content, category, municipality_source, source
    - self_knowledge, media_url, media_source, self_produced_media
@@ -133,6 +148,7 @@ npm run dev
    - set selected revision ID into input.
 
 ### Manual check
+
 - create returns revision ID
 - update works after setting revision ID
 - submit changes status to pending
@@ -144,14 +160,17 @@ npm run dev
 ## Script D: Public Profile
 
 ### API endpoints
+
 - `GET /api/users/<username>`
 - optional: `GET /api/users/<username>/cultural-stewardship`
 - optional: `GET /api/users/<username>/recognition-events`
 
 ### File to edit
+
 - `frontend/src/pages/PublicProfilePage.jsx`
 
 ### Build steps
+
 1. Add states:
    - `username`, `profile`, `loading`, `error`
 2. Implement `loadProfile()`.
@@ -164,6 +183,7 @@ npm run dev
 4. Keep labels human-readable (not raw keys).
 
 ### Manual check
+
 - profile loads by username
 - accountability line appears when available
 - gamification block displays without crash
@@ -173,15 +193,18 @@ npm run dev
 ## Script E: Leaderboards
 
 ### API endpoints
+
 - `GET /leaderboard/global?metric=...&period=...`
 - `GET /leaderboard/municipality?municipality=...&metric=...&period=...`
 - `GET /leaderboard/municipalities`
 - `GET /leaderboard/municipality-winners?month=YYYY-MM`
 
 ### File to edit
+
 - `frontend/src/pages/LeaderboardPage.jsx`
 
 ### Build steps
+
 1. Add control states:
    - `metric`, `period`, `municipality`, `month`
 2. Add data states:
@@ -195,6 +218,7 @@ npm run dev
 5. Add friendly empty states.
 
 ### Manual check
+
 - global loads
 - municipality requires value and then loads
 - month filter works for winners
@@ -204,15 +228,18 @@ npm run dev
 ## Script F: Role Center
 
 ### API endpoints
+
 - `POST /api/users/role-applications`
 - `GET /api/users/role-applications/my`
 - `POST /api/users/role-applications/<application_uuid>/decide`
 - `POST /api/users/role-invitations`
 
 ### File to edit
+
 - `frontend/src/pages/RoleCenterPage.jsx`
 
 ### Build steps
+
 1. Section A: apply
    - choose role
    - submit application
@@ -226,6 +253,7 @@ npm run dev
 5. Display single shared error/success banners.
 
 ### Manual check
+
 - apply works as logged-in user
 - my list loads
 - decision works for reviewer/admin accounts
@@ -236,6 +264,7 @@ npm run dev
 ## Script G: Dictionary Draft Builder
 
 ### API endpoints
+
 - `POST /api/dictionary/revisions/create`
 - `POST /api/dictionary/entries/<entry_uuid>/revisions/start`
 - `PATCH /api/dictionary/revisions/<revision_uuid>`
@@ -244,9 +273,11 @@ npm run dev
 - `GET /api/dictionary/revisions/my`
 
 ### File to edit
+
 - `frontend/src/pages/DictionaryDraftBuilderPage.jsx`
 
 ### Build steps
+
 1. Add form state for dictionary content:
    - term, meaning, part_of_speech, pronunciation_text, variant_type
    - synonyms/antonyms
@@ -271,6 +302,7 @@ npm run dev
 5. Keep `inflected_forms` input as JSON text for now.
 
 ### Manual check
+
 - create draft returns revision ID
 - start-from-entry preloads approved entry fields into draft form
 - update draft keeps latest text values
@@ -282,16 +314,20 @@ npm run dev
 ## Shared Implementation Rules (all pages)
 
 1. Use `apiRequest()` from:
+
 - `frontend/src/lib/api.js`
 
 2. For write actions:
+
 - always catch errors and show `error` message in UI
 
 3. For file uploads:
+
 - use `FormData`
 - do not set JSON content-type manually
 
 4. Always implement these states:
+
 - loading
 - success
 - error
@@ -306,28 +342,33 @@ npm run dev
 After all pages are integrated:
 
 1. Run frontend build:
+
 ```bash
-cd /Users/admin/Documents/GitHub/ChirinIvatan/frontend
+cd /path/to/ChirinIvatan/frontend
 npm run build
 ```
 
 2. Run backend check:
+
 ```bash
-cd /Users/admin/Documents/GitHub/ChirinIvatan/backend
+cd /path/to/ChirinIvatan/backend
 python3 manage.py check
 ```
 
 3. Run backend tests:
+
 ```bash
 python3 manage.py test users reviews dictionary folklore
 ```
 
 4. Manual click-through test all pages at:
+
 - `http://localhost:5173`
 
 ---
 
 ## Commit Plan (recommended)
+
 Use one commit per page:
 
 1. `feat(frontend): integrate folklore viewer endpoints`
@@ -342,7 +383,9 @@ This makes rollbacks and debugging much easier.
 ---
 
 ## If you get stuck
+
 Use this debug order:
+
 1. check Network tab (request URL/method/status)
 2. check backend server logs
 3. check response `detail` text

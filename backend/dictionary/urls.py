@@ -10,15 +10,14 @@ from django.urls import path
 from dictionary.views import (
     create_dictionary_revision_view,
     delete_dictionary_revision_view,
-    dictionary_entries_list_view,
     dictionary_english_terms_view,
+    dictionary_entries_list_view,
     dictionary_entry_detail_view,
     my_dictionary_revisions_view,
     start_dictionary_entry_revision_view,
     submit_dictionary_revision_view,
     update_dictionary_revision_view,
 )
-
 
 urlpatterns = [
     path(

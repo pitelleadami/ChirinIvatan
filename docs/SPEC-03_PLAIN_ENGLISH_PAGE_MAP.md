@@ -1,7 +1,7 @@
 # SPEC-03 Plain English Screen Map
 
 Status: current screen contract
-Last updated: 2026-06-06
+Last updated: 2026-06-13
 Detailed rebuild source: `docs/SPEC-03_REBUILD_SPEC.md`
 
 This document lists every user-facing screen, who can use it, and what must be inside it.
@@ -34,6 +34,7 @@ Must include:
   - Django Admin Console for admins
   - Log Out
 - Mobile menu.
+- Notification bell for authenticated users, with unread count and linked recent updates.
 - Footer on normal interior pages.
 - Maintenance screen override when admin pauses public site access.
 
@@ -54,7 +55,7 @@ Visitor can see:
 - live dictionary/folklore counts
 - latest/featured archive previews
 - Hall of Stewards preview
-- support statements and partner details if admin populated them
+- support statements and supporting organization details if admin populated them
 
 Existing contributors/reviewers/admins must not see the join button.
 
@@ -71,7 +72,7 @@ Must show:
 - future directions
 - final quote
 - statements of support if populated
-- partner details if populated
+- supporting organization details if populated
 
 ### 2.3 The Digital Yaru
 
@@ -243,8 +244,8 @@ Must include:
 
 Redirect rules:
 
-- incomplete profile -> Profile Edit
-- reviewer non-admin -> Reviewer Dashboard
+- pending one-time onboarding -> Steward's Desk welcome screen
+- reviewer non-admin without pending onboarding -> Reviews
 - other authenticated user -> Steward's Desk
 
 ### 3.2 Profile Edit
@@ -367,9 +368,19 @@ Contributor can see:
 
 - own dictionary contribution drafts/revisions
 - own folklore contribution drafts/revisions
+- Drafts, In Review, Approved, and Needs Changes status tabs with counts
+- reviewer feedback shown directly for rejected/Needs Changes submissions
+- revise action that reopens the rejected revision
 - create buttons
 - edit draft buttons
 - public entry links
+
+On first login after accepting an invitation, this screen must show one welcome prompt with:
+
+- short explanation of the user's active role
+- Complete Profile action
+- role-appropriate contribution/review/admin action
+- Not Now action that persists and does not reappear every login
 
 ---
 
@@ -461,6 +472,9 @@ Must support:
 - send email invitation
 - list invitations
 - show pending/accepted/revoked state
+- send a branded HTML email with plain-text fallback
+- identify inviter and role
+- include an accept button and visible fallback invitation URL
 
 Admin-only:
 

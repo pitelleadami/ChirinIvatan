@@ -4,11 +4,15 @@ from django.db.models import Min, Q
 from dictionary.field_groups import MEDIA_FIELDS, SEMANTIC_CORE_FIELDS
 from dictionary.models import Entry, EntryRevision, EntryStatus, VariantGroup
 
-
 # Variant-group service:
 # - Maintains mother term selection and deterministic fallback.
 # - Keeps grouping logic centralized so review/publish code stays simple.
-GENERAL_VARIANT_ALIASES = {"general", "general ivatan", "ivatan (common usage)", "ivatan common usage"}
+GENERAL_VARIANT_ALIASES = {
+    "general",
+    "general ivatan",
+    "ivatan (common usage)",
+    "ivatan common usage",
+}
 
 
 def _normalize_variant_type(value: str) -> str:

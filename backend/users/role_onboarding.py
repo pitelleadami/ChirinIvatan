@@ -10,6 +10,8 @@ Handles:
 - accountability-label formatting for profile display
 """
 
+from datetime import timedelta
+
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
@@ -17,7 +19,6 @@ from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from django.db import transaction
 from django.utils import timezone
-from datetime import timedelta
 
 from users.models import (
     RoleApplication,
@@ -26,7 +27,13 @@ from users.models import (
     RoleOnboardingRecord,
     UserProfile,
 )
-
+from users.names import (
+    display_name as formatted_display_name,
+)
+from users.names import (
+    normalize_affiliation_text,
+    normalize_person_name,
+)
 
 User = get_user_model()
 CONTRIBUTOR_GROUP = "Contributor"
@@ -100,19 +107,27 @@ def _activate_role(*, user, role):
             user.save(update_fields=["is_staff"])
 
 
+def activate_role_for_approved_application(application):
+    _activate_role(user=application.applicant, role=application.target_role)
+
+
 def _user_already_has_role(*, user, target_role):
     if target_role == RoleApplication.TargetRole.CONTRIBUTOR:
-        return user.is_superuser or user.groups.filter(
-            name__in=[CONTRIBUTOR_GROUP, REVIEWER_GROUP, CONSULTANT_GROUP, ADMIN_GROUP]
-        ).exists()
+        return (
+            user.is_superuser
+            or user.groups.filter(
+                name__in=[CONTRIBUTOR_GROUP, REVIEWER_GROUP, CONSULTANT_GROUP, ADMIN_GROUP]
+            ).exists()
+        )
     if target_role == RoleApplication.TargetRole.REVIEWER:
-        return user.is_superuser or user.groups.filter(
-            name__in=[REVIEWER_GROUP, ADMIN_GROUP]
-        ).exists()
+        return (
+            user.is_superuser or user.groups.filter(name__in=[REVIEWER_GROUP, ADMIN_GROUP]).exists()
+        )
     if target_role == RoleOnboardingRecord.Role.CONSULTANT:
-        return user.is_superuser or user.groups.filter(
-            name__in=[CONSULTANT_GROUP, ADMIN_GROUP]
-        ).exists()
+        return (
+            user.is_superuser
+            or user.groups.filter(name__in=[CONSULTANT_GROUP, ADMIN_GROUP]).exists()
+        )
     if target_role == RoleOnboardingRecord.Role.ADMIN:
         return user.is_superuser or user.groups.filter(name=ADMIN_GROUP).exists()
     return False
@@ -123,16 +138,24 @@ def create_role_application(*, applicant, target_role, reviewer_reason=""):
     if target_role not in set(RoleApplication.TargetRole.values):
         raise ValidationError("Invalid target role.")
     reviewer_reason = str(reviewer_reason or "").strip()
-    if target_role == RoleApplication.TargetRole.REVIEWER and not reviewer_reason:
+    is_contributor_upgrade = (
+        target_role == RoleApplication.TargetRole.REVIEWER
+        and applicant.groups.filter(name=CONTRIBUTOR_GROUP).exists()
+    )
+    if is_contributor_upgrade and not reviewer_reason:
         raise ValidationError("Reason for applying as reviewer is required.")
     if _user_already_has_role(user=applicant, target_role=target_role):
-        raise ValidationError(f"This email is already connected to active {target_role} access. Please log in instead.")
+        raise ValidationError(
+            f"This email is already connected to active {target_role} access. Please log in instead."
+        )
     if RoleApplication.objects.filter(
         applicant=applicant,
         target_role=target_role,
         status=RoleApplication.Status.PENDING,
     ).exists():
-        raise ValidationError(f"This email already has a pending {target_role} application. Please check your email or use the status checker.")
+        raise ValidationError(
+            f"This email already has a pending {target_role} application. Please check your email or use the status checker."
+        )
 
     return RoleApplication.objects.create(
         applicant=applicant,
@@ -144,9 +167,9 @@ def create_role_application(*, applicant, target_role, reviewer_reason=""):
 
 def _build_approval_set(application):
     # Build unique approver sets by effective role at decision time.
-    approvals = application.decisions.filter(decision=RoleApplicationDecision.Decision.APPROVE).select_related(
-        "decided_by"
-    )
+    approvals = application.decisions.filter(
+        decision=RoleApplicationDecision.Decision.APPROVE
+    ).select_related("decided_by")
 
     reviewer_user_ids = set()
     admin_user_ids = set()
@@ -207,7 +230,9 @@ def decide_role_application(*, application, decided_by, decision, notes=""):
     if decision == RoleApplicationDecision.Decision.REJECT and not notes.strip():
         raise ValidationError("Rejection requires notes.")
 
-    if RoleApplicationDecision.objects.filter(application=application, decided_by=decided_by).exists():
+    if RoleApplicationDecision.objects.filter(
+        application=application, decided_by=decided_by
+    ).exists():
         raise ValidationError("You already decided this application.")
 
     row = RoleApplicationDecision.objects.create(
@@ -228,7 +253,11 @@ def decide_role_application(*, application, decided_by, decision, notes=""):
         application.decided_at = timezone.now()
         application.save(update_fields=["status", "decided_at", "updated_at"])
 
-        _activate_role(user=application.applicant, role=application.target_role)
+        if application.applicant.has_usable_password():
+            _activate_role(user=application.applicant, role=application.target_role)
+        elif application.applicant.is_active:
+            application.applicant.is_active = False
+            application.applicant.save(update_fields=["is_active"])
         record = _create_onboarding_record_for_approved_application(
             application=application,
             accountability_notes=notes or "",
@@ -248,7 +277,10 @@ def invite_user_to_role(*, inviter, invitee, role, notes=""):
         raise ValidationError("Self-invitation is not allowed.")
     if role not in set(RoleOnboardingRecord.Role.values):
         raise ValidationError("Invalid role.")
-    if role in [RoleOnboardingRecord.Role.CONSULTANT, RoleOnboardingRecord.Role.ADMIN] and not is_admin(inviter):
+    if role in [
+        RoleOnboardingRecord.Role.CONSULTANT,
+        RoleOnboardingRecord.Role.ADMIN,
+    ] and not is_admin(inviter):
         role_name = "administrators" if role == RoleOnboardingRecord.Role.ADMIN else "consultants"
         raise ValidationError(f"Only admin users can invite {role_name}.")
 
@@ -271,6 +303,7 @@ def create_email_role_invitation(
     role,
     first_name="",
     last_name="",
+    name_extension="",
     municipality="",
     notes="",
 ):
@@ -279,7 +312,10 @@ def create_email_role_invitation(
         raise ValidationError("Only reviewer/admin users can send email role invitations.")
     if role not in set(RoleOnboardingRecord.Role.values):
         raise ValidationError("Invalid role.")
-    if role in [RoleOnboardingRecord.Role.CONSULTANT, RoleOnboardingRecord.Role.ADMIN] and not is_admin(inviter):
+    if role in [
+        RoleOnboardingRecord.Role.CONSULTANT,
+        RoleOnboardingRecord.Role.ADMIN,
+    ] and not is_admin(inviter):
         role_name = "administrators" if role == RoleOnboardingRecord.Role.ADMIN else "consultants"
         raise ValidationError(f"Only admin users can invite {role_name}.")
     normalized_email = _clean_email(email)
@@ -298,11 +334,13 @@ def create_email_role_invitation(
         email=normalized_email,
         role=role,
         invited_by=inviter,
-        first_name=str(first_name or "").strip(),
-        last_name=str(last_name or "").strip(),
+        first_name=normalize_person_name(first_name),
+        last_name=normalize_person_name(last_name),
+        name_extension=str(name_extension or "").strip(),
         municipality=str(municipality or "").strip(),
         notes=notes or "",
-        expires_at=timezone.now() + timedelta(days=getattr(settings, "ROLE_INVITATION_EXPIRY_DAYS", 14)),
+        expires_at=timezone.now()
+        + timedelta(days=getattr(settings, "ROLE_INVITATION_EXPIRY_DAYS", 14)),
     )
 
 
@@ -312,6 +350,7 @@ def create_consultant_profile(
     created_by,
     first_name,
     last_name,
+    name_extension="",
     email="",
     municipality="",
     post_nominals="",
@@ -326,8 +365,8 @@ def create_consultant_profile(
     if not is_admin(created_by):
         raise ValidationError("Only admin users can create consultant profiles.")
 
-    first_name = str(first_name or "").strip()
-    last_name = str(last_name or "").strip()
+    first_name = normalize_person_name(first_name)
+    last_name = normalize_person_name(last_name)
     email = _clean_email(email, required=False)
     if not first_name or not last_name:
         raise ValidationError("First name and last name are required.")
@@ -345,38 +384,45 @@ def create_consultant_profile(
     user.save(update_fields=["password"])
 
     profile, _ = UserProfile.objects.get_or_create(user=user)
+    profile.name_extension = str(name_extension or "").strip()
     profile.municipality = str(municipality or "").strip()
     profile.post_nominals = str(post_nominals or "").strip()
-    profile.cultural_affiliations = cultural_affiliations or []
-    profile.other_affiliations = other_affiliations or []
+    profile.cultural_affiliations = [
+        {
+            "role": normalize_affiliation_text(row.get("role", "")),
+            "organization": normalize_affiliation_text(row.get("organization", "")),
+        }
+        for row in (cultural_affiliations or [])
+        if isinstance(row, dict)
+    ]
+    profile.other_affiliations = [
+        {
+            "designation": normalize_affiliation_text(row.get("designation", "")),
+            "institution": normalize_affiliation_text(row.get("institution", "")),
+        }
+        for row in (other_affiliations or [])
+        if isinstance(row, dict)
+    ]
     cultural_organizations = [
         row.get("organization", "")
         for row in profile.cultural_affiliations
         if row.get("organization")
     ]
     other_institutions = [
-        row.get("institution", "")
-        for row in profile.other_affiliations
-        if row.get("institution")
+        row.get("institution", "") for row in profile.other_affiliations if row.get("institution")
     ]
     cultural_roles = [
-        row.get("role", "")
-        for row in profile.cultural_affiliations
-        if row.get("role")
+        row.get("role", "") for row in profile.cultural_affiliations if row.get("role")
     ]
     other_designations = [
-        row.get("designation", "")
-        for row in profile.other_affiliations
-        if row.get("designation")
+        row.get("designation", "") for row in profile.other_affiliations if row.get("designation")
     ]
-    profile.affiliation = (
-        ", ".join(cultural_organizations + other_institutions)[:255]
-        or str(affiliation or "").strip()
-    )
-    profile.occupation = (
-        ", ".join(cultural_roles + other_designations)[:255]
-        or str(occupation or "").strip()
-    )
+    profile.affiliation = ", ".join(cultural_organizations + other_institutions)[
+        :255
+    ] or normalize_affiliation_text(affiliation)
+    profile.occupation = ", ".join(cultural_roles + other_designations)[
+        :255
+    ] or normalize_affiliation_text(occupation)
     profile.bio = str(bio or "").strip()
     if profile_photo:
         profile.profile_photo = profile_photo
@@ -401,6 +447,7 @@ def update_managed_consultant_profile(
     user,
     first_name,
     last_name,
+    name_extension="",
     email="",
     municipality="",
     post_nominals="",
@@ -426,8 +473,8 @@ def update_managed_consultant_profile(
     if not record:
         raise ValidationError("This is not an admin-managed consultant profile.")
 
-    first_name = str(first_name or "").strip()
-    last_name = str(last_name or "").strip()
+    first_name = normalize_person_name(first_name)
+    last_name = normalize_person_name(last_name)
     email = _clean_email(email, required=False)
     if not first_name or not last_name:
         raise ValidationError("First name and last name are required.")
@@ -440,38 +487,45 @@ def update_managed_consultant_profile(
     user.save(update_fields=["first_name", "last_name", "email"])
 
     profile, _ = UserProfile.objects.get_or_create(user=user)
+    profile.name_extension = str(name_extension or "").strip()
     profile.municipality = str(municipality or "").strip()
     profile.post_nominals = str(post_nominals or "").strip()
-    profile.cultural_affiliations = cultural_affiliations or []
-    profile.other_affiliations = other_affiliations or []
+    profile.cultural_affiliations = [
+        {
+            "role": normalize_affiliation_text(row.get("role", "")),
+            "organization": normalize_affiliation_text(row.get("organization", "")),
+        }
+        for row in (cultural_affiliations or [])
+        if isinstance(row, dict)
+    ]
+    profile.other_affiliations = [
+        {
+            "designation": normalize_affiliation_text(row.get("designation", "")),
+            "institution": normalize_affiliation_text(row.get("institution", "")),
+        }
+        for row in (other_affiliations or [])
+        if isinstance(row, dict)
+    ]
     cultural_organizations = [
         row.get("organization", "")
         for row in profile.cultural_affiliations
         if row.get("organization")
     ]
     other_institutions = [
-        row.get("institution", "")
-        for row in profile.other_affiliations
-        if row.get("institution")
+        row.get("institution", "") for row in profile.other_affiliations if row.get("institution")
     ]
     cultural_roles = [
-        row.get("role", "")
-        for row in profile.cultural_affiliations
-        if row.get("role")
+        row.get("role", "") for row in profile.cultural_affiliations if row.get("role")
     ]
     other_designations = [
-        row.get("designation", "")
-        for row in profile.other_affiliations
-        if row.get("designation")
+        row.get("designation", "") for row in profile.other_affiliations if row.get("designation")
     ]
-    profile.affiliation = (
-        ", ".join(cultural_organizations + other_institutions)[:255]
-        or str(affiliation or "").strip()
-    )
-    profile.occupation = (
-        ", ".join(cultural_roles + other_designations)[:255]
-        or str(occupation or "").strip()
-    )
+    profile.affiliation = ", ".join(cultural_organizations + other_institutions)[
+        :255
+    ] or normalize_affiliation_text(affiliation)
+    profile.occupation = ", ".join(cultural_roles + other_designations)[
+        :255
+    ] or normalize_affiliation_text(occupation)
     profile.bio = str(bio or "").strip()
     if profile_photo:
         profile.profile_photo = profile_photo
@@ -502,6 +556,7 @@ def accept_email_role_invitation(
     token,
     first_name="",
     last_name="",
+    name_extension="",
     municipality="",
     username,
     password,
@@ -519,12 +574,22 @@ def accept_email_role_invitation(
     normalized_email = str(invitation.email or "").strip().lower()
     user = User.objects.select_for_update().filter(email__iexact=normalized_email).first()
     existing_municipality = ""
+    existing_name_extension = ""
     if user:
         existing_profile = UserProfile.objects.filter(user=user).first()
         existing_municipality = existing_profile.municipality if existing_profile else ""
-    first_name = str(first_name or invitation.first_name or (user.first_name if user else "")).strip()
-    last_name = str(last_name or invitation.last_name or (user.last_name if user else "")).strip()
+        existing_name_extension = existing_profile.name_extension if existing_profile else ""
+    first_name = normalize_person_name(
+        first_name or invitation.first_name or (user.first_name if user else "")
+    )
+    last_name = normalize_person_name(
+        last_name or invitation.last_name or (user.last_name if user else "")
+    )
+    name_extension = str(
+        name_extension or invitation.name_extension or existing_name_extension
+    ).strip()
     municipality = str(municipality or invitation.municipality or existing_municipality).strip()
+    username = str(username or "").strip().lower()
     if not first_name or not last_name or not municipality:
         raise ValidationError("First name, last name, and municipality are required.")
 
@@ -543,7 +608,9 @@ def accept_email_role_invitation(
         )
     else:
         if user.has_usable_password():
-            raise ValidationError("This email already has login credentials. Please log in instead.")
+            raise ValidationError(
+                "This email already has login credentials. Please log in instead."
+            )
         user.username = username
         user.first_name = first_name
         user.last_name = last_name
@@ -552,8 +619,18 @@ def accept_email_role_invitation(
     user.save(update_fields=["username", "email", "first_name", "last_name", "password"])
 
     profile, _ = UserProfile.objects.get_or_create(user=user)
+    profile.name_extension = name_extension
     profile.municipality = municipality
-    profile.save(update_fields=["municipality"])
+    profile.onboarding_prompt_pending = True
+    profile.onboarding_prompt_dismissed = False
+    profile.save(
+        update_fields=[
+            "municipality",
+            "name_extension",
+            "onboarding_prompt_pending",
+            "onboarding_prompt_dismissed",
+        ]
+    )
 
     _activate_role(user=user, role=invitation.role)
     record = RoleOnboardingRecord.objects.create(
@@ -578,40 +655,47 @@ def format_accountability_label(record):
         return ""
 
     def actor_display_name(user):
-        first = str(user.first_name or "").strip()
-        last = str(user.last_name or "").strip()
+        first = normalize_person_name(user.first_name)
+        last = normalize_person_name(user.last_name)
         try:
             profile = user.profile
         except Exception:
             profile = None
+        extension = str(getattr(profile, "name_extension", "") or "").strip()
         post_nominals = str(getattr(profile, "post_nominals", "") or "").strip()
         if first and last:
             name = f"{first[0].upper()}. {last}"
+            if extension:
+                name = f"{name} {extension}"
             return f"{name}, {post_nominals}" if post_nominals else name
         if first:
-            return f"{first}, {post_nominals}" if post_nominals else first
+            name = f"{first} {extension}".strip()
+            return f"{name}, {post_nominals}" if post_nominals else name
         if last:
-            return f"{last}, {post_nominals}" if post_nominals else last
+            name = f"{last} {extension}".strip()
+            return f"{name}, {post_nominals}" if post_nominals else name
         username = str(user.username or "").strip()
-        parts = [chunk for chunk in username.replace("_", ".").replace("-", ".").split(".") if chunk]
+        parts = [
+            chunk for chunk in username.replace("_", ".").replace("-", ".").split(".") if chunk
+        ]
         if len(parts) >= 2:
             name = f"{parts[0][0].upper()}. {parts[-1].title()}"
             return f"{name}, {post_nominals}" if post_nominals else name
-        return f"{username}, {post_nominals}" if post_nominals else username
+        return formatted_display_name(user, profile)
 
     if record.method == RoleOnboardingRecord.Method.INVITED and record.invited_by:
         return f"Invited as {record.role.title()} by {actor_display_name(record.invited_by)}"
 
     if record.method == RoleOnboardingRecord.Method.ADMIN_CREATED and record.invited_by:
-        return f"Created as {record.role.title()} profile by {actor_display_name(record.invited_by)}"
+        return (
+            f"Created as {record.role.title()} profile by {actor_display_name(record.invited_by)}"
+        )
 
     reviewer_names = [
-        actor_display_name(user)
-        for user in record.approved_by_reviewers.order_by("username")
+        actor_display_name(user) for user in record.approved_by_reviewers.order_by("username")
     ]
     admin_names = [
-        actor_display_name(user)
-        for user in record.approved_by_admins.order_by("username")
+        actor_display_name(user) for user in record.approved_by_admins.order_by("username")
     ]
     approvers = reviewer_names + admin_names
     if approvers:

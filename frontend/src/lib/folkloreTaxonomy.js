@@ -67,7 +67,12 @@ const LEGACY_CATEGORY_LABELS = {
 }
 
 export function folkloreCategoryLabel(value) {
-  return FOLKLORE_TAXONOMY.find((category) => category.value === value)?.label || LEGACY_CATEGORY_LABELS[value] || value || ''
+  return (
+    FOLKLORE_TAXONOMY.find((category) => category.value === value)?.label ||
+    LEGACY_CATEGORY_LABELS[value] ||
+    value ||
+    ''
+  )
 }
 
 export function folkloreSubcategoryOptions(categoryValue) {
@@ -86,4 +91,8 @@ export function folkloreTaxonomyLabel(categoryValue, subcategoryValue) {
   const category = folkloreCategoryLabel(categoryValue)
   const subcategory = folkloreSubcategoryLabel(subcategoryValue)
   return [category, subcategory].filter(Boolean).join(' / ')
+}
+
+export function municipalitySourceLabel(value) {
+  return value === 'Not Applicable' ? 'No specific municipality associated' : value || ''
 }

@@ -11,13 +11,12 @@ If you need to change lifecycle behavior:
 
 from django.core.exceptions import ValidationError
 
-
 # "No state change is allowed outside this table."
 VALID_TRANSITIONS = {
     "draft": {"pending"},
     "pending": {"approved", "rejected"},
     "approved": {"approved_under_review", "archived"},
-    "approved_under_review": {"approved", "rejected"},
+    "approved_under_review": {"approved", "rejected", "archived"},
     "rejected": {"archived"},
     "archived": {"approved", "deleted"},
     "deleted": set(),
@@ -39,6 +38,4 @@ def validate_transition(
 ) -> None:
     if can_transition(from_status, to_status, allow_same=allow_same):
         return
-    raise ValidationError(
-        f"Invalid {entity_name} state transition: {from_status} -> {to_status}."
-    )
+    raise ValidationError(f"Invalid {entity_name} state transition: {from_status} -> {to_status}.")

@@ -1,5 +1,6 @@
 from django.db import transaction
 from django.utils import timezone
+
 from dictionary.field_groups import (
     ENTRY_SNAPSHOT_FIELDS,
     MEDIA_FIELDS,
@@ -8,8 +9,8 @@ from dictionary.field_groups import (
 )
 from dictionary.models import Entry, EntryRevision, EntryStatus
 from dictionary.state_machine import validate_transition
+from dictionary.text import capitalize_first, normalize_headword, normalize_sentence
 from dictionary.variant_services import ensure_group_and_mother, maybe_promote_general_ivatan
-
 
 # Dictionary publishing service:
 # - Takes approved revisions and applies them to live entries.
@@ -19,6 +20,8 @@ REVISION_HISTORY_LIMITS = {
     "public": 5,
     "staff": 15,  # reviewers/admins
 }
+
+OLD_HISTORICAL_VARIANT_TYPE = "Old / Historical Form"
 
 
 def _semantic_source_entry(entry: Entry) -> Entry:
@@ -78,7 +81,7 @@ def _build_variant_create_kwargs(*, variant_data: dict, semantic_entry: Entry, r
     """
 
     create_kwargs = {
-        "term": str(variant_data.get("term") or "").strip(),
+        "term": normalize_headword(variant_data.get("term")),
         "status": EntryStatus.APPROVED,
         "variant_group": semantic_entry.variant_group,
         "is_mother": False,
@@ -95,7 +98,23 @@ def _build_variant_create_kwargs(*, variant_data: dict, semantic_entry: Entry, r
         if field == "term":
             continue
         if field in variant_data:
-            create_kwargs[field] = variant_data[field]
+            value = variant_data[field]
+            if field in {"example_sentence", "example_translation"}:
+                value = normalize_sentence(value)
+            create_kwargs[field] = value
+
+    historical_note = str(variant_data.get("historical_note") or "").strip()
+    if (
+        historical_note
+        and str(variant_data.get("variant_type") or "").strip() == OLD_HISTORICAL_VARIANT_TYPE
+    ):
+        existing_usage = str(create_kwargs.get("usage_notes") or "").strip()
+        historical_usage_note = f"Historical note: {historical_note}"
+        create_kwargs["usage_notes"] = (
+            f"{existing_usage}\n\n{historical_usage_note}"
+            if existing_usage
+            else historical_usage_note
+        )
 
     if variant_data.get("audio_pronunciation"):
         create_kwargs["audio_contributor"] = revision.contributor
@@ -187,8 +206,7 @@ def get_visible_revision_history(*, entry: Entry, audience: str = "public") -> d
             entry=entry,
             status=EntryRevision.Status.APPROVED,
             is_base_snapshot=False,
-        )
-        .order_by("-approved_at", "-created_at")[: REVISION_HISTORY_LIMITS[audience]]
+        ).order_by("-approved_at", "-created_at")[: REVISION_HISTORY_LIMITS[audience]]
     )
 
     recent_rejected = list(
@@ -196,8 +214,7 @@ def get_visible_revision_history(*, entry: Entry, audience: str = "public") -> d
             entry=entry,
             status=EntryRevision.Status.REJECTED,
             is_base_snapshot=False,
-        )
-        .order_by("-created_at")[: REVISION_HISTORY_LIMITS[audience]]
+        ).order_by("-created_at")[: REVISION_HISTORY_LIMITS[audience]]
     )
 
     return {
@@ -272,7 +289,7 @@ def publish_revision(*, revision, approvers):
 
     # `proposed_data` is the canonical payload from reviewable revision JSON.
     data = revision.proposed_data or {}
-    term = data.get("term")
+    term = normalize_headword(data.get("term"))
 
     if not term:
         raise ValueError("Revision publish requires a non-empty term.")
@@ -297,7 +314,12 @@ def publish_revision(*, revision, approvers):
             if field == "term":
                 continue
             if field in data:
-                create_kwargs[field] = data[field]
+                value = data[field]
+                if field in {"example_sentence", "example_translation"}:
+                    value = normalize_sentence(value)
+                elif field == "meaning":
+                    value = capitalize_first(value)
+                create_kwargs[field] = value
 
         # Active media contributor attribution:
         # when media is present in this approved submission, the revision
@@ -321,12 +343,14 @@ def publish_revision(*, revision, approvers):
         semantic_entry = _semantic_source_entry(entry)
         old_audio = entry.audio_pronunciation.name if entry.audio_pronunciation else ""
         old_photo = semantic_entry.photo.name if semantic_entry.photo else ""
-        validate_transition(
-            entry.status,
-            EntryStatus.APPROVED,
-            allow_same=True,
-            entity_name="DictionaryEntry",
-        )
+        is_assigned_correction = hasattr(revision, "correction_assignment")
+        if not (is_assigned_correction and entry.status == EntryStatus.REJECTED):
+            validate_transition(
+                entry.status,
+                EntryStatus.APPROVED,
+                allow_same=True,
+                entity_name="DictionaryEntry",
+            )
 
         now = timezone.now()
         entry_update_fields = set()
@@ -347,19 +371,25 @@ def publish_revision(*, revision, approvers):
             if field == "term":
                 continue
             if field in data:
+                value = data[field]
+                if field in {"example_sentence", "example_translation"}:
+                    value = normalize_sentence(value)
                 _assign_if_changed(
                     target=entry,
                     field=field,
-                    value=data[field],
+                    value=value,
                     update_fields=entry_update_fields,
                 )
 
         for field in SEMANTIC_CORE_FIELDS:
             if field in data:
+                value = data[field]
+                if field == "meaning":
+                    value = capitalize_first(value)
                 _assign_if_changed(
                     target=semantic_entry,
                     field=field,
-                    value=data[field],
+                    value=value,
                     update_fields=semantic_update_fields,
                 )
 
@@ -404,7 +434,6 @@ def publish_revision(*, revision, approvers):
     return entry
 
 
-
 @transaction.atomic
 def create_revision_from_entry(*, entry: Entry, contributor) -> EntryRevision:
     """
@@ -415,6 +444,18 @@ def create_revision_from_entry(*, entry: Entry, contributor) -> EntryRevision:
 
     if entry is None:
         raise ValueError("Cannot create a revision without an approved Entry.")
+
+    existing_revision = (
+        EntryRevision.objects.filter(
+            entry=entry,
+            contributor=contributor,
+            status__in=[EntryRevision.Status.DRAFT, EntryRevision.Status.REJECTED],
+        )
+        .order_by("-created_at")
+        .first()
+    )
+    if existing_revision:
+        return existing_revision
 
     # Troubleshooting tip:
     # If users complain that revisions start "blank", ensure this function is used.

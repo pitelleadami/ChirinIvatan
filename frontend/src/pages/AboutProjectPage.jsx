@@ -10,12 +10,16 @@ function Paragraphs({ rows }) {
 }
 
 function partnerInitials(name) {
-  const words = String(name || 'Partner')
+  const words = String(name || 'Supporting Organization')
     .split(/\s+/)
     .filter(Boolean)
   return words.length > 1
-    ? words.slice(0, 2).map((word) => word[0]).join('').toUpperCase()
-    : (words[0] || 'Partner').slice(0, 2).toUpperCase()
+    ? words
+        .slice(0, 2)
+        .map((word) => word[0])
+        .join('')
+        .toUpperCase()
+    : (words[0] || 'Supporting Organization').slice(0, 2).toUpperCase()
 }
 
 export default function AboutProjectPage() {
@@ -45,10 +49,7 @@ export default function AboutProjectPage() {
         <div className="about-intro-top">
           <div className="about-intro-illustration-wrap">
             <div className="about-intro-illustration">
-              <img
-                src={content.brand_logo_url || brandLogo}
-                alt={`${content.brand_name} logo`}
-              />
+              <img src={content.brand_logo_url || brandLogo} alt={`${content.brand_name} logo`} />
             </div>
           </div>
           <div className="about-intro-leads">
@@ -86,7 +87,7 @@ export default function AboutProjectPage() {
 
       {content.partner_details.length > 0 && (
         <section className="about-section about-partner-section">
-          <h2>Partners</h2>
+          <h2>Supporting Organizations</h2>
           <div className="partner-grid about-partner-grid">
             {content.partner_details.map((partner, index) => (
               <a
@@ -103,7 +104,7 @@ export default function AboutProjectPage() {
                     {partnerInitials(partner.name)}
                   </span>
                 )}
-                <span className="partner-agency-name">{partner.name || 'Partner'}</span>
+                <span className="partner-agency-name">{partner.name || 'Supporting Organization'}</span>
               </a>
             ))}
           </div>
