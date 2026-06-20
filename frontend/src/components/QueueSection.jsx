@@ -65,6 +65,19 @@ function formatPreviewValue(label, value) {
   return textValue
 }
 
+function liveEntryPath(kind, row) {
+  if (!row.entry_id) return ''
+  return kind === 'dictionary'
+    ? `/dictionary-view?entry_id=${encodeURIComponent(row.entry_id)}`
+    : `/folklore-view?entry_id=${encodeURIComponent(row.entry_id)}`
+}
+
+function canOpenLiveEntry(row) {
+  if (!row.entry_id) return false
+  if (!row.entry_status) return true
+  return ['approved', 'approved_under_review'].includes(row.entry_status)
+}
+
 function normalizedDictionarySnapshotPreview(snapshot = {}) {
   return {
     meaning: snapshot.meaning || '',
@@ -524,6 +537,8 @@ export default function QueueSection({
     const canReject = mode !== 'published' && mode !== 'awaiting'
     const canReturn = mode === 'rereview'
     const canFlag = mode === 'published'
+    const livePath = liveEntryPath(kind, row)
+    const liveEntryAvailable = canOpenLiveEntry(row)
     return (
       <div
         className="celebration-backdrop contribution-preview-backdrop"
@@ -739,17 +754,15 @@ export default function QueueSection({
                 {flagNotesOpen(revisionId) ? 'Submit Flag' : 'Flag for re-review'}
               </button>
             )}
-            {row.entry_id && (
-              <a
-                className="button-link"
-                href={
-                  kind === 'dictionary'
-                    ? `/dictionary-view?entry_id=${row.entry_id}`
-                    : `/folklore-view?entry_id=${row.entry_id}`
-                }
-              >
+            {livePath && liveEntryAvailable && (
+              <a className="queue-live-entry-button" href={livePath} target="_blank" rel="noreferrer">
                 View live entry
               </a>
+            )}
+            {livePath && !liveEntryAvailable && (
+              <button type="button" className="queue-live-entry-button unavailable" disabled>
+                Live entry unavailable
+              </button>
             )}
             <button type="button" onClick={() => setPreviewItem(null)}>
               Close
@@ -870,14 +883,13 @@ export default function QueueSection({
                 </dl>
               )}
 
-              {(!isAwaiting || awaitingOpen) && row.entry_id && (
+              {(!isAwaiting || awaitingOpen) && liveEntryPath(kind, row) && canOpenLiveEntry(row) && (
                 <p className="queue-detail-link-row">
                   <a
-                    href={
-                      kind === 'dictionary'
-                        ? `/dictionary-view?entry_id=${row.entry_id}`
-                        : `/folklore-view?entry_id=${row.entry_id}`
-                    }
+                    className="queue-live-entry-text-link"
+                    href={liveEntryPath(kind, row)}
+                    target="_blank"
+                    rel="noreferrer"
                   >
                     View live entry
                   </a>

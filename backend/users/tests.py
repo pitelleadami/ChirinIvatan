@@ -1203,6 +1203,44 @@ class RoleOnboardingFlowTests(TestCase):
         self.assertEqual(row["screening_status"], RoleApplication.Status.PENDING)
         self.assertEqual(row["current_user_decision"], "")
 
+    def test_admin_can_release_email_from_rejected_public_application(self):
+        public_applicant = User.objects.create_user(
+            username="public_rejected",
+            email="released@example.com",
+        )
+        public_applicant.set_unusable_password()
+        public_applicant.save(update_fields=["password"])
+        application = RoleApplication.objects.create(
+            applicant=public_applicant,
+            target_role=RoleApplication.TargetRole.CONTRIBUTOR,
+            status=RoleApplication.Status.REJECTED,
+        )
+
+        self.client.force_login(self.admin_user)
+        response = self.client.post(f"/api/admin/role-applications/{application.id}/release-email")
+
+        self.assertEqual(response.status_code, 200)
+        public_applicant.refresh_from_db()
+        self.assertEqual(public_applicant.email, "")
+        self.assertEqual(response.json()["released_email"], "released@example.com")
+        self.assertEqual(response.json()["application"]["applicant"]["email"], "")
+
+    def test_release_email_refuses_credentialed_rejected_applicant(self):
+        self.applicant.email = "real.user@example.com"
+        self.applicant.save(update_fields=["email"])
+        application = RoleApplication.objects.create(
+            applicant=self.applicant,
+            target_role=RoleApplication.TargetRole.CONTRIBUTOR,
+            status=RoleApplication.Status.REJECTED,
+        )
+
+        self.client.force_login(self.admin_user)
+        response = self.client.post(f"/api/admin/role-applications/{application.id}/release-email")
+
+        self.assertEqual(response.status_code, 400)
+        self.applicant.refresh_from_db()
+        self.assertEqual(self.applicant.email, "real.user@example.com")
+
     def test_reviewer_application_can_activate_via_reviewer_plus_admin(self):
         self.client.force_login(self.applicant)
         create = self.client.post(

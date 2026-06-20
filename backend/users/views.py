@@ -2772,6 +2772,56 @@ def admin_role_applications_view(request):
     return JsonResponse({"rows": [_serialize_role_application(request, row) for row in rows]})
 
 
+@require_http_methods(["POST"])
+def admin_role_application_release_email_view(request, application_id):
+    auth_error = _require_authenticated(request)
+    if auth_error:
+        return auth_error
+    if not is_admin(request.user):
+        return JsonResponse({"detail": "Admin access required."}, status=403)
+
+    application = (
+        RoleApplication.objects.select_related("applicant", "applicant__profile")
+        .prefetch_related("applicant__groups", "decisions__decided_by")
+        .filter(id=application_id)
+        .first()
+    )
+    if not application:
+        return JsonResponse({"detail": "Application not found."}, status=404)
+    if application.status != RoleApplication.Status.REJECTED:
+        return JsonResponse(
+            {"detail": "Only rejected applications can release an email."}, status=400
+        )
+
+    applicant = application.applicant
+    if not applicant.email:
+        return JsonResponse(
+            {"detail": "This rejected application has no email to release."}, status=400
+        )
+    if applicant.has_usable_password() or applicant.groups.exists():
+        return JsonResponse(
+            {
+                "detail": (
+                    "This applicant has login credentials or active roles. "
+                    "Edit that user directly instead of releasing the email from the application."
+                )
+            },
+            status=400,
+        )
+
+    released_email = applicant.email
+    applicant.email = ""
+    applicant.save(update_fields=["email"])
+
+    return JsonResponse(
+        {
+            "detail": f"{released_email} is now available for another account.",
+            "released_email": released_email,
+            "application": _serialize_role_application(request, application),
+        }
+    )
+
+
 @require_GET
 def admin_users_view(request):
     auth_error = _require_authenticated(request)

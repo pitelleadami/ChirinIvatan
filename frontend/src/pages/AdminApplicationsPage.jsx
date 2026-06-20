@@ -1891,6 +1891,32 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
     decide(applicationId, 'reject')
   }
 
+  async function releaseRejectedApplicationEmail(applicationId) {
+    const application = applications.find((row) => row.application_id === applicationId)
+    const email = application?.applicant?.email || 'This email'
+    setActingId(applicationId)
+    setError('')
+    setMessage('')
+    setApplicationDecisionToast(null)
+    setApplicationActionErrorById((current) => ({ ...current, [applicationId]: '' }))
+    try {
+      await apiRequest('/api/auth/csrf')
+      const payload = await apiRequest(`/api/admin/role-applications/${applicationId}/release-email`, {
+        method: 'POST',
+      })
+      await loadApplications()
+      await loadPeople()
+      setMessage(payload.detail || `${email} is now available for another account.`)
+    } catch (requestError) {
+      setApplicationActionErrorById((current) => ({
+        ...current,
+        [applicationId]: requestError.message,
+      }))
+    } finally {
+      setActingId('')
+    }
+  }
+
   function renderDictionaryPostedPreview(contribution) {
     const data = contribution.proposed_data || {}
     const term = contribution.term || data.term || '(no headword)'
@@ -3033,6 +3059,10 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
 
                         <div className="admin-app-details">
                           <div>
+                            <p className="stat-label">Email</p>
+                            <p className="meta">{applicant.email || 'Released / none'}</p>
+                          </div>
+                          <div>
                             <p className="stat-label">Screening Progress</p>
                             <p className="meta">{approvalProgress(application)}</p>
                           </div>
@@ -3057,6 +3087,29 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
                             )}
                           </div>
                         </div>
+
+                        {isAdmin && application.status === 'rejected' && applicant.email && (
+                          <div className="admin-app-actions">
+                            {applicationActionErrorById[application.application_id] && (
+                              <p className="inline-error admin-application-action-error">
+                                {applicationActionErrorById[application.application_id]}
+                              </p>
+                            )}
+                            <div className="actions">
+                              <button
+                                type="button"
+                                className="ghost"
+                                disabled={actingId === application.application_id}
+                                onClick={() => releaseRejectedApplicationEmail(application.application_id)}
+                              >
+                                {actingId === application.application_id ? 'Releasing...' : 'Release Email'}
+                              </button>
+                            </div>
+                            <p className="meta">
+                              Frees this rejected applicant email so it can be assigned to another account.
+                            </p>
+                          </div>
+                        )}
 
                         {canDecide && (
                           <div className="admin-app-actions">

@@ -10,6 +10,8 @@ import { getMunicipalityFlag } from '../lib/municipalityFlags'
 import { ROUTES, navigate } from '../lib/router'
 import { DEFAULT_SITE_CONTENT, normalizeSiteContent } from '../lib/siteContent'
 
+const HOME_LATEST_FOLKLORE_LIMIT = 2
+
 function contributorLabel(row) {
   return compactLeaderboardName(row.display_name || row.full_name || row.username)
 }
@@ -145,7 +147,7 @@ export default function HomePage({ currentUser = {} }) {
 
       try {
         const folklorePayload = await apiRequest('/api/folklore/entries')
-        setFolkloreRows((folklorePayload.rows || []).slice(0, 4))
+        setFolkloreRows((folklorePayload.rows || []).slice(0, HOME_LATEST_FOLKLORE_LIMIT))
         setArchiveCounts((current) => ({
           ...current,
           folkloreApproved: folklorePayload.counts?.approved ?? 0,
@@ -197,7 +199,7 @@ export default function HomePage({ currentUser = {} }) {
       : rankedRows.filter((row) => row.municipality === leaderMunicipality)
   const topFiveMunicipality = filteredRows.slice(0, 5)
   const latestDictionary = dictionaryRows.filter(hasMeaning).filter(isMotherTerm).slice(0, 3)
-  const latestFolklore = folkloreRows.slice(0, 3)
+  const latestFolklore = folkloreRows.slice(0, HOME_LATEST_FOLKLORE_LIMIT)
   const visibleSupportStatements = siteContent.support_statements.filter(
     (statement) => statement?.quote || statement?.name || statement?.role,
   )

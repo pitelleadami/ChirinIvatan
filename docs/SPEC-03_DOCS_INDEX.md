@@ -83,7 +83,7 @@ This is the single entry point for project documentation.
 ## Continuous Integration
 
 - `.github/workflows/ci.yml` runs backend checks/tests, frontend lint/build, and Playwright end-to-end tests on GitHub pushes and pull requests.
-- Backend CI installs dependencies from `backend/requirements.txt`.
+- Backend CI installs dependencies from the root `requirements.txt`.
 - Playwright e2e is local-only and uses seeded SQLite test data.
 
 ## Branch And Pull Request Workflow

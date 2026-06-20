@@ -15,7 +15,7 @@ This file is reconstructed from Git history, project specs, deployment notes, an
 ### Engineering Practice
 
 - Added GitHub Actions continuous integration for backend tests, frontend lint/build, and Playwright e2e.
-- Added `backend/requirements.txt` so backend dependencies can be installed repeatably in CI.
+- Standardized backend dependency installs on the root `requirements.txt` so CI and deployment use the same pinned package list.
 - Made Playwright's Python binary configurable with `E2E_PYTHON` so e2e tests can run both locally and in GitHub Actions.
 - Added PR-based contribution workflow documentation, a pull request template, and branch protection setup notes.
 - Documented the decision to protect `main` through pull requests and CI in ADR-0012.

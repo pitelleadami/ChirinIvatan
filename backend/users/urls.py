@@ -16,6 +16,7 @@ from users.views import (
     admin_email_role_invitation_view,
     admin_maintenance_toggle_view,
     admin_overview_view,
+    admin_role_application_release_email_view,
     admin_role_applications_view,
     admin_user_activity_view,
     admin_user_password_reset_view,
@@ -116,6 +117,11 @@ urlpatterns = [
         "api/admin/role-applications",
         admin_role_applications_view,
         name="admin_role_applications",
+    ),
+    path(
+        "api/admin/role-applications/<uuid:application_id>/release-email",
+        admin_role_application_release_email_view,
+        name="admin_role_application_release_email",
     ),
     path("api/admin/users", admin_users_view, name="admin_users"),
     path(

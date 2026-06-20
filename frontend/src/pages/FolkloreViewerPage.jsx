@@ -110,6 +110,7 @@ export default function FolkloreViewerPage({ currentUser }) {
   const [error, setError] = useState('')
   const [listLoaded, setListLoaded] = useState(false)
   const [listRows, setListRows] = useState([])
+  const [browseMode, setBrowseMode] = useState('categories')
   const [liveEntryTotal, setLiveEntryTotal] = useState(0)
   const [titleSearchInput, setTitleSearchInput] = useState('')
   const [titleSearchTerm, setTitleSearchTerm] = useState('')
@@ -156,7 +157,9 @@ export default function FolkloreViewerPage({ currentUser }) {
   const selectedCategoryLabel = FOLKLORE_CATEGORIES.find(
     (category) => category.value === selectedCategory,
   )?.label
-  const showCategoryChooser = !detail && !selectedCategory && !titleSearchTerm.trim()
+  const showCategoryChooser = !detail && browseMode === 'categories' && !titleSearchTerm.trim()
+  const folkloreListHeading =
+    selectedCategoryLabel || (titleSearchTerm.trim() ? 'Search Results' : 'All Folklore')
 
   const loadPublicList = useCallback(async () => {
     setLoadingList(true)
@@ -329,12 +332,21 @@ export default function FolkloreViewerPage({ currentUser }) {
     event.preventDefault()
     setSelectedCategory('')
     setTitleSearchTerm(titleSearchInput)
+    setBrowseMode('list')
   }
 
   function handleCategorySelect(categoryValue) {
     setSelectedCategory(categoryValue)
     setTitleSearchInput('')
     setTitleSearchTerm('')
+    setBrowseMode('list')
+  }
+
+  function handleBrowseAll() {
+    setSelectedCategory('')
+    setTitleSearchInput('')
+    setTitleSearchTerm('')
+    setBrowseMode('list')
   }
 
   function closeDetail() {
@@ -348,6 +360,7 @@ export default function FolkloreViewerPage({ currentUser }) {
     setSelectedCategory('')
     setTitleSearchInput('')
     setTitleSearchTerm('')
+    setBrowseMode('categories')
   }
 
   useEffect(() => {
@@ -434,11 +447,13 @@ export default function FolkloreViewerPage({ currentUser }) {
           <section className="folklore-browser">
             <div className="section-heading">
               <div>
-                <h3>
-                  {showCategoryChooser ? 'Choose a Category' : selectedCategoryLabel || 'Latest Submissions'}
-                </h3>
+                <h3>{showCategoryChooser ? 'Choose a Category' : folkloreListHeading}</h3>
               </div>
-              {!showCategoryChooser && (
+              {showCategoryChooser ? (
+                <button type="button" className="folklore-browse-all-link" onClick={handleBrowseAll}>
+                  Browse all folklore <span>{liveEntryTotal}</span>
+                </button>
+              ) : (
                 <button className="ghost compact-button" onClick={handleChooseCategory}>
                   Choose Category
                 </button>
@@ -447,30 +462,51 @@ export default function FolkloreViewerPage({ currentUser }) {
             {loadingList && <p className="muted">Loading public folklore entries...</p>}
             {!listLoaded && !loadingList && <p className="muted">Public list not loaded yet.</p>}
             {showCategoryChooser ? (
-              <div className="folklore-category-grid">
-                {FOLKLORE_CATEGORIES.map((category) => (
-                  <button
-                    key={category.value}
-                    className="folklore-category-card"
-                    type="button"
-                    onClick={() => handleCategorySelect(category.value)}
-                    aria-label={`View ${category.label}`}
-                    style={{ '--folklore-card-mobile-bg': `url(${category.mobileImage})` }}
-                  >
-                    <picture>
-                      <source
-                        media="(max-width: 900px), (orientation: portrait)"
-                        srcSet={category.mobileImage}
-                      />
-                      <img src={category.image} alt="" />
-                    </picture>
-                    <span>{category.label}</span>
-                    <small>{category.description}</small>
-                  </button>
-                ))}
-              </div>
+              <>
+                <div className="folklore-category-grid">
+                  {FOLKLORE_CATEGORIES.map((category) => (
+                    <button
+                      key={category.value}
+                      className="folklore-category-card"
+                      type="button"
+                      onClick={() => handleCategorySelect(category.value)}
+                      aria-label={`View ${category.label}`}
+                      style={{ '--folklore-card-mobile-bg': `url(${category.mobileImage})` }}
+                    >
+                      <picture>
+                        <source
+                          media="(max-width: 900px), (orientation: portrait)"
+                          srcSet={category.mobileImage}
+                        />
+                        <img src={category.image} alt="" />
+                      </picture>
+                      <span>{category.label}</span>
+                      <small>{category.description}</small>
+                    </button>
+                  ))}
+                </div>
+              </>
             ) : (
               <>
+                <div className="folklore-filter-pills" aria-label="Folklore category filters">
+                  <button
+                    type="button"
+                    className={!selectedCategory ? 'active' : ''}
+                    onClick={() => handleCategorySelect('')}
+                  >
+                    All
+                  </button>
+                  {FOLKLORE_CATEGORIES.map((category) => (
+                    <button
+                      key={category.value}
+                      type="button"
+                      className={selectedCategory === category.value ? 'active' : ''}
+                      onClick={() => handleCategorySelect(category.value)}
+                    >
+                      {category.label}
+                    </button>
+                  ))}
+                </div>
                 {listLoaded && listRows.length === 0 && (
                   <p className="muted">No public folklore entries found.</p>
                 )}

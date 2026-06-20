@@ -284,15 +284,22 @@ function MuniRow({ row, isMe }) {
       {flag ? (
         <img
           src={flag}
-          style={{ width: '32px', height: '22px', objectFit: 'cover', borderRadius: '4px', flexShrink: 0 }}
+          style={{
+            width: '36px',
+            height: '28px',
+            objectFit: 'contain',
+            objectPosition: 'center',
+            borderRadius: '4px',
+            flexShrink: 0,
+          }}
           alt=""
           crossOrigin="anonymous"
         />
       ) : (
         <span
           style={{
-            width: '32px',
-            height: '22px',
+            width: '36px',
+            height: '28px',
             borderRadius: '4px',
             background: '#e6efc6',
             display: 'flex',
@@ -367,13 +374,15 @@ function MuniPodiumSlot({ row, rank, isMe, isTall }) {
         <img
           src={flag}
           style={{
-            width: `${flagSize + 16}px`,
-            height: `${Math.round((flagSize + 16) * 0.65)}px`,
-            objectFit: 'cover',
+            width: `${flagSize + 22}px`,
+            height: `${flagSize + 6}px`,
+            objectFit: 'contain',
+            objectPosition: 'center',
             borderRadius: '6px',
             flexShrink: 0,
-            border: isMe ? '3px solid #c8a84b' : '3px solid #fff',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.14)',
+            filter: isMe
+              ? 'drop-shadow(0 2px 5px rgba(0,0,0,0.18))'
+              : 'drop-shadow(0 2px 5px rgba(0,0,0,0.12))',
           }}
           alt=""
           crossOrigin="anonymous"
@@ -381,8 +390,8 @@ function MuniPodiumSlot({ row, rank, isMe, isTall }) {
       ) : (
         <span
           style={{
-            width: `${flagSize + 16}px`,
-            height: `${Math.round((flagSize + 16) * 0.65)}px`,
+            width: `${flagSize + 22}px`,
+            height: `${flagSize + 6}px`,
             borderRadius: '6px',
             background: '#e6efc6',
             display: 'flex',
@@ -391,7 +400,6 @@ function MuniPodiumSlot({ row, rank, isMe, isTall }) {
             fontSize: '18px',
             fontWeight: 700,
             color: '#1f5f28',
-            border: isMe ? '3px solid #c8a84b' : '3px solid #fff',
           }}
         >
           {row.municipality?.slice(0, 1)}
