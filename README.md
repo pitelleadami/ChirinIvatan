@@ -69,10 +69,15 @@ trustworthy.
 
 ## Screenshots
 
-Screenshots live in `docs/screenshots/`. Add images there and link them here.
+Dictionary draft builder, where a contributor fills in an entry and sees a live
+preview before submitting it for review:
+
+![Dictionary draft builder](docs/screenshots/dictionary-draft-builder.png)
+
+More screenshots (folklore archive and reviewer dashboard) live in
+`docs/screenshots/` and will be added here.
 
 <!--
-![Dictionary page](docs/screenshots/dictionary.png)
 ![Folklore archive](docs/screenshots/folklore.png)
 ![Reviewer dashboard](docs/screenshots/reviewer-dashboard.png)
 -->
