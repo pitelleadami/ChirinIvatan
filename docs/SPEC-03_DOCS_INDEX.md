@@ -62,23 +62,12 @@ This is the single entry point for project documentation.
 
 15. `docs/PUBLIC_DEPLOYMENT_TEMPLATE.md`
 
-- Exact local/staging/production deployment settings and release gate.
+- Public-safe deployment overview with placeholder domains, placeholder server
+  paths, and environment-variable guidance.
 
-16. `docs/PUBLIC_DEPLOYMENT_TEMPLATE.md`
-
-- Beginner guide for buying domain, hosting, SSL, and secure deployment order.
-
-17. `deploy/README.md`
+16. `deploy/README.md`
 
 - Server deployment templates (systemd + Nginx) and how to apply them.
-
-18. `docs/PUBLIC_DEPLOYMENT_TEMPLATE.md`
-
-- How to use the Ubuntu bootstrap deployment script safely.
-
-19. `private operator backup notes`
-
-- How production database and media backups are created, scheduled, checked, and smoke-restored.
 
 ## Continuous Integration
 
@@ -94,10 +83,8 @@ This is the single entry point for project documentation.
 
 ## Backups And Restore Testing
 
-- `private backup script` creates PostgreSQL and media backups.
-- `private restore smoke-test script` proves a backup can be restored into a temporary database and extracted media folder.
-- `private backup service` and `private backup timer` schedule daily production backups.
-- `private operator backup notes` is the operator checklist.
+- Production backup scripts, restore commands, schedules, and storage locations are
+  intentionally kept in private operator notes rather than this public repository.
 
 ## Legacy / Historical Docs
 

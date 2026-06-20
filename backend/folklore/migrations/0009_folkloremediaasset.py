@@ -1,4 +1,3 @@
-
 import django.db.models.deletion
 import uuid
 from django.conf import settings

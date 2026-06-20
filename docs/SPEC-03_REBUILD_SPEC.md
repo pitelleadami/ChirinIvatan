@@ -1770,7 +1770,7 @@ Production frontend:
 
 Production management-command invariant:
 
-- Every production Django management command must load `<app-root>/backend/.env.production` and use `<app-root>/backend/.venv/bin/python`.
+- Every production Django management command must load the private server environment file and use the same Python interpreter configured for the backend service.
 - Bare `python3 manage.py ...` commands are forbidden in production because they may target fallback SQLite instead of the PostgreSQL database used by Gunicorn.
 - Before applying schema changes, print and verify `settings.DATABASES['default']['ENGINE']` and `settings.DATABASES['default']['NAME']`.
 - After migration, verify migration state using the same environment, restart the backend, exercise the affected endpoint, and inspect service logs.
