@@ -160,4 +160,10 @@ The code is open source, but the project keeps public and private cleanly separa
 
 ## License
 
-See [LICENSE](LICENSE).
+The source code and repository documentation are released under the
+[Apache License 2.0](LICENSE). See [NOTICE.md](NOTICE.md) for authorship and
+license scope.
+
+The license does not include live production data, user accounts, submitted
+dictionary or folklore content, uploaded media, private operator notes, server
+credentials, backup paths, or deployment runbooks.
