@@ -105,6 +105,7 @@ python3 manage.py test users reviews dictionary folklore
 - [ ] Admin Site Content can enable/disable maintenance mode and edit the visitor message
 - [ ] Maintenance screen appears for visitors/non-admins and still allows admin login
 - [ ] Admin People tab shows per-person action logs capped at 500 displayed rows without deleting audit records
+- [ ] Admin People profile shows `Approved, not joined` for unclaimed approved applicants, can resend setup link, and reveals email history only after `View email log`
 
 ---
 

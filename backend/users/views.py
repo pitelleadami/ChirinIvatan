@@ -733,6 +733,24 @@ def _serialize_admin_user(request, user):
         .prefetch_related("approved_by_reviewers", "approved_by_admins")
         .order_by("-created_at")
     )
+    pending_activation_applications = (
+        user.role_applications.filter(status=RoleApplication.Status.APPROVED).order_by(
+            "-decided_at", "-created_at"
+        )
+        if not user.has_usable_password()
+        else RoleApplication.objects.none()
+    )
+    email_actions = (
+        AdminAccountAction.objects.filter(
+            target_user=user,
+            action__in=[
+                AdminAccountAction.Action.SEND_PASSWORD_RESET,
+                AdminAccountAction.Action.SEND_APPROVAL_REMINDER,
+            ],
+        )
+        .select_related("admin")
+        .order_by("-created_at")[:12]
+    )
 
     return {
         "user_id": user.id,
@@ -786,6 +804,29 @@ def _serialize_admin_user(request, user):
                 "created_at": record.created_at.isoformat(),
             }
             for record in onboarding_records
+        ],
+        "pending_activation_applications": [
+            {
+                "application_id": str(application.id),
+                "target_role": application.target_role,
+                "access_url": _role_application_access_url(application),
+                "decided_at": (
+                    application.decided_at.isoformat() if application.decided_at else None
+                ),
+            }
+            for application in pending_activation_applications
+        ],
+        "email_log": [
+            {
+                "action_id": str(action.id),
+                "action": action.action,
+                "label": action.get_action_display(),
+                "sent_by": normalize_username(action.admin.username),
+                "recipient_email": user.email,
+                "notes": action.notes,
+                "created_at": action.created_at.isoformat(),
+            }
+            for action in email_actions
         ],
         "pending_applications": user.role_applications.filter(
             status=RoleApplication.Status.PENDING
@@ -2203,7 +2244,7 @@ def _actor_display_name(user):
     return formatted_display_name(user, _safe_profile(user))
 
 
-def _send_role_application_approval_email(application, onboarding_record):
+def _send_role_application_approval_email(application, onboarding_record, *, reminder=False):
     role_name = {
         RoleApplication.TargetRole.REVIEWER: "Reviewer",
         RoleApplication.TargetRole.CONTRIBUTOR: "Contributor",
@@ -2213,30 +2254,48 @@ def _send_role_application_approval_email(application, onboarding_record):
     if not recipient:
         return
 
-    approvers = [
-        _actor_display_name(user)
-        for user in onboarding_record.approved_by_reviewers.order_by(
-            "first_name", "last_name", "username"
-        )
-    ] + [
-        _actor_display_name(user)
-        for user in onboarding_record.approved_by_admins.order_by(
-            "first_name", "last_name", "username"
-        )
-    ]
+    approvers = []
+    if onboarding_record:
+        approvers = [
+            _actor_display_name(user)
+            for user in onboarding_record.approved_by_reviewers.order_by(
+                "first_name", "last_name", "username"
+            )
+        ] + [
+            _actor_display_name(user)
+            for user in onboarding_record.approved_by_admins.order_by(
+                "first_name", "last_name", "username"
+            )
+        ]
     approver_text = ", ".join(approvers) if approvers else "the Chirin Ivatan review team"
     access_url = _role_application_access_url(application)
     applicant_name = formatted_display_name(applicant, _safe_profile(applicant)) or "there"
 
-    subject = f"Your Chirin Ivatan {role_name} application was approved"
-    message = (
-        f"Hi {applicant_name},\n\n"
-        f"Your application to join Chirin Ivatan as {role_name} has been approved.\n\n"
-        f"Approved by: {approver_text}\n\n"
-        "Open this link to activate your account or check your approved application:\n"
-        f"{access_url}\n\n"
-        "After activating your login, please update your profile so the community can recognize your contribution properly."
-    )
+    if reminder:
+        subject = "Complete your Chirin Ivatan account setup"
+        message = (
+            f"Hi {applicant_name},\n\n"
+            f"Your Chirin Ivatan account has been approved as {role_name}.\n\n"
+            "It looks like you have not completed your profile setup yet. "
+            "Please finish your account setup so you can access the platform and participate "
+            "in your approved role.\n\n"
+            f"Approved by: {approver_text}\n\n"
+            "Complete your profile here:\n"
+            f"{access_url}\n\n"
+            "If you already completed this, you can ignore this email.\n\n"
+            "Thank you,\n"
+            "Chirin Ivatan Team"
+        )
+    else:
+        subject = f"Your Chirin Ivatan {role_name} application was approved"
+        message = (
+            f"Hi {applicant_name},\n\n"
+            f"Your application to join Chirin Ivatan as {role_name} has been approved.\n\n"
+            f"Approved by: {approver_text}\n\n"
+            "Open this link to activate your account or check your approved application:\n"
+            f"{access_url}\n\n"
+            "After activating your login, please update your profile so the community can recognize your contribution properly."
+        )
     send_mail(
         subject,
         message,
@@ -3124,7 +3183,80 @@ def admin_user_password_reset_view(request, username):
         status_before="email_available",
         status_after="reset_link_sent",
     )
-    return JsonResponse({"detail": f"Password reset link sent to {target_user.email}."})
+    return JsonResponse(
+        {
+            "detail": f"Password reset link sent to {target_user.email}.",
+            "user": _serialize_admin_user(request, target_user),
+        }
+    )
+
+
+@require_http_methods(["POST"])
+def admin_user_approval_reminder_view(request, username):
+    auth_error = _require_authenticated(request)
+    if auth_error:
+        return auth_error
+    if not is_admin(request.user):
+        return JsonResponse({"detail": "Admin access required."}, status=403)
+
+    target_user = User.objects.filter(username=username).first()
+    if not target_user:
+        return JsonResponse({"detail": "User not found."}, status=404)
+    if not target_user.email:
+        return JsonResponse(
+            {"detail": "This approved account has no email address for a reminder."}, status=400
+        )
+    if target_user.has_usable_password():
+        return JsonResponse(
+            {"detail": "This account has already created login credentials."}, status=400
+        )
+
+    application = (
+        target_user.role_applications.filter(status=RoleApplication.Status.APPROVED)
+        .order_by("-decided_at", "-created_at")
+        .first()
+    )
+    if not application:
+        return JsonResponse(
+            {"detail": "No approved unclaimed application was found for this account."}, status=400
+        )
+
+    onboarding_record = (
+        application.onboarding_records.prefetch_related(
+            "approved_by_reviewers", "approved_by_admins"
+        )
+        .order_by("-created_at")
+        .first()
+    )
+    payload, parse_error = _parse_json_body(request)
+    if parse_error:
+        return parse_error
+    notes = str(payload.get("notes", "") or "").strip()
+
+    try:
+        _send_role_application_approval_email(application, onboarding_record, reminder=True)
+    except Exception as exc:
+        return JsonResponse(
+            {"detail": ("Approval reminder was not sent. " f"{type(exc).__name__}: {exc}")},
+            status=500,
+        )
+
+    _record_admin_account_action(
+        target_user=target_user,
+        admin=request.user,
+        action=AdminAccountAction.Action.SEND_APPROVAL_REMINDER,
+        role=application.target_role,
+        notes=notes,
+        status_before="approved_pending_activation",
+        status_after="approval_reminder_sent",
+    )
+    return JsonResponse(
+        {
+            "detail": f"Approval reminder sent to {target_user.email}.",
+            "access_url": _role_application_access_url(application),
+            "user": _serialize_admin_user(request, target_user),
+        }
+    )
 
 
 @require_http_methods(["POST"])

@@ -1851,6 +1851,37 @@ class RoleOnboardingFlowTests(TestCase):
         usernames = [row["username"] for row in response.json()["rows"]]
         self.assertIn(self.applicant.username, usernames)
 
+    def test_admin_users_endpoint_marks_approved_applicant_waiting_for_activation(self):
+        pending_activation_user = User.objects.create_user(
+            username="awaiting_activation",
+            email="awaiting@example.com",
+        )
+        pending_activation_user.set_unusable_password()
+        pending_activation_user.is_active = False
+        pending_activation_user.save(update_fields=["password", "is_active"])
+        application = RoleApplication.objects.create(
+            applicant=pending_activation_user,
+            target_role=RoleApplication.TargetRole.CONTRIBUTOR,
+            status=RoleApplication.Status.APPROVED,
+        )
+        RoleOnboardingRecord.objects.create(
+            user=pending_activation_user,
+            role=RoleOnboardingRecord.Role.CONTRIBUTOR,
+            method=RoleOnboardingRecord.Method.APPROVED_APPLICATION,
+            source_application=application,
+        )
+
+        self.client.force_login(self.admin_user)
+        response = self.client.get("/api/admin/users?q=awaiting@example.com")
+
+        self.assertEqual(response.status_code, 200)
+        row = response.json()["rows"][0]
+        pending_applications = row["pending_activation_applications"]
+        self.assertEqual(len(pending_applications), 1)
+        self.assertEqual(pending_applications[0]["application_id"], str(application.id))
+        self.assertIn("/roles?", pending_applications[0]["access_url"])
+        self.assertIn("status_email=awaiting%40example.com", pending_applications[0]["access_url"])
+
     def test_admin_users_endpoint_requires_admin_access(self):
         self.client.force_login(self.reviewer_a)
         response = self.client.get("/api/admin/users")
@@ -2144,6 +2175,65 @@ class AdminAccountControlTests(TestCase):
         self.assertFalse(pending_activation_user.is_active)
         self.assertIn("must create credentials", response.json()["detail"])
 
+    @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+    def test_admin_can_resend_approval_setup_link_for_unclaimed_application(self):
+        pending_activation_user = User.objects.create_user(
+            username="awaiting_activation",
+            email="awaiting@example.com",
+            first_name="Awaiting",
+            last_name="Applicant",
+            is_active=False,
+        )
+        pending_activation_user.set_unusable_password()
+        pending_activation_user.save(update_fields=["password"])
+        application = RoleApplication.objects.create(
+            applicant=pending_activation_user,
+            target_role=RoleApplication.TargetRole.CONTRIBUTOR,
+            status=RoleApplication.Status.APPROVED,
+        )
+        record = RoleOnboardingRecord.objects.create(
+            user=pending_activation_user,
+            role=RoleOnboardingRecord.Role.CONTRIBUTOR,
+            method=RoleOnboardingRecord.Method.APPROVED_APPLICATION,
+            source_application=application,
+        )
+        record.approved_by_admins.add(self.admin)
+
+        response = self.client.post(
+            f"/api/admin/users/{pending_activation_user.username}/approval-reminder",
+            data=json.dumps({"notes": "follow-up before orientation"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("/roles?", payload["access_url"])
+        self.assertIn("status_email=awaiting%40example.com", payload["access_url"])
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].subject, "Complete your Chirin Ivatan account setup")
+        self.assertIn("approved as Contributor", mail.outbox[0].body)
+        self.assertIn(payload["access_url"], mail.outbox[0].body)
+        self.assertEqual(payload["user"]["email_log"][0]["action"], "send_approval_reminder")
+        self.assertEqual(payload["user"]["email_log"][0]["recipient_email"], "awaiting@example.com")
+        self.assertTrue(
+            AdminAccountAction.objects.filter(
+                target_user=pending_activation_user,
+                admin=self.admin,
+                action=AdminAccountAction.Action.SEND_APPROVAL_REMINDER,
+                role=RoleApplication.TargetRole.CONTRIBUTOR,
+            ).exists()
+        )
+
+    def test_admin_cannot_send_approval_reminder_after_credentials_are_claimed(self):
+        response = self.client.post(
+            f"/api/admin/users/{self.user.username}/approval-reminder",
+            data=json.dumps({}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("already created login credentials", response.json()["detail"])
+
     def test_admin_cannot_deactivate_self(self):
         response = self.client.post(
             f"/api/admin/users/{self.admin.username}/status",
@@ -2265,6 +2355,9 @@ class AdminAccountControlTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(mail.outbox), 1)
         self.assertIn(self.user.email, mail.outbox[0].to)
+        payload = response.json()
+        self.assertEqual(payload["user"]["email_log"][0]["action"], "send_password_reset")
+        self.assertEqual(payload["user"]["email_log"][0]["recipient_email"], self.user.email)
         self.assertTrue(
             AdminAccountAction.objects.filter(
                 target_user=self.user,

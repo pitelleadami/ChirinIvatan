@@ -4,6 +4,15 @@ Plain-language record of visible product changes, workflow decisions, and public
 
 This file is reconstructed from Git history, project specs, deployment notes, and recent implementation work. It is not a full commit log. Use Git history for exact file-level changes.
 
+## 2026-06-22
+
+### Admin Account Follow-Up
+
+- Added an admin-only resend setup link flow for approved applicants who have not completed account activation.
+- Marked approved but unclaimed applicants in the People profile modal as `Approved, not joined`.
+- Added an admin-only email log in the People profile modal, hidden behind a `View email log` button, showing setup reminders and password reset messages sent to the selected person.
+- Recorded setup reminder sends as admin account actions alongside password reset sends, so email follow-up remains auditable.
+
 ## 2026-06-19
 
 ### Security

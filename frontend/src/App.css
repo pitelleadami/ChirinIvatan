@@ -2434,6 +2434,29 @@ button.admin-site-content-menu-card.active {
   font-size: 20px;
 }
 
+.admin-person-email-log {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(18, 35, 18, 0.1);
+  border-radius: 8px;
+  margin-bottom: 12px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.52);
+}
+
+.admin-person-email-log .section-heading {
+  margin: 0;
+}
+
+.admin-person-email-log .section-heading h3,
+.admin-person-email-log .muted {
+  margin: 0;
+}
+
+.admin-email-log-list {
+  max-height: 180px;
+}
+
 .admin-account-flag-list {
   display: grid;
   gap: 8px;

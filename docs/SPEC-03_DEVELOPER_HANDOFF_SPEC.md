@@ -895,6 +895,10 @@ Screen: `Admin People Activity Log`
 - The People list source `GET /api/admin/users` includes only users with active Admin, Consultant, Reviewer, or Contributor access, including role-assigned test accounts.
 - Exclude registered-only applicants who do not yet have an active role, even when they have a pending application.
 - Do not exclude an existing contributor merely because that person has a separate pending reviewer application.
+- Approved application users who have not created credentials appear in People with `pending_activation_applications` and should be labeled `Approved, not joined`.
+- Admins can resend the approved applicant setup link through `POST /api/admin/users/<username>/approval-reminder`.
+- `GET /api/admin/users` includes `email_log` rows for setup reminders and password reset messages sent to the selected person.
+- The People modal should hide email history until the admin clicks `View email log`.
 - Render the managed consultant profile panel after the people directory as the final People-section tool.
 - Include actions such as:
   - contribution credits
@@ -904,6 +908,7 @@ Screen: `Admin People Activity Log`
   - folklore reviews
   - role application decisions
   - role invitations sent
+  - account email actions such as password reset and approved applicant setup reminders
 - UI/API should show the latest 500 rows per person.
 - Do not auto-delete older audit records simply because the list exceeds 500; cap retrieval/display while preserving audit history.
 

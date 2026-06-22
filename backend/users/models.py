@@ -265,6 +265,7 @@ class AdminAccountAction(models.Model):
         DEACTIVATE = "deactivate", "Deactivate"
         REACTIVATE = "reactivate", "Reactivate"
         SEND_PASSWORD_RESET = "send_password_reset", "Send Password Reset"
+        SEND_APPROVAL_REMINDER = "send_approval_reminder", "Send Approval Reminder"
         REVOKE_ROLE = "revoke_role", "Revoke Role"
         FLAG_SUSPICIOUS = "flag_suspicious", "Flag Suspicious"
         CLEAR_SUSPICIOUS_FLAG = "clear_suspicious_flag", "Clear Suspicious Flag"

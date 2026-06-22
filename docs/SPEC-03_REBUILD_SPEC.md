@@ -1552,6 +1552,9 @@ People section:
 - exclude registered-only users whose contributor/reviewer applications are pending or rejected
 - keep an existing contributor visible while a separate reviewer application is pending
 - view user activity
+- show `Approved, not joined` for approved application users who have not created credentials yet
+- resend the approved applicant setup link from the selected person profile
+- show setup reminder and password reset history only after admin clicks `View email log`
 - admin public visibility controls
 - admin leaderboard visibility controls
 - show the managed consultant profile panel last, after the people directory and related controls

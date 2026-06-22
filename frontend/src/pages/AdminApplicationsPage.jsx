@@ -538,6 +538,7 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
   const [selectedActivityUser, setSelectedActivityUser] = useState(null)
   const [activityRows, setActivityRows] = useState([])
   const [showActivityLog, setShowActivityLog] = useState(false)
+  const [showEmailLog, setShowEmailLog] = useState(false)
   const [showAccountControls, setShowAccountControls] = useState(false)
   const [invitations, setInvitations] = useState([])
   const [invitationPage, setInvitationPage] = useState(1)
@@ -1167,6 +1168,7 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
     setSelectedActivityUser(person)
     setActivityRows([])
     setShowActivityLog(false)
+    setShowEmailLog(false)
     setShowAccountControls(false)
     setAccountActionNotes('')
     setRoleToRevoke(preferredRoleToRevoke(person))
@@ -1177,6 +1179,7 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
     setSelectedActivityUser(null)
     setActivityRows([])
     setShowActivityLog(false)
+    setShowEmailLog(false)
     setShowAccountControls(false)
     setAccountActionNotes('')
     setRoleToRevoke('contributor')
@@ -1304,6 +1307,9 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
       } else if (action === 'password-reset') {
         endpoint = `/api/admin/users/${encodeURIComponent(person.username)}/password-reset`
         body = { notes }
+      } else if (action === 'approval-reminder') {
+        endpoint = `/api/admin/users/${encodeURIComponent(person.username)}/approval-reminder`
+        body = { notes }
       } else if (action === 'revoke-role') {
         endpoint = `/api/admin/users/${encodeURIComponent(person.username)}/roles/revoke`
         body = { role: roleToRevoke, notes }
@@ -1325,6 +1331,7 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
       const successMessages = {
         activate: 'Account reactivated.',
         deactivate: 'Account deactivated.',
+        'approval-reminder': payload.detail || 'Approval reminder sent.',
         'password-reset': payload.detail || 'Password reset link sent.',
         'revoke-role':
           roleToRevoke === 'reviewer'
@@ -2777,6 +2784,9 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
 
   const selectedRevokableRoles = revokableRolesForPerson(selectedActivityUser)
   const selectedCanRevokeRole = selectedRevokableRoles.includes(roleToRevoke)
+  const selectedPendingActivationApplication =
+    selectedActivityUser?.pending_activation_applications?.[0] || null
+  const selectedEmailLog = selectedActivityUser?.email_log || []
 
   if (!isAuthenticated) {
     return (
@@ -3641,6 +3651,14 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
                           </span>
                         </dd>
                       </div>
+                      {selectedPendingActivationApplication && (
+                        <div>
+                          <dt>Join Status</dt>
+                          <dd>
+                            <span className="badge status-pending">Approved, not joined</span>
+                          </dd>
+                        </div>
+                      )}
                       <div>
                         <dt>Suspicious Review</dt>
                         <dd>
@@ -3708,6 +3726,26 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
                       >
                         Edit Managed Profile
                       </button>
+                    )}
+                    {selectedPendingActivationApplication && (
+                      <>
+                        <button
+                          className="compact-button"
+                          type="button"
+                          disabled={Boolean(accountActionLoading)}
+                          onClick={() => runAccountAction(selectedActivityUser, 'approval-reminder')}
+                        >
+                          {accountActionLoading === 'approval-reminder' ? 'Sending...' : 'Resend Setup Link'}
+                        </button>
+                        <a
+                          className="ghost compact-button admin-invite-link"
+                          href={selectedPendingActivationApplication.access_url}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Open setup link
+                        </a>
+                      </>
                     )}
                     <button
                       className="ghost compact-button"
@@ -3785,6 +3823,15 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
                     </button>
                     <button
                       className="ghost compact-button"
+                      type="button"
+                      aria-expanded={showEmailLog}
+                      onClick={() => setShowEmailLog((current) => !current)}
+                    >
+                      {showEmailLog ? 'Hide email log' : 'View email log'}
+                    </button>
+                    <button
+                      className="ghost compact-button"
+                      type="button"
                       disabled={loadingActivity}
                       onClick={() => loadPersonActivity(selectedActivityUser)}
                     >
@@ -3942,6 +3989,41 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
                         </button>
                       </div>
                     </div>
+                  )}
+                  {showEmailLog && (
+                    <section className="admin-person-email-log">
+                      <div className="section-heading">
+                        <div>
+                          <p className="profile-kicker">Email Log</p>
+                          <h3>Messages Sent</h3>
+                        </div>
+                      </div>
+                      {selectedEmailLog.length === 0 ? (
+                        <p className="muted">
+                          No setup reminder or password reset emails have been sent yet.
+                        </p>
+                      ) : (
+                        <div className="admin-activity-list admin-email-log-list">
+                          {selectedEmailLog.map((row) => (
+                            <article key={row.action_id} className="admin-activity-row">
+                              <div>
+                                <strong>{row.label}</strong>
+                                <p>
+                                  {[
+                                    row.recipient_email,
+                                    row.sent_by ? `sent by @${row.sent_by}` : '',
+                                    row.notes,
+                                  ]
+                                    .filter(Boolean)
+                                    .join(' · ')}
+                                </p>
+                              </div>
+                              <time>{formatDate(row.created_at)}</time>
+                            </article>
+                          ))}
+                        </div>
+                      )}
+                    </section>
                   )}
                   {showActivityLog && loadingActivity && <p className="muted">Loading action log...</p>}
                   {showActivityLog && !loadingActivity && activityRows.length === 0 && (

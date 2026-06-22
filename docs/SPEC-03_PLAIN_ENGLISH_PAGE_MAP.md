@@ -488,6 +488,9 @@ Must support:
 - user search/list
 - managed consultant profile creation
 - view user activity
+- view email log on demand for setup reminders and password reset emails
+- resend setup link for approved applicants who have not joined yet
+- show `Approved, not joined` status for approved applicants who have not created credentials
 - edit public visibility flags
 - hide/show from Yaru chart
 - hide/show live contributions
