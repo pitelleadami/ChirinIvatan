@@ -96,9 +96,19 @@ const PART_OF_SPEECH_OPTIONS = [
   'Proverb',
 ]
 
-const SOURCE_OWNER_LABEL = 'K. Adami'
 const SOURCE_REMARKS_KEY = 'source_remarks'
 const DICTIONARY_MUNICIPALITY_OPTIONS = ['Basco', 'Mahatao', 'Ivana', 'Uyugan', 'Sabtang', 'Itbayat']
+
+function sourceOwnerLabel(user) {
+  const nameParts = [user?.first_name, user?.last_name]
+    .map((part) => String(part || '').trim())
+    .filter(Boolean)
+  const nameExtension = String(user?.name_extension || '').trim()
+  const fullName = [...nameParts, nameExtension].filter(Boolean).join(' ')
+  if (fullName) return fullName
+  const username = String(user?.username || '').trim()
+  return username ? `@${username}` : 'Contributor'
+}
 
 const DICTIONARY_TERM_SOURCE_TYPES = [
   {
@@ -551,11 +561,11 @@ function normalizeVariantForForm(variant) {
   }
 }
 
-function variantForPayload(variant) {
+function variantForPayload(variant, ownerLabel) {
   const sourceConfig = resolveSourceConfig(DICTIONARY_AUDIO_SOURCE_TYPES, variant.audio_source_type)
   const derivedAudioSource =
     variant.audio_source_is_self_recorded === true
-      ? `Audio Source: ${SOURCE_OWNER_LABEL}`
+      ? `Audio Source: ${ownerLabel}`
       : variant.audio_source_is_self_recorded === false
         ? buildSourceLine('Audio Source', sourceConfig, variant.audio_source_details)
         : ''
@@ -737,7 +747,7 @@ function YesNoField({ legend, name, value, onChange, required = false, error = '
   )
 }
 
-export default function DictionaryDraftBuilderPage() {
+export default function DictionaryDraftBuilderPage({ currentUser = {} }) {
   const [revisionId, setRevisionId] = useState('')
   const [entryId, setEntryId] = useState('')
   const [autoRevisionStarted, setAutoRevisionStarted] = useState(false)
@@ -1007,19 +1017,19 @@ export default function DictionaryDraftBuilderPage() {
         : buildSourceLine('Source', selectedTermSourceConfig, termSourceValues, form.source_text)
     const derivedAudioSource =
       hasAudioMedia && form.audio_source_is_self_recorded === true
-        ? `Audio Source: ${SOURCE_OWNER_LABEL}`
+        ? `Audio Source: ${currentSourceOwnerLabel}`
         : hasAudioMedia
           ? buildSourceLine('Audio Source', selectedAudioSourceConfig, audioSourceValues, form.audio_source)
           : ''
     const derivedPhotoSource =
       hasPhotoMedia && form.photo_source_is_contributor_owned === true
-        ? `Photo Source: ${SOURCE_OWNER_LABEL}`
+        ? `Photo Source: ${currentSourceOwnerLabel}`
         : hasPhotoMedia
           ? buildSourceLine('Photo Source', selectedPhotoSourceConfig, photoSourceValues, form.photo_source)
           : ''
     const variants = form.variants
       .map((variant, index) => ({
-        ...variantForPayload(variant),
+        ...variantForPayload(variant, currentSourceOwnerLabel),
         sourceIndex: index,
       }))
       .filter(
@@ -1651,19 +1661,20 @@ export default function DictionaryDraftBuilderPage() {
   const selectedTermSourceConfig = resolveSourceConfig(DICTIONARY_TERM_SOURCE_TYPES, termSourceType)
   const selectedAudioSourceConfig = resolveSourceConfig(DICTIONARY_AUDIO_SOURCE_TYPES, audioSourceType)
   const selectedPhotoSourceConfig = resolveSourceConfig(DICTIONARY_PHOTO_SOURCE_TYPES, photoSourceType)
+  const currentSourceOwnerLabel = sourceOwnerLabel(currentUser)
   const previewTermSource =
     form.term_source_is_self_knowledge === true
       ? ''
       : buildSourceLine('Source', selectedTermSourceConfig, termSourceValues, form.source_text)
   const previewAudioSource =
     hasAudioMedia && form.audio_source_is_self_recorded === true
-      ? `Audio Source: ${SOURCE_OWNER_LABEL}`
+      ? `Audio Source: ${currentSourceOwnerLabel}`
       : hasAudioMedia
         ? buildSourceLine('Audio Source', selectedAudioSourceConfig, audioSourceValues, form.audio_source)
         : ''
   const previewPhotoSource =
     hasPhotoMedia && form.photo_source_is_contributor_owned === true
-      ? `Photo Source: ${SOURCE_OWNER_LABEL}`
+      ? `Photo Source: ${currentSourceOwnerLabel}`
       : hasPhotoMedia
         ? buildSourceLine('Photo Source', selectedPhotoSourceConfig, photoSourceValues, form.photo_source)
         : ''
@@ -1682,13 +1693,13 @@ export default function DictionaryDraftBuilderPage() {
     snapshotForm.term_source_is_self_knowledge === true ? '' : snapshotForm.source_text
   const snapshotAudioSource =
     snapshotAudioPreview && snapshotForm.audio_source_is_self_recorded === true
-      ? `Audio Source: ${SOURCE_OWNER_LABEL}`
+      ? `Audio Source: ${currentSourceOwnerLabel}`
       : snapshotAudioPreview
         ? snapshotForm.audio_source
         : ''
   const snapshotPhotoSource =
     snapshotPhotoPreview && snapshotForm.photo_source_is_contributor_owned === true
-      ? `Photo Source: ${SOURCE_OWNER_LABEL}`
+      ? `Photo Source: ${currentSourceOwnerLabel}`
       : snapshotPhotoPreview
         ? snapshotForm.photo_source
         : ''
@@ -2773,7 +2784,7 @@ export default function DictionaryDraftBuilderPage() {
                       )}
                       {form.audio_source_is_self_recorded === true && (
                         <>
-                          <p className="hint">Audio Source: {SOURCE_OWNER_LABEL}</p>
+                          <p className="hint">Audio Source: {currentSourceOwnerLabel}</p>
                           {renderMediaLicenseSelect({
                             id: 'dictionary-audio-license',
                             value: form.audio_license,
@@ -2862,7 +2873,7 @@ export default function DictionaryDraftBuilderPage() {
                       )}
                       {form.photo_source_is_contributor_owned === true && (
                         <>
-                          <p className="hint">Photo Source: {SOURCE_OWNER_LABEL}</p>
+                          <p className="hint">Photo Source: {currentSourceOwnerLabel}</p>
                           {renderMediaLicenseSelect({
                             id: 'dictionary-photo-license',
                             value: form.photo_license,
@@ -3515,7 +3526,7 @@ export default function DictionaryDraftBuilderPage() {
                                 </>
                               )}
                               {variant.audio_source_is_self_recorded === true && (
-                                <p className="hint">Audio Source: {SOURCE_OWNER_LABEL}</p>
+                                <p className="hint">Audio Source: {currentSourceOwnerLabel}</p>
                               )}
                             </>
                           )}
@@ -3655,7 +3666,7 @@ export default function DictionaryDraftBuilderPage() {
                       <strong>{normalizeHeadword(variant.term) || `Variant ${index + 1}`}</strong>
                       <p className="meta">
                         {[
-                          variantForPayload(variant).variant_type,
+                          variantForPayload(variant, currentSourceOwnerLabel).variant_type,
                           variant.pronunciation_text,
                           variant.phonetic,
                         ]

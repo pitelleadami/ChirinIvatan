@@ -322,6 +322,7 @@ backend/staticfiles/
 
 # Local uploads and generated media should be handled by production storage/backups.
 backend/media/
+backend/private_media/
 
 # Node / frontend generated files
 node_modules/

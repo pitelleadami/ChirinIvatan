@@ -4,6 +4,7 @@ export const ROUTES = {
   about: '/about',
   yaru: '/yaru',
   faqs: '/faqs',
+  resources: '/resources',
   manual: '/manual',
   adminApplications: '/admin-applications',
   dictionaryView: '/dictionary-view',

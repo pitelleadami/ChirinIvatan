@@ -65,6 +65,17 @@ function formatPreviewValue(label, value) {
   return textValue
 }
 
+function isTruthy(value) {
+  return value === true || String(value || '').toLowerCase() === 'true'
+}
+
+function contributorSourceLabel(row) {
+  return (
+    row.contributor_display_name ||
+    (row.contributor_username ? `@${row.contributor_username}` : 'Contributor')
+  )
+}
+
 function liveEntryPath(kind, row) {
   if (!row.entry_id) return ''
   return kind === 'dictionary'
@@ -96,7 +107,9 @@ function normalizedDictionarySnapshotPreview(snapshot = {}) {
     inflected_forms: snapshot.inflected_forms || '',
     source: snapshot.source || snapshot.source_text || '',
     audio_source: snapshot.audio_source || '',
+    audio_source_is_self_recorded: snapshot.audio_source_is_self_recorded || false,
     photo_source: snapshot.photo_source || '',
+    photo_source_is_contributor_owned: snapshot.photo_source_is_contributor_owned || false,
     audio_license: snapshot.audio_license || '',
     photo_license: snapshot.photo_license || '',
     variants: Array.isArray(snapshot.variants) ? snapshot.variants : [],
@@ -116,6 +129,13 @@ function normalizedFolkloreSnapshotPreview(snapshot = {}) {
 
 function previewRows(kind, row, { compact = false } = {}) {
   const preview = row.preview || {}
+  const contributorSource = contributorSourceLabel(row)
+  const dictionaryAudioSource = isTruthy(preview.audio_source_is_self_recorded)
+    ? `Audio Source: ${contributorSource}`
+    : preview.audio_source
+  const dictionaryPhotoSource = isTruthy(preview.photo_source_is_contributor_owned)
+    ? `Photo Source: ${contributorSource}`
+    : preview.photo_source
   const rows =
     kind === 'dictionary'
       ? [
@@ -134,8 +154,8 @@ function previewRows(kind, row, { compact = false } = {}) {
           ['Ivatan Antonyms', preview.ivatan_antonym],
           ['Inflected Forms', preview.inflected_forms],
           ['Term Source', preview.source],
-          ['Audio Source', preview.audio_source],
-          ['Image Source', preview.photo_source],
+          ['Audio Source', dictionaryAudioSource],
+          ['Image Source', dictionaryPhotoSource],
           ['License', [preview.audio_license, preview.photo_license].filter(Boolean).join(' | ')],
         ]
       : [
@@ -219,8 +239,13 @@ function renderQueueDictionaryPreview(row) {
   const usageNotes = displayText(fieldValue(row, 'usage_notes'))
   const etymology = displayText(fieldValue(row, 'etymology'))
   const source = displayText(fieldValue(row, 'source'))
-  const audioSource = displayText(fieldValue(row, 'audio_source'))
-  const photoSource = displayText(fieldValue(row, 'photo_source'))
+  const contributorSource = contributorSourceLabel(row)
+  const audioSource = isTruthy(fieldValue(row, 'audio_source_is_self_recorded'))
+    ? `Audio Source: ${contributorSource}`
+    : displayText(fieldValue(row, 'audio_source'))
+  const photoSource = isTruthy(fieldValue(row, 'photo_source_is_contributor_owned'))
+    ? `Photo Source: ${contributorSource}`
+    : displayText(fieldValue(row, 'photo_source'))
   const audioLicense = displayText(fieldValue(row, 'audio_license'))
   const photoLicense = displayText(fieldValue(row, 'photo_license'))
   const photoUrl = fieldValue(row, 'photo_url')

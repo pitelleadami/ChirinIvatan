@@ -7,7 +7,7 @@
   - reviewer/admin direct invitations
 */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import TurnstileWidget from '../components/TurnstileWidget'
 import { apiRequest } from '../lib/api'
@@ -65,6 +65,16 @@ const ROLE_OPTIONS = [
   },
 ]
 
+function prioritizeApplication(rows, applicationId) {
+  if (!applicationId) return rows
+  return [...rows].sort((a, b) => {
+    const aMatches = a.application_id === applicationId
+    const bMatches = b.application_id === applicationId
+    if (aMatches === bMatches) return 0
+    return aMatches ? -1 : 1
+  })
+}
+
 function formatDate(value) {
   if (!value) return '-'
   return new Date(value).toLocaleString()
@@ -114,6 +124,7 @@ export default function RoleCenterPage({ currentUser = {} }) {
   const [publicApplications, setPublicApplications] = useState([])
   const [statusLookupFeedback, setStatusLookupFeedback] = useState({ tone: '', text: '' })
   const [claimForms, setClaimForms] = useState({})
+  const [requestedApplicationId, setRequestedApplicationId] = useState('')
   const [invitationToken, setInvitationToken] = useState('')
   const [invitationDetails, setInvitationDetails] = useState(null)
   const [invitationClaimForm, setInvitationClaimForm] = useState({
@@ -174,6 +185,7 @@ export default function RoleCenterPage({ currentUser = {} }) {
         ? isContributorUser || isReviewerUser || isAdminUser
         : false
   const invitedRole = ROLE_OPTIONS.find((role) => role.value === invitationDetails?.role)
+  const focusedClaimApplicationRef = useRef('')
 
   function updateApplicantField(field, value) {
     setApplicantForm((current) => ({ ...current, [field]: value }))
@@ -491,10 +503,11 @@ export default function RoleCenterPage({ currentUser = {} }) {
   }
 
   const lookupPublicApplications = useCallback(
-    async (emailOverride = '') => {
+    async (emailOverride = '', applicationIdOverride = '') => {
       const email = String(emailOverride || statusEmail)
         .trim()
         .toLowerCase()
+      const applicationId = String(applicationIdOverride || requestedApplicationId).trim()
       setStatusLookupFeedback({ tone: '', text: '' })
       if (!email) {
         setStatusLookupFeedback({ tone: 'error', text: 'Enter the email address used in your application.' })
@@ -516,7 +529,7 @@ export default function RoleCenterPage({ currentUser = {} }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email }),
         })
-        const rows = payload.rows || []
+        const rows = prioritizeApplication(payload.rows || [], applicationId)
         setPublicApplications(rows)
         setSubmittedApplication(null)
         if (rows.length) {
@@ -540,7 +553,7 @@ export default function RoleCenterPage({ currentUser = {} }) {
         setLoading(false)
       }
     },
-    [statusEmail],
+    [requestedApplicationId, statusEmail],
   )
 
   async function claimRoleAccess(row) {
@@ -748,10 +761,30 @@ export default function RoleCenterPage({ currentUser = {} }) {
 
   useEffect(() => {
     if (isAuthenticated) return
-    const requestedStatusEmail = new URLSearchParams(window.location.search).get('status_email') || ''
+    const params = new URLSearchParams(window.location.search)
+    const requestedStatusEmail = params.get('status_email') || ''
+    const requestedApplication = params.get('application') || ''
     if (!requestedStatusEmail) return
-    lookupPublicApplications(requestedStatusEmail)
+    setRequestedApplicationId(requestedApplication)
+    lookupPublicApplications(requestedStatusEmail, requestedApplication)
   }, [isAuthenticated, lookupPublicApplications])
+
+  useEffect(() => {
+    if (!requestedApplicationId || !publicApplications.length) return
+    const requestedApplication = publicApplications.find(
+      (row) => row.application_id === requestedApplicationId && row.can_claim_credentials,
+    )
+    if (!requestedApplication || focusedClaimApplicationRef.current === requestedApplicationId) return
+
+    focusedClaimApplicationRef.current = requestedApplicationId
+    window.setTimeout(() => {
+      const claimPanel = document.getElementById(`claim-access-${requestedApplicationId}`)
+      if (!claimPanel) return
+      claimPanel.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      const usernameInput = document.getElementById(`claim-username-${requestedApplicationId}`)
+      usernameInput?.focus({ preventScroll: true })
+    }, 150)
+  }, [publicApplications, requestedApplicationId])
 
   useEffect(() => {
     setApplicantPolicyAccepted(false)
@@ -1477,7 +1510,13 @@ export default function RoleCenterPage({ currentUser = {} }) {
             {!isAuthenticated && publicApplications.length > 0 && (
               <div className="role-application-list role-public-status-list">
                 {publicApplications.map((row) => (
-                  <article key={row.application_id} className="role-application-card">
+                  <article
+                    key={row.application_id}
+                    id={`role-application-${row.application_id}`}
+                    className={`role-application-card${
+                      row.application_id === requestedApplicationId ? ' role-application-card-target' : ''
+                    }`}
+                  >
                     <div className="queue-header">
                       <strong>{roleLabel(row.target_role)}</strong>
                       <span className={`badge status-${row.status}`}>{publicStatusLabel(row)}</span>
@@ -1487,7 +1526,10 @@ export default function RoleCenterPage({ currentUser = {} }) {
                     <p className="meta">Submitted {formatDate(row.created_at)}</p>
                     {row.decided_at && <p className="meta">Decided {formatDate(row.decided_at)}</p>}
                     {row.can_claim_credentials && (
-                      <div className="role-claim-access">
+                      <div className="role-claim-access" id={`claim-access-${row.application_id}`}>
+                        <p className="inline-ok role-claim-access-prompt">
+                          Complete your account setup here by creating your username and password.
+                        </p>
                         <div className="field-grid">
                           <label className="field" htmlFor={`claim-username-${row.application_id}`}>
                             <span>Create Username</span>

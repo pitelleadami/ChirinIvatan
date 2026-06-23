@@ -56,7 +56,22 @@ export async function copyShareText({ text = '', url = '' }) {
     await navigator.clipboard.writeText(payload)
     return true
   } catch {
-    return false
+    const textarea = document.createElement('textarea')
+    textarea.value = payload
+    textarea.setAttribute('readonly', '')
+    textarea.style.position = 'fixed'
+    textarea.style.top = '0'
+    textarea.style.left = '-9999px'
+    document.body.appendChild(textarea)
+    textarea.select()
+    textarea.setSelectionRange(0, textarea.value.length)
+    try {
+      return document.execCommand('copy')
+    } catch {
+      return false
+    } finally {
+      document.body.removeChild(textarea)
+    }
   }
 }
 

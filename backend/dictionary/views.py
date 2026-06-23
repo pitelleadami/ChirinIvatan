@@ -824,11 +824,15 @@ def _serialize_attribution(entry: Entry):
         },
         "audio": {
             "contributed_by": audio_contributor,
+            "contributed_by_actor": _public_actor(entry.audio_contributor),
+            "is_self_recorded": entry.audio_source_is_self_recorded,
             "source": "" if entry.audio_source_is_self_recorded else entry.audio_source,
             "license": entry.audio_license if entry.audio_source_is_self_recorded else "",
         },
         "photo": {
             "contributed_by": photo_contributor,
+            "contributed_by_actor": _public_actor(semantic_entry.photo_contributor),
+            "is_contributor_owned": semantic_entry.photo_source_is_contributor_owned,
             "source": (
                 ""
                 if semantic_entry.photo_source_is_contributor_owned

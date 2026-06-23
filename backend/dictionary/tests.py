@@ -772,9 +772,13 @@ class DictionaryEntryDetailApiTests(TestCase):
         self.assertEqual(attribution["term"]["initially_contributed_by"], "api_contrib")
         self.assertEqual(attribution["term"]["source_text"], "")
         self.assertEqual(attribution["audio"]["source"], "")
+        self.assertTrue(attribution["audio"]["is_self_recorded"])
         self.assertIsNone(attribution["audio"]["contributed_by"])
+        self.assertEqual(attribution["audio"]["contributed_by_actor"]["username"], "api_contrib")
         self.assertEqual(attribution["photo"]["source"], "")
+        self.assertTrue(attribution["photo"]["is_contributor_owned"])
         self.assertEqual(attribution["photo"]["contributed_by"], "api_contrib")
+        self.assertEqual(attribution["photo"]["contributed_by_actor"]["username"], "api_contrib")
 
 
 class DictionaryRevisionApiTests(TestCase):
