@@ -3479,7 +3479,7 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
                         />
                       </label>
                       <label className="field" htmlFor="consultant-post-nominals">
-                        <span>Post-nominals / honorifics</span>
+                        <span>Credentials</span>
                         <input
                           id="consultant-post-nominals"
                           value={consultantProfile.post_nominals}

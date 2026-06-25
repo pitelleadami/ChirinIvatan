@@ -925,6 +925,42 @@ class SiteContentApiTests(TestCase):
         self.assertNotIn(unactivated_contributor.username, rows)
         self.assertNotIn(hidden_admin.username, rows)
 
+    def test_yaru_members_collapses_duplicate_first_and_last_name(self):
+        contributor_group, _ = Group.objects.get_or_create(name="Contributor")
+        user = User.objects.create_user(
+            username="duplicate_name",
+            password="testpass123",
+            first_name="Kyle de Guzman",
+            last_name="Kyle de Guzman",
+        )
+        user.groups.add(contributor_group)
+        UserProfile.objects.get_or_create(user=user)
+
+        response = self.client.get("/api/yaru/members")
+
+        self.assertEqual(response.status_code, 200)
+        rows = {row["username"]: row for row in response.json()["rows"]}
+        self.assertEqual(rows["duplicate_name"]["display_name"], "Kyle de Guzman")
+
+    def test_yaru_members_ignores_duplicate_name_extension(self):
+        contributor_group, _ = Group.objects.get_or_create(name="Contributor")
+        user = User.objects.create_user(
+            username="duplicate_extension",
+            password="testpass123",
+            first_name="Kyle",
+            last_name="de Guzman",
+        )
+        user.groups.add(contributor_group)
+        profile, _ = UserProfile.objects.get_or_create(user=user)
+        profile.name_extension = "Kyle de Guzman"
+        profile.save(update_fields=["name_extension"])
+
+        response = self.client.get("/api/yaru/members")
+
+        self.assertEqual(response.status_code, 200)
+        rows = {row["username"]: row for row in response.json()["rows"]}
+        self.assertEqual(rows["duplicate_extension"]["display_name"], "Kyle de Guzman")
+
 
 class RoleOnboardingFlowTests(TestCase):
     def setUp(self):

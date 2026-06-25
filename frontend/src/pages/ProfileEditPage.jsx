@@ -6,6 +6,7 @@ import { prepareImageUpload } from '../lib/imageUpload'
 import { ROUTES, navigate } from '../lib/router'
 
 const MUNICIPALITIES = ['Basco', 'Mahatao', 'Ivana', 'Uyugan', 'Sabtang', 'Itbayat']
+const SUFFIX_OPTIONS = ['', 'Jr.', 'Sr.', 'II', 'III', 'IV']
 const EMPTY_CULTURAL_AFFILIATION = { role: '', organization: '' }
 const EMPTY_OTHER_AFFILIATION = { designation: '', institution: '' }
 
@@ -26,6 +27,45 @@ const EMPTY_FORM = {
 
 function rowsForEdit(rows, emptyRow) {
   return Array.isArray(rows) && rows.length ? rows : [{ ...emptyRow }]
+}
+
+function suffixSelectValue(value) {
+  const suffix = String(value || '').trim()
+  if (!suffix) return ''
+  return SUFFIX_OPTIONS.includes(suffix) ? suffix : 'Other'
+}
+
+function SuffixField({ id, value, onChange }) {
+  const [otherSelected, setOtherSelected] = useState(false)
+  const selectValue = otherSelected ? 'Other' : suffixSelectValue(value)
+
+  function handleSelectChange(event) {
+    const nextValue = event.target.value
+    if (nextValue === 'Other') {
+      setOtherSelected(true)
+      if (SUFFIX_OPTIONS.includes(String(value || '').trim())) onChange('')
+      return
+    }
+    setOtherSelected(false)
+    onChange(nextValue)
+  }
+
+  return (
+    <>
+      <select id={id} value={selectValue} onChange={handleSelectChange}>
+        <option value="">None</option>
+        {SUFFIX_OPTIONS.filter(Boolean).map((suffix) => (
+          <option key={suffix} value={suffix}>
+            {suffix}
+          </option>
+        ))}
+        <option value="Other">Other</option>
+      </select>
+      {selectValue === 'Other' && (
+        <input value={value} onChange={(event) => onChange(event.target.value)} placeholder="Enter suffix" />
+      )}
+    </>
+  )
 }
 
 export default function ProfileEditPage({ currentUser, onAuthChange }) {
@@ -329,17 +369,16 @@ export default function ProfileEditPage({ currentUser, onAuthChange }) {
                   </label>
 
                   <label className="field" htmlFor="profile-name-extension">
-                    <span>Name extension</span>
-                    <input
+                    <span>Suffix</span>
+                    <SuffixField
                       id="profile-name-extension"
                       value={form.name_extension}
-                      onChange={(event) => setField('name_extension', event.target.value)}
-                      placeholder="e.g., Jr., Sr., III"
+                      onChange={(value) => setField('name_extension', value)}
                     />
                   </label>
 
                   <label className="field" htmlFor="profile-post-nominals">
-                    <span>Post-nominals</span>
+                    <span>Credentials</span>
                     <input
                       id="profile-post-nominals"
                       value={form.post_nominals}

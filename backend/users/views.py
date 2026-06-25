@@ -57,12 +57,13 @@ from users.models import (
     UserSessionEvent,
 )
 from users.names import (
-    display_name as formatted_display_name,
-)
-from users.names import (
+    clean_name_extension,
     normalize_affiliation_text,
     normalize_person_name,
     normalize_username,
+)
+from users.names import (
+    display_name as formatted_display_name,
 )
 from users.notifications import notify
 from users.recognition import (
@@ -1485,7 +1486,13 @@ def my_profile_view(request):
             status=500,
         )
 
-    for field in ["name_extension", "post_nominals", "municipality", "bio"]:
+    if "name_extension" in payload:
+        profile.name_extension = clean_name_extension(
+            user.first_name,
+            user.last_name,
+            payload.get("name_extension"),
+        )
+    for field in ["post_nominals", "municipality", "bio"]:
         if field in payload:
             setattr(profile, field, (payload.get(field) or "").strip())
     for field in ["affiliation", "occupation"]:
@@ -2319,7 +2326,11 @@ def _unique_username(seed):
 def _applicant_from_public_payload(payload):
     first_name = normalize_person_name(payload.get("first_name", ""))
     last_name = normalize_person_name(payload.get("last_name", ""))
-    name_extension = str(payload.get("name_extension", "")).strip()
+    name_extension = clean_name_extension(
+        first_name,
+        last_name,
+        payload.get("name_extension", ""),
+    )
     email = _clean_email(payload.get("email", ""))
     municipality = str(payload.get("municipality", "")).strip()
     affiliation = normalize_affiliation_text(payload.get("affiliation", ""))

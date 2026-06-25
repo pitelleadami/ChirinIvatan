@@ -28,11 +28,12 @@ from users.models import (
     UserProfile,
 )
 from users.names import (
-    display_name as formatted_display_name,
-)
-from users.names import (
+    clean_name_extension,
     normalize_affiliation_text,
     normalize_person_name,
+)
+from users.names import (
+    display_name as formatted_display_name,
 )
 
 User = get_user_model()
@@ -370,13 +371,16 @@ def create_email_role_invitation(
         status=RoleInvitation.Status.PENDING,
     ).update(status=RoleInvitation.Status.REPLACED)
 
+    first_name = normalize_person_name(first_name)
+    last_name = normalize_person_name(last_name)
+
     return RoleInvitation.objects.create(
         email=normalized_email,
         role=role,
         invited_by=inviter,
-        first_name=normalize_person_name(first_name),
-        last_name=normalize_person_name(last_name),
-        name_extension=str(name_extension or "").strip(),
+        first_name=first_name,
+        last_name=last_name,
+        name_extension=clean_name_extension(first_name, last_name, name_extension),
         municipality=str(municipality or "").strip(),
         notes=notes or "",
         expires_at=timezone.now()
@@ -424,7 +428,7 @@ def create_consultant_profile(
     user.save(update_fields=["password"])
 
     profile, _ = UserProfile.objects.get_or_create(user=user)
-    profile.name_extension = str(name_extension or "").strip()
+    profile.name_extension = clean_name_extension(first_name, last_name, name_extension)
     profile.municipality = str(municipality or "").strip()
     profile.post_nominals = str(post_nominals or "").strip()
     profile.cultural_affiliations = [
@@ -527,7 +531,7 @@ def update_managed_consultant_profile(
     user.save(update_fields=["first_name", "last_name", "email"])
 
     profile, _ = UserProfile.objects.get_or_create(user=user)
-    profile.name_extension = str(name_extension or "").strip()
+    profile.name_extension = clean_name_extension(first_name, last_name, name_extension)
     profile.municipality = str(municipality or "").strip()
     profile.post_nominals = str(post_nominals or "").strip()
     profile.cultural_affiliations = [
@@ -625,9 +629,11 @@ def accept_email_role_invitation(
     last_name = normalize_person_name(
         last_name or invitation.last_name or (user.last_name if user else "")
     )
-    name_extension = str(
-        name_extension or invitation.name_extension or existing_name_extension
-    ).strip()
+    name_extension = clean_name_extension(
+        first_name,
+        last_name,
+        name_extension or invitation.name_extension or existing_name_extension,
+    )
     municipality = str(municipality or invitation.municipality or existing_municipality).strip()
     username = str(username or "").strip().lower()
     if not first_name or not last_name or not municipality:

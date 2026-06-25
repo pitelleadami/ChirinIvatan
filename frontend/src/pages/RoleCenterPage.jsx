@@ -35,6 +35,7 @@ function PasswordEyeIcon({ visible }) {
 }
 
 const MUNICIPALITIES = ['Basco', 'Mahatao', 'Ivana', 'Uyugan', 'Sabtang', 'Itbayat']
+const SUFFIX_OPTIONS = ['', 'Jr.', 'Sr.', 'II', 'III', 'IV']
 const EMPTY_CULTURAL_AFFILIATION = { role: '', organization: '' }
 const EMPTY_OTHER_AFFILIATION = { designation: '', institution: '' }
 const USERNAME_PATTERN = /^[\w.@+-]+$/
@@ -85,6 +86,45 @@ function roleLabel(value) {
   if (value === 'admin') return 'Admin'
   if (value === 'consultant') return 'Consultant'
   return value === 'reviewer' ? 'Reviewer' : 'Contributor'
+}
+
+function suffixSelectValue(value) {
+  const suffix = String(value || '').trim()
+  if (!suffix) return ''
+  return SUFFIX_OPTIONS.includes(suffix) ? suffix : 'Other'
+}
+
+function SuffixField({ id, value, onChange }) {
+  const [otherSelected, setOtherSelected] = useState(false)
+  const selectValue = otherSelected ? 'Other' : suffixSelectValue(value)
+
+  function handleSelectChange(event) {
+    const nextValue = event.target.value
+    if (nextValue === 'Other') {
+      setOtherSelected(true)
+      if (SUFFIX_OPTIONS.includes(String(value || '').trim())) onChange('')
+      return
+    }
+    setOtherSelected(false)
+    onChange(nextValue)
+  }
+
+  return (
+    <>
+      <select id={id} value={selectValue} onChange={handleSelectChange}>
+        <option value="">None</option>
+        {SUFFIX_OPTIONS.filter(Boolean).map((suffix) => (
+          <option key={suffix} value={suffix}>
+            {suffix}
+          </option>
+        ))}
+        <option value="Other">Other</option>
+      </select>
+      {selectValue === 'Other' && (
+        <input value={value} onChange={(event) => onChange(event.target.value)} placeholder="Enter suffix" />
+      )}
+    </>
+  )
 }
 
 function applicationHelp(row) {
@@ -1058,12 +1098,11 @@ export default function RoleCenterPage({ currentUser = {} }) {
                   />
                 </label>
                 <label className="field" htmlFor="invite-claim-name-extension">
-                  <span>Name Extension</span>
-                  <input
+                  <span>Suffix</span>
+                  <SuffixField
                     id="invite-claim-name-extension"
                     value={invitationClaimForm.name_extension}
-                    onChange={(event) => updateInvitationClaimField('name_extension', event.target.value)}
-                    placeholder="e.g., Jr., Sr., III"
+                    onChange={(value) => updateInvitationClaimField('name_extension', value)}
                   />
                 </label>
                 <label className="field" htmlFor="invite-claim-username">
@@ -1284,12 +1323,11 @@ export default function RoleCenterPage({ currentUser = {} }) {
                     />
                   </label>
                   <label className="field" htmlFor="role-name-extension">
-                    <span>Name Extension</span>
-                    <input
+                    <span>Suffix</span>
+                    <SuffixField
                       id="role-name-extension"
                       value={applicantForm.name_extension}
-                      onChange={(event) => updateApplicantField('name_extension', event.target.value)}
-                      placeholder="e.g., Jr., Sr., III"
+                      onChange={(value) => updateApplicantField('name_extension', value)}
                     />
                   </label>
                 </div>
