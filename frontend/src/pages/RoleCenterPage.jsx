@@ -123,7 +123,9 @@ export default function RoleCenterPage({ currentUser = {} }) {
   const [statusEmail, setStatusEmail] = useState('')
   const [publicApplications, setPublicApplications] = useState([])
   const [statusLookupFeedback, setStatusLookupFeedback] = useState({ tone: '', text: '' })
+  const [applicationConflictAction, setApplicationConflictAction] = useState('')
   const [claimForms, setClaimForms] = useState({})
+  const [resendingActivationId, setResendingActivationId] = useState('')
   const [requestedApplicationId, setRequestedApplicationId] = useState('')
   const [invitationToken, setInvitationToken] = useState('')
   const [invitationDetails, setInvitationDetails] = useState(null)
@@ -453,7 +455,20 @@ export default function RoleCenterPage({ currentUser = {} }) {
         setStatusEmail(applicantForm.email)
         setPublicApplications([payload])
         setSubmittedApplication(payload)
+        setApplicationConflictAction('')
       } catch (requestError) {
+        const responseBody = requestError.body || {}
+        if (responseBody.code === 'email_already_used') {
+          const rows = responseBody.rows || []
+          setStatusEmail(applicantForm.email)
+          setPublicApplications(rows)
+          setSubmittedApplication(null)
+          setApplicationConflictAction(responseBody.action || '')
+          setStatusLookupFeedback({
+            tone: responseBody.action === 'login' ? 'neutral' : 'ok',
+            text: requestError.message || 'This email is already connected to an application or account.',
+          })
+        }
         const detail = requestError.message || 'Application could not be submitted.'
         setApplicantFormError(detail)
         setApplicantMissingFields(detail.toLowerCase().includes('email') ? ['email'] : [])
@@ -492,6 +507,7 @@ export default function RoleCenterPage({ currentUser = {} }) {
         setStatusEmail(applicantForm.email)
         setPublicApplications([payload])
       }
+      setApplicationConflictAction('')
       setSubmittedApplication(payload)
       setTurnstileToken('')
       if (isAuthenticated) {
@@ -532,6 +548,7 @@ export default function RoleCenterPage({ currentUser = {} }) {
         const rows = prioritizeApplication(payload.rows || [], applicationId)
         setPublicApplications(rows)
         setSubmittedApplication(null)
+        setApplicationConflictAction('')
         if (rows.length) {
           setStatusLookupFeedback({
             tone: 'ok',
@@ -555,6 +572,50 @@ export default function RoleCenterPage({ currentUser = {} }) {
     },
     [requestedApplicationId, statusEmail],
   )
+
+  async function resendActivationEmail(row) {
+    const email = statusEmail.trim().toLowerCase()
+    if (!email) {
+      setStatusLookupFeedback({
+        tone: 'error',
+        text: 'Enter the same application email address before resending activation.',
+      })
+      return
+    }
+    const emailError = emailValidationMessage(email)
+    if (emailError) {
+      setStatusLookupFeedback({ tone: 'error', text: emailError })
+      return
+    }
+
+    setResendingActivationId(row.application_id)
+    setError('')
+    try {
+      const payload = await apiRequest('/api/users/role-applications/resend-activation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, application_id: row.application_id }),
+      })
+      setPublicApplications((current) =>
+        current.map((application) =>
+          application.application_id === row.application_id
+            ? payload.application || application
+            : application,
+        ),
+      )
+      setStatusLookupFeedback({
+        tone: 'ok',
+        text: payload.detail || 'Activation email sent. Please check your inbox and spam folder.',
+      })
+    } catch (requestError) {
+      setStatusLookupFeedback({
+        tone: 'error',
+        text: requestError.message || 'Could not resend activation right now. Please try again.',
+      })
+    } finally {
+      setResendingActivationId('')
+    }
+  }
 
   async function claimRoleAccess(row) {
     const email = statusEmail.trim().toLowerCase()
@@ -1503,6 +1564,11 @@ export default function RoleCenterPage({ currentUser = {} }) {
                   <button type="submit" disabled={loading}>
                     Check Status
                   </button>
+                  {applicationConflictAction === 'login' && (
+                    <button type="button" className="ghost" onClick={() => navigate(ROUTES.login)}>
+                      Go to Login
+                    </button>
+                  )}
                 </div>
               </form>
             )}
@@ -1577,6 +1643,15 @@ export default function RoleCenterPage({ currentUser = {} }) {
                           </button>
                           <button className="ghost" disabled={loading} onClick={() => navigate(ROUTES.login)}>
                             Go to Login
+                          </button>
+                          <button
+                            className="ghost"
+                            disabled={loading || resendingActivationId === row.application_id}
+                            onClick={() => resendActivationEmail(row)}
+                          >
+                            {resendingActivationId === row.application_id
+                              ? 'Sending...'
+                              : 'Resend Activation Email'}
                           </button>
                         </div>
                       </div>

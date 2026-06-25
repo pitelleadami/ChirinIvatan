@@ -82,6 +82,7 @@ from users.role_onboarding import (
     invite_user_to_role,
     is_admin,
     is_reviewer,
+    role_application_duplicate_message,
     update_managed_consultant_profile,
 )
 
@@ -2381,6 +2382,29 @@ def _applicant_from_public_payload(payload):
     return user, created
 
 
+def _public_application_duplicate_payload(*, user, target_role, message):
+    action = "check_status"
+    if user.has_usable_password():
+        action = "login"
+    elif user.role_applications.filter(status=RoleApplication.Status.APPROVED).exists():
+        action = "activate"
+    elif user.role_applications.filter(status=RoleApplication.Status.PENDING).exists():
+        action = "pending"
+
+    rows = (
+        RoleApplication.objects.filter(applicant=user)
+        .prefetch_related("decisions")
+        .order_by("-created_at")
+    )
+    return {
+        "detail": message,
+        "code": "email_already_used",
+        "action": action,
+        "target_role": target_role,
+        "rows": [_serialize_public_role_application_status(application) for application in rows],
+    }
+
+
 @require_GET
 def public_user_profile_view(request, username):
     user = User.objects.filter(username__iexact=username).first()
@@ -2613,12 +2637,30 @@ def create_role_application_view(request):
             applicant = request.user
             created_applicant = False
         else:
+            email = _clean_email(payload.get("email", ""))
+            existing_applicant = User.objects.filter(email__iexact=email).first()
+            if existing_applicant:
+                duplicate_message = role_application_duplicate_message(
+                    applicant=existing_applicant,
+                    target_role=target_role,
+                    public=True,
+                )
+                if duplicate_message:
+                    return JsonResponse(
+                        _public_application_duplicate_payload(
+                            user=existing_applicant,
+                            target_role=target_role,
+                            message=duplicate_message,
+                        ),
+                        status=409,
+                    )
             applicant, created_applicant = _applicant_from_public_payload(payload)
 
         application = create_role_application(
             applicant=applicant,
             target_role=target_role,
             reviewer_reason=payload.get("reviewer_reason", ""),
+            public=not request.user.is_authenticated,
         )
     except ValidationError as exc:
         return JsonResponse({"detail": _validation_detail(exc)}, status=400)
@@ -2660,6 +2702,66 @@ def public_role_application_status_view(request):
     )
     return JsonResponse(
         {"rows": [_serialize_public_role_application_status(application) for application in rows]}
+    )
+
+
+@require_http_methods(["POST"])
+def public_role_application_resend_activation_view(request):
+    payload, parse_error = _parse_json_body(request)
+    if parse_error:
+        return parse_error
+
+    try:
+        email = _clean_email(payload.get("email", ""))
+    except ValidationError as exc:
+        return JsonResponse({"detail": _validation_detail(exc)}, status=400)
+    application_id = str(payload.get("application_id", "")).strip()
+    if not email or not application_id:
+        return JsonResponse(
+            {"detail": "Email address and application reference are required."},
+            status=400,
+        )
+
+    application = (
+        RoleApplication.objects.select_related("applicant")
+        .filter(
+            id=application_id,
+            applicant__email__iexact=email,
+            status=RoleApplication.Status.APPROVED,
+        )
+        .first()
+    )
+    if not application:
+        return JsonResponse(
+            {"detail": "Approved application reference not found for this email."},
+            status=404,
+        )
+    if application.applicant.has_usable_password():
+        return JsonResponse(
+            {"detail": "This account has already been activated. Please log in instead."},
+            status=400,
+        )
+
+    onboarding_record = (
+        application.onboarding_records.prefetch_related(
+            "approved_by_reviewers", "approved_by_admins"
+        )
+        .order_by("-created_at")
+        .first()
+    )
+    try:
+        _send_role_application_approval_email(application, onboarding_record, reminder=True)
+    except Exception as exc:
+        return JsonResponse(
+            {"detail": ("Activation email was not sent. " f"{type(exc).__name__}: {exc}")},
+            status=500,
+        )
+
+    return JsonResponse(
+        {
+            "detail": "Activation email sent. Please check your inbox and spam folder.",
+            "application": _serialize_public_role_application_status(application),
+        }
     )
 
 

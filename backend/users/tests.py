@@ -1765,9 +1765,173 @@ class RoleOnboardingFlowTests(TestCase):
         )
 
         self.assertEqual(first.status_code, 201)
-        self.assertEqual(second.status_code, 400)
+        self.assertEqual(second.status_code, 409)
         self.assertIn("already has a pending contributor application", second.json()["detail"])
+        self.assertEqual(second.json()["action"], "pending")
+        self.assertEqual(len(second.json()["rows"]), 1)
         self.assertNotIn("below", second.json()["detail"].lower())
+
+    def test_public_role_application_blocks_second_role_while_email_is_pending(self):
+        payload = {
+            "first_name": "Pending",
+            "last_name": "Applicant",
+            "email": "cross-role-pending@example.com",
+            "municipality": "Basco",
+        }
+        first = self.client.post(
+            "/api/users/role-applications",
+            data=json.dumps({"target_role": "contributor", **payload, **valid_captcha_payload()}),
+            content_type="application/json",
+        )
+        second = self.client.post(
+            "/api/users/role-applications",
+            data=json.dumps(
+                {
+                    "target_role": "reviewer",
+                    "reviewer_reason": "I can help review entries.",
+                    **payload,
+                    **valid_captcha_payload(),
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 409)
+        self.assertIn("already has an application under review", second.json()["detail"])
+        self.assertEqual(second.json()["action"], "pending")
+
+    def test_public_role_application_blocks_active_account_email(self):
+        User.objects.create_user(
+            username="active.email",
+            email="active@example.com",
+            password="testpass123",
+        )
+        response = self.client.post(
+            "/api/users/role-applications",
+            data=json.dumps(
+                {
+                    "target_role": "contributor",
+                    "first_name": "Active",
+                    "last_name": "User",
+                    "email": "active@example.com",
+                    "municipality": "Basco",
+                    **valid_captcha_payload(),
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["action"], "login")
+        self.assertIn("Please log in", response.json()["detail"])
+
+    def test_public_role_application_blocks_approved_unclaimed_email(self):
+        awaiting_user = User.objects.create_user(
+            username="approved.unclaimed",
+            email="approved-unclaimed@example.com",
+            first_name="Approved",
+            last_name="Unclaimed",
+            is_active=False,
+        )
+        awaiting_user.set_unusable_password()
+        awaiting_user.save(update_fields=["password"])
+        RoleApplication.objects.create(
+            applicant=awaiting_user,
+            target_role=RoleApplication.TargetRole.CONTRIBUTOR,
+            status=RoleApplication.Status.APPROVED,
+        )
+
+        response = self.client.post(
+            "/api/users/role-applications",
+            data=json.dumps(
+                {
+                    "target_role": "contributor",
+                    "first_name": "Approved",
+                    "last_name": "Unclaimed",
+                    "email": "approved-unclaimed@example.com",
+                    "municipality": "Basco",
+                    **valid_captcha_payload(),
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["action"], "activate")
+        self.assertIn("already approved", response.json()["detail"])
+
+    def test_public_role_application_allows_rejected_email_to_reapply(self):
+        rejected_user = User.objects.create_user(
+            username="rejected.reapply",
+            email="reapply@example.com",
+        )
+        rejected_user.set_unusable_password()
+        rejected_user.save(update_fields=["password"])
+        RoleApplication.objects.create(
+            applicant=rejected_user,
+            target_role=RoleApplication.TargetRole.CONTRIBUTOR,
+            status=RoleApplication.Status.REJECTED,
+        )
+
+        response = self.client.post(
+            "/api/users/role-applications",
+            data=json.dumps(
+                {
+                    "target_role": "contributor",
+                    "first_name": "Rejected",
+                    "last_name": "Applicant",
+                    "email": "reapply@example.com",
+                    "municipality": "Basco",
+                    **valid_captcha_payload(),
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(
+            RoleApplication.objects.filter(applicant=rejected_user).count(),
+            2,
+        )
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        FRONTEND_BASE_URL="https://chirinivatan.test",
+        DEFAULT_FROM_EMAIL="Chirin Ivatan <noreply@chirinivatan.test>",
+    )
+    def test_public_can_resend_activation_email_for_approved_unclaimed_application(self):
+        awaiting_user = User.objects.create_user(
+            username="public.awaiting.resend",
+            email="public-resend@example.com",
+            first_name="Public",
+            last_name="Resend",
+            is_active=False,
+        )
+        awaiting_user.set_unusable_password()
+        awaiting_user.save(update_fields=["password"])
+        application = RoleApplication.objects.create(
+            applicant=awaiting_user,
+            target_role=RoleApplication.TargetRole.CONTRIBUTOR,
+            status=RoleApplication.Status.APPROVED,
+        )
+
+        response = self.client.post(
+            "/api/users/role-applications/resend-activation",
+            data=json.dumps(
+                {
+                    "email": "public-resend@example.com",
+                    "application_id": str(application.id),
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Activation email sent", response.json()["detail"])
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].subject, "Complete your Chirin Ivatan account setup")
+        self.assertIn("status_email=public-resend%40example.com", mail.outbox[0].body)
 
     def test_admin_email_invitation_rejects_invalid_email(self):
         self.client.force_login(self.admin_user)

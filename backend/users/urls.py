@@ -47,6 +47,7 @@ from users.views import (
     notifications_mark_read_view,
     public_accept_role_invitation_view,
     public_claim_role_access_view,
+    public_role_application_resend_activation_view,
     public_role_application_status_view,
     public_role_invitation_view,
     public_user_profile_view,
@@ -206,6 +207,11 @@ urlpatterns = [
         "api/users/role-applications/status",
         public_role_application_status_view,
         name="public_role_application_status",
+    ),
+    path(
+        "api/users/role-applications/resend-activation",
+        public_role_application_resend_activation_view,
+        name="public_role_application_resend_activation",
     ),
     path(
         "api/users/role-applications/claim-access",
