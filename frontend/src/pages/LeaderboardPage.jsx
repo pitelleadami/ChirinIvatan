@@ -23,8 +23,8 @@ const PERIOD_OPTIONS = ['monthly', 'all_time']
 const MUNICIPALITIES = ['All', 'Basco', 'Mahatao', 'Ivana', 'Uyugan', 'Sabtang', 'Itbayat']
 const RANKED_MUNICIPALITIES = MUNICIPALITIES.filter((item) => item !== 'All')
 const EMPTY_ARCHIVE_COUNTS = {
-  dictionaryApproved: 0,
-  folkloreApproved: 0,
+  dictionaryLive: 0,
+  folkloreLive: 0,
 }
 
 function toNumber(value) {
@@ -1064,8 +1064,8 @@ Honoring the heritage entrusted to us by those who came before. Join us in this 
         apiRequest('/api/folklore/entries'),
       ])
       setArchiveCounts({
-        dictionaryApproved: dictionaryPayload.counts?.approved ?? 0,
-        folkloreApproved: folklorePayload.counts?.approved ?? 0,
+        dictionaryLive: dictionaryPayload.counts?.visible_total ?? dictionaryPayload.counts?.approved ?? 0,
+        folkloreLive: folklorePayload.counts?.visible_total ?? folklorePayload.counts?.approved ?? 0,
       })
     } catch {
       setArchiveCounts(EMPTY_ARCHIVE_COUNTS)
@@ -1128,11 +1128,11 @@ Honoring the heritage entrusted to us by those who came before. Join us in this 
         <article className="archive-count-card archive-count-inline">
           <div className="archive-count-grid">
             <div>
-              <p className="stat-value">{archiveCounts.dictionaryApproved}</p>
+              <p className="stat-value">{archiveCounts.dictionaryLive}</p>
               <p className="stat-label">Dictionary Terms</p>
             </div>
             <div>
-              <p className="stat-value">{archiveCounts.folkloreApproved}</p>
+              <p className="stat-value">{archiveCounts.folkloreLive}</p>
               <p className="stat-label">Folklore Entries</p>
             </div>
           </div>

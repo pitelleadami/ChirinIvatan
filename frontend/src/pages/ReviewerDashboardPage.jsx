@@ -117,7 +117,13 @@ export default function ReviewerDashboardPage({ currentUser, refreshToken = 0 })
     return notesByRevisionId[revisionId] || ''
   }
 
-  async function submitDecision({ kind, revisionId, decision }) {
+  async function submitDecision({
+    kind,
+    revisionId,
+    decision,
+    assignedToUsername = '',
+    sourceRevisionId = '',
+  }) {
     // Backend requires notes for reject/flag, so enforce early in UI.
     const notes = getNotes(revisionId).trim()
     setRowErrorByRevisionId((prev) => ({ ...prev, [revisionId]: '' }))
@@ -125,6 +131,20 @@ export default function ReviewerDashboardPage({ currentUser, refreshToken = 0 })
       setRowErrorByRevisionId((prev) => ({
         ...prev,
         [revisionId]: 'Reject and flag require notes.',
+      }))
+      return
+    }
+    if (decision === 'return' && !notes) {
+      setRowErrorByRevisionId((prev) => ({
+        ...prev,
+        [revisionId]: 'Fix instructions are required.',
+      }))
+      return
+    }
+    if (decision === 'return' && !sourceRevisionId) {
+      setRowErrorByRevisionId((prev) => ({
+        ...prev,
+        [revisionId]: 'Choose the approved version that needs fixing.',
       }))
       return
     }
@@ -147,6 +167,8 @@ export default function ReviewerDashboardPage({ currentUser, refreshToken = 0 })
           revision_id: revisionId,
           decision,
           notes,
+          assigned_to_username: assignedToUsername,
+          source_revision_id: sourceRevisionId,
         }),
       })
       setRowResultByRevisionId((prev) => ({

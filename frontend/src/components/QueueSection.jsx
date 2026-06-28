@@ -89,6 +89,11 @@ function canOpenLiveEntry(row) {
   return ['approved', 'approved_under_review'].includes(row.entry_status)
 }
 
+function latestApprovedSnapshot(row) {
+  const snapshots = row.revision_log || []
+  return snapshots[snapshots.length - 1] || null
+}
+
 function normalizedDictionarySnapshotPreview(snapshot = {}) {
   return {
     meaning: snapshot.meaning || '',
@@ -530,8 +535,8 @@ export default function QueueSection({
   }
 
   function handleReturn({ revisionId, kind, row }) {
+    const latestSnapshot = latestApprovedSnapshot(row)
     if (!returnOpenById[revisionId]) {
-      const latestSnapshot = row.revision_log?.[row.revision_log.length - 1]
       setReturnSourceById((current) => ({
         ...current,
         [revisionId]: latestSnapshot?.revision_id || '',
@@ -543,12 +548,15 @@ export default function QueueSection({
       setReturnOpenById((current) => ({ ...current, [revisionId]: true }))
       return
     }
+    const sourceRevisionId = returnSourceById[revisionId] || latestSnapshot?.revision_id || ''
+    const assignedToUsername =
+      returnAssigneeById[revisionId] || latestSnapshot?.contributor_username || row.contributor_username || ''
     submitDecision({
       kind,
       revisionId,
       decision: 'return',
-      assignedToUsername: returnAssigneeById[revisionId] || '',
-      sourceRevisionId: returnSourceById[revisionId] || '',
+      assignedToUsername,
+      sourceRevisionId,
     })
   }
 
@@ -561,6 +569,13 @@ export default function QueueSection({
     const canApprove = mode !== 'published' && mode !== 'awaiting'
     const canReject = mode !== 'published' && mode !== 'awaiting'
     const canReturn = mode === 'rereview'
+    const defaultReturnSource = latestApprovedSnapshot(row)
+    const selectedReturnSourceId = returnSourceById[revisionId] || defaultReturnSource?.revision_id || ''
+    const selectedReturnAssignee =
+      returnAssigneeById[revisionId] ||
+      defaultReturnSource?.contributor_username ||
+      row.contributor_username ||
+      ''
     const canFlag = mode === 'published'
     const livePath = liveEntryPath(kind, row)
     const liveEntryAvailable = canOpenLiveEntry(row)
@@ -669,7 +684,7 @@ export default function QueueSection({
                 <span>Which approved version needs fixing?</span>
                 <select
                   id={`preview-return-source-${revisionId}`}
-                  value={returnSourceById[revisionId] || ''}
+                  value={selectedReturnSourceId}
                   onChange={(event) => {
                     const sourceId = event.target.value
                     const source = row.revision_log?.find((item) => item.revision_id === sourceId)
@@ -693,7 +708,7 @@ export default function QueueSection({
                 <span>Assign correction to</span>
                 <select
                   id={`preview-return-assignee-${revisionId}`}
-                  value={returnAssigneeById[revisionId] || ''}
+                  value={selectedReturnAssignee}
                   onChange={(event) =>
                     setReturnAssigneeById((current) => ({
                       ...current,
