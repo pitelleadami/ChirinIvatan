@@ -66,6 +66,7 @@ const VARIANT_TYPE_OPTIONS = [
   'Isamurungen',
   'Ivasayen',
   'Itbayaten',
+  'Other / Spelling Variant',
   OLD_HISTORICAL_VARIANT_TYPE,
   'Borrowed Form',
   'Newly Coined Term / Expression',
@@ -575,6 +576,26 @@ function normalizeVariantForForm(variant) {
         ? variant.audio_source_details
         : {},
   }
+}
+
+function normalizedVariantType(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+}
+
+function duplicateVariantTypeIndexes(variants) {
+  const typeCounts = variants.reduce((counts, variant) => {
+    const type = normalizedVariantType(variant.variant_type)
+    if (type) counts[type] = (counts[type] || 0) + 1
+    return counts
+  }, {})
+  return new Set(
+    variants
+      .map((variant, index) => ({ index, type: normalizedVariantType(variant.variant_type) }))
+      .filter(({ type }) => type && typeCounts[type] > 1)
+      .map(({ index }) => index),
+  )
 }
 
 function variantForPayload(variant, ownerLabel) {
@@ -1244,12 +1265,30 @@ export default function DictionaryDraftBuilderPage({ currentUser = {} }) {
         'English translation is required when an Ivatan example sentence is provided.'
     }
     form.variants.forEach((variant, index) => {
+      const normalizedTerm = normalizeHeadword(variant.term)
+      if (
+        normalizedTerm &&
+        form.variants.some(
+          (otherVariant, otherIndex) =>
+            otherIndex !== index &&
+            normalizeHeadword(otherVariant.term).toLowerCase() === normalizedTerm.toLowerCase(),
+        )
+      ) {
+        nextErrors[`variant-${index}-term`] = 'This variant headword is already listed.'
+      }
       if (
         String(variant.example_sentence || '').trim() &&
         !String(variant.example_translation || '').trim()
       ) {
         nextErrors[`variant-${index}-example_translation`] =
           'English translation is required for this Ivatan example.'
+      }
+    })
+    const duplicateTypeIndexes = duplicateVariantTypeIndexes(form.variants)
+    duplicateTypeIndexes.forEach((index) => {
+      if (!String(form.variants[index]?.usage_notes || '').trim()) {
+        nextErrors[`variant-${index}-usage_notes`] =
+          'Add a usage note when another variant uses the same type.'
       }
     })
     setFieldErrors(nextErrors)
@@ -1953,6 +1992,7 @@ export default function DictionaryDraftBuilderPage({ currentUser = {} }) {
     ['phonetic', form.phonetic],
   ].some(([field, value]) => showInEditableSection(field, value))
   const showVariantsEditor = showVariants && showInEditableSection('variants', form.variants)
+  const duplicateTypeVariantIndexes = duplicateVariantTypeIndexes(form.variants)
   const showInflectedFormsEditor =
     showInflectedForms && showInEditableSection('inflected_forms', inflectedFormsValue)
   const showUsageNotesEditor = showUsageNotes && showInEditableSection('usage_notes', form.usage_notes)
@@ -3442,8 +3482,17 @@ export default function DictionaryDraftBuilderPage({ currentUser = {} }) {
                             id={`variant-term-${index}`}
                             value={variant.term}
                             onBlur={() => setVariantField(index, 'term', normalizeHeadword(variant.term))}
+                            aria-invalid={Boolean(fieldErrors[`variant-${index}-term`])}
+                            aria-describedby={
+                              fieldErrors[`variant-${index}-term`] ? `variant-term-${index}-error` : undefined
+                            }
                             onChange={(event) => setVariantField(index, 'term', event.target.value)}
                           />
+                          {fieldErrors[`variant-${index}-term`] && (
+                            <p className="inline-error" id={`variant-term-${index}-error`}>
+                              {fieldErrors[`variant-${index}-term`]}
+                            </p>
+                          )}
                         </div>
                         <div className="field">
                           <label htmlFor={`variant-type-${index}`}>Variant Type</label>
@@ -3458,6 +3507,13 @@ export default function DictionaryDraftBuilderPage({ currentUser = {} }) {
                               </option>
                             ))}
                           </select>
+                          {duplicateTypeVariantIndexes.has(index) && (
+                            <p className="alert warning">
+                              This mother term already has a {variant.variant_type} variant. You may add
+                              another if it reflects a different spelling, pronunciation, place, or source.
+                              Please add a usage note.
+                            </p>
+                          )}
                         </div>
                       </div>
                       <div className="field-grid dictionary-variant-pronunciation-grid">
@@ -3646,8 +3702,19 @@ export default function DictionaryDraftBuilderPage({ currentUser = {} }) {
                             value={variant.usage_notes}
                             onChange={(event) => setVariantField(index, 'usage_notes', event.target.value)}
                             placeholder="Short note about use, meaning nuance, or origin."
+                            aria-invalid={Boolean(fieldErrors[`variant-${index}-usage_notes`])}
+                            aria-describedby={
+                              fieldErrors[`variant-${index}-usage_notes`]
+                                ? `variant-usage-${index}-error`
+                                : undefined
+                            }
                             rows={3}
                           />
+                          {fieldErrors[`variant-${index}-usage_notes`] && (
+                            <p className="inline-error" id={`variant-usage-${index}-error`}>
+                              {fieldErrors[`variant-${index}-usage_notes`]}
+                            </p>
+                          )}
                         </div>
                         {variant.variant_type === OLD_HISTORICAL_VARIANT_TYPE && (
                           <div className="field compact-field">

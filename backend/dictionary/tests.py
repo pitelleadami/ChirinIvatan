@@ -1097,6 +1097,52 @@ class DictionaryRevisionApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("Variant 1", response.json()["detail"])
 
+    def test_submit_rejects_duplicate_variant_headwords(self):
+        revision = EntryRevision.objects.create(
+            contributor=self.contributor,
+            proposed_data={
+                "term": "duplicate-variant-term",
+                "meaning": "has duplicate variant terms",
+                "term_source_is_self_knowledge": True,
+                "variants": [
+                    {"term": "same form", "variant_type": "Itbayaten"},
+                    {"term": "Same Form", "variant_type": "Other / Spelling Variant"},
+                ],
+            },
+            status=EntryRevision.Status.DRAFT,
+        )
+        self.client.force_login(self.contributor)
+
+        response = self.client.post(f"/api/dictionary/revisions/{revision.id}/submit")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("repeats the same headword", response.json()["detail"])
+
+    def test_submit_requires_usage_note_for_duplicate_variant_type(self):
+        revision = EntryRevision.objects.create(
+            contributor=self.contributor,
+            proposed_data={
+                "term": "duplicate-variant-type",
+                "meaning": "has duplicate variant types",
+                "term_source_is_self_knowledge": True,
+                "variants": [
+                    {
+                        "term": "first form",
+                        "variant_type": "Itbayaten",
+                        "usage_notes": "Used in one source context.",
+                    },
+                    {"term": "second form", "variant_type": "Itbayaten"},
+                ],
+            },
+            status=EntryRevision.Status.DRAFT,
+        )
+        self.client.force_login(self.contributor)
+
+        response = self.client.post(f"/api/dictionary/revisions/{revision.id}/submit")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("duplicate Itbayaten variant type", response.json()["detail"])
+
     def test_submit_requires_audio_source_when_audio_not_self_recorded(self):
         revision = EntryRevision.objects.create(
             contributor=self.contributor,
