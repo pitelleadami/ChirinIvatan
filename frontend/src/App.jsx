@@ -16,6 +16,7 @@ import LoginPage from './pages/LoginPage'
 import AboutProjectPage from './pages/AboutProjectPage'
 import YaruPage from './pages/YaruPage'
 import FaqPage from './pages/FaqPage'
+import ResourcesPage from './pages/ResourcesPage'
 import AdminApplicationsPage from './pages/AdminApplicationsPage'
 import DictionaryViewerPage from './pages/DictionaryViewerPage'
 import DictionaryDraftBuilderPage from './pages/DictionaryDraftBuilderPage'
@@ -417,6 +418,14 @@ export default function App() {
                               <button
                                 className="top-link-button"
                                 onClick={() =>
+                                  closeMenusAndNavigate(`${ROUTES.adminApplications}?tab=resources`)
+                                }
+                              >
+                                Resources
+                              </button>
+                              <button
+                                className="top-link-button"
+                                onClick={() =>
                                   closeMenusAndNavigate(`${ROUTES.adminApplications}?tab=contributions`)
                                 }
                               >
@@ -442,8 +451,44 @@ export default function App() {
                                 >
                                   Applications
                                 </button>
+                                <button
+                                  className="top-link-button"
+                                  onClick={() =>
+                                    closeMenusAndNavigate(`${ROUTES.adminApplications}?tab=resources`)
+                                  }
+                                >
+                                  Resources
+                                </button>
+                                <button
+                                  className="top-link-button"
+                                  onClick={() =>
+                                    closeMenusAndNavigate(`${ROUTES.adminApplications}?tab=contributions`)
+                                  }
+                                >
+                                  Contributions
+                                </button>
                               </>
                             )
+                          )}
+                          {!canUseReviewerTools && (
+                            <>
+                              <button
+                                className="top-link-button"
+                                onClick={() =>
+                                  closeMenusAndNavigate(`${ROUTES.adminApplications}?tab=resources`)
+                                }
+                              >
+                                Resources
+                              </button>
+                              <button
+                                className="top-link-button"
+                                onClick={() =>
+                                  closeMenusAndNavigate(`${ROUTES.adminApplications}?tab=contributions`)
+                                }
+                              >
+                                Contributions
+                              </button>
+                            </>
                           )}
                           <button
                             className="top-link-button"
@@ -531,6 +576,7 @@ export default function App() {
             )}
             {pathname === ROUTES.about && <AboutProjectPage />}
             {pathname === ROUTES.yaru && <YaruPage currentUser={currentUser} />}
+            {pathname === ROUTES.resources && <ResourcesPage currentUser={currentUser} />}
             {(pathname === ROUTES.faqs || pathname === ROUTES.manual) && (
               <FaqPage currentUser={currentUser} />
             )}
@@ -538,9 +584,9 @@ export default function App() {
               <AdminApplicationsPage currentUser={currentUser} onAuthChange={setCurrentUser} />
             )}
             {pathname === ROUTES.dictionaryView && <DictionaryViewerPage currentUser={currentUser} />}
-            {pathname === ROUTES.dictionaryDraft && <DictionaryDraftBuilderPage />}
+            {pathname === ROUTES.dictionaryDraft && <DictionaryDraftBuilderPage currentUser={currentUser} />}
             {pathname === ROUTES.folkloreView && <FolkloreViewerPage currentUser={currentUser} />}
-            {pathname === ROUTES.folkloreDraft && <FolkloreDraftBuilderPage />}
+            {pathname === ROUTES.folkloreDraft && <FolkloreDraftBuilderPage currentUser={currentUser} />}
             {pathname === ROUTES.profileView && <PublicProfilePage currentUser={currentUser} />}
             {pathname === ROUTES.profileEdit && (
               <ProfileEditPage currentUser={currentUser} onAuthChange={setCurrentUser} />

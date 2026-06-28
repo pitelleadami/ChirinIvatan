@@ -15,7 +15,7 @@ import { apiRequest } from '../lib/api'
 import { compactLeaderboardName } from '../lib/leaderboardDisplay'
 import { getMunicipalityFlag } from '../lib/municipalityFlags'
 import { ROUTES, navigate } from '../lib/router'
-import { copyShareText, downloadBlob } from '../lib/socialShare'
+import { copyShareText, downloadBlob, shareImageNative } from '../lib/socialShare'
 import logoSrc from '../assets/brand/chirin-ivatan-logo.png'
 
 const METRIC_OPTIONS = ['combined', 'dictionary', 'folklore']
@@ -23,8 +23,8 @@ const PERIOD_OPTIONS = ['monthly', 'all_time']
 const MUNICIPALITIES = ['All', 'Basco', 'Mahatao', 'Ivana', 'Uyugan', 'Sabtang', 'Itbayat']
 const RANKED_MUNICIPALITIES = MUNICIPALITIES.filter((item) => item !== 'All')
 const EMPTY_ARCHIVE_COUNTS = {
-  dictionaryApproved: 0,
-  folkloreApproved: 0,
+  dictionaryLive: 0,
+  folkloreLive: 0,
 }
 
 function toNumber(value) {
@@ -78,6 +78,37 @@ const STORY_H = 960 // 9:16 portrait → 1080×1920 at 2×
 const POST_W = 720
 const POST_H = 720 // 1:1 square → 2160×2160 at 3×
 
+function isPhoneShareDevice() {
+  if (typeof navigator === 'undefined') return false
+  const userAgent = navigator.userAgent || ''
+  const hasCoarsePointer = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches
+  return /iPhone|iPod|Android/i.test(userAgent) || (hasCoarsePointer && /Mobile|Safari/i.test(userAgent))
+}
+
+async function waitForCardImages(node) {
+  const images = Array.from(node?.querySelectorAll?.('img') || [])
+  await Promise.all(
+    images.map((image) => {
+      if (image.complete && image.naturalWidth > 0) return Promise.resolve()
+      return new Promise((resolve) => {
+        const finish = () => resolve()
+        const timeout = setTimeout(finish, 2500)
+        const done = () => {
+          clearTimeout(timeout)
+          finish()
+        }
+        if (image.complete) {
+          done()
+          return
+        }
+        image.addEventListener('load', done, { once: true })
+        image.addEventListener('error', done, { once: true })
+      })
+    }),
+  )
+  await Promise.all(images.map((image) => image.decode?.().catch(() => undefined) || Promise.resolve()))
+}
+
 // Podium colors — warm accents against the site's light sage base
 const PODIUM = {
   1: { block: '#c8a84b', blockDark: '#a8873a', text: '#fff', rankText: '#fff', blockH: 110 },
@@ -100,7 +131,7 @@ function CardAvatar({ src, initial, size, border }) {
     flexShrink: 0,
     overflow: 'hidden',
     border: border || '3px solid #fff',
-    boxShadow: '0 2px 8px rgba(0,0,0,0.14)',
+    boxShadow: 'none',
   }
   return src ? (
     <img src={src} style={{ ...base, objectFit: 'cover' }} alt="" crossOrigin="anonymous" />
@@ -178,6 +209,7 @@ function PodiumSlot({ row, rank, isMe, isTall }) {
 
 function ListRow({ row, isMe, showYouBadge }) {
   const name = contributorName(row)
+  const initial = name.slice(0, 1).toUpperCase()
   return (
     <div
       style={{
@@ -188,7 +220,7 @@ function ListRow({ row, isMe, showYouBadge }) {
         borderRadius: '10px',
         background: isMe ? '#1f5f28' : '#ffffff',
         border: isMe ? '1.5px solid #1f5f28' : '1px solid #d2dcc8',
-        boxShadow: isMe ? '0 3px 12px rgba(31,95,40,0.22)' : 'none',
+        boxShadow: 'none',
       }}
     >
       <span
@@ -205,9 +237,9 @@ function ListRow({ row, isMe, showYouBadge }) {
       </span>
       <CardAvatar
         src={row.profile_photo}
-        initial={name.slice(0, 1)}
+        initial={initial}
         size={32}
-        border={isMe ? '2px solid rgba(255,255,255,0.4)' : '2px solid #e6efc6'}
+        border={isMe ? '2px solid rgba(255,255,255,0.45)' : '2px solid #e6efc6'}
       />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -266,7 +298,7 @@ function MuniRow({ row, isMe }) {
         borderRadius: '10px',
         background: isMe ? '#1f5f28' : '#ffffff',
         border: isMe ? '1.5px solid #1f5f28' : '1px solid #d2dcc8',
-        boxShadow: isMe ? '0 3px 12px rgba(31,95,40,0.22)' : 'none',
+        boxShadow: 'none',
       }}
     >
       <span
@@ -380,9 +412,6 @@ function MuniPodiumSlot({ row, rank, isMe, isTall }) {
             objectPosition: 'center',
             borderRadius: '6px',
             flexShrink: 0,
-            filter: isMe
-              ? 'drop-shadow(0 2px 5px rgba(0,0,0,0.18))'
-              : 'drop-shadow(0 2px 5px rgba(0,0,0,0.12))',
           }}
           alt=""
           crossOrigin="anonymous"
@@ -681,6 +710,15 @@ function LeaderboardShareCardMunicipality({
   const cardH = isPost ? POST_H : STORY_H
   const top3 = rankedMunicipalities.slice(0, 3)
   const rest = rankedMunicipalities.slice(3)
+  const progress = rankedMunicipalities.reduce(
+    (totals, row) => ({
+      dictionary: totals.dictionary + toNumber(row.dictionary),
+      folklore: totals.folklore + toNumber(row.folklore),
+    }),
+    { dictionary: 0, folklore: 0 },
+  )
+  const progressTotal = progress.dictionary + progress.folklore
+  const progressPeriod = period === 'all_time' ? 'all time' : 'this month'
 
   return (
     <div
@@ -726,6 +764,94 @@ function LeaderboardShareCardMunicipality({
         ))}
       </div>
 
+      <div
+        style={{
+          margin: isPost ? '28px 0 0' : '34px 0 0',
+          padding: isPost ? '18px 20px' : '20px 18px',
+          borderTop: '1px solid rgba(31,95,40,0.12)',
+          borderBottom: '1px solid rgba(31,95,40,0.1)',
+          background: 'rgba(255,255,255,0.38)',
+        }}
+      >
+        <div
+          style={{
+            color: '#1f5f28',
+            fontSize: '11px',
+            fontWeight: 800,
+            letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            textAlign: 'center',
+          }}
+        >
+          Community Progress
+        </div>
+        <div
+          style={{
+            marginTop: '8px',
+            color: '#122312',
+            fontFamily: "'Lora', Georgia, serif",
+            fontSize: isPost ? '26px' : '28px',
+            fontWeight: 800,
+            lineHeight: 1,
+            textAlign: 'center',
+          }}
+        >
+          {progressTotal}
+        </div>
+        <div
+          style={{
+            marginTop: '5px',
+            color: '#596553',
+            fontSize: '12px',
+            fontWeight: 700,
+            textAlign: 'center',
+          }}
+        >
+          total contributions {progressPeriod}
+        </div>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: '10px',
+            marginTop: '14px',
+          }}
+        >
+          <div
+            style={{
+              border: '1px solid rgba(31,95,40,0.12)',
+              borderRadius: '8px',
+              padding: '10px 8px',
+              background: 'rgba(240,246,232,0.62)',
+              textAlign: 'center',
+            }}
+          >
+            <strong style={{ display: 'block', color: '#122312', fontSize: '19px', lineHeight: 1 }}>
+              {progress.dictionary}
+            </strong>
+            <span style={{ display: 'block', marginTop: '4px', color: '#596553', fontSize: '11px' }}>
+              dictionary entries
+            </span>
+          </div>
+          <div
+            style={{
+              border: '1px solid rgba(31,95,40,0.12)',
+              borderRadius: '8px',
+              padding: '10px 8px',
+              background: 'rgba(240,246,232,0.62)',
+              textAlign: 'center',
+            }}
+          >
+            <strong style={{ display: 'block', color: '#122312', fontSize: '19px', lineHeight: 1 }}>
+              {progress.folklore}
+            </strong>
+            <span style={{ display: 'block', marginTop: '4px', color: '#596553', fontSize: '11px' }}>
+              folklore records
+            </span>
+          </div>
+        </div>
+      </div>
+
       <CardFooter date={todayLabel} />
     </div>
   )
@@ -739,6 +865,7 @@ export default function LeaderboardPage({ currentUser = {} }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [generatingCard, setGeneratingCard] = useState(false)
+  const [sharingCard, setSharingCard] = useState(false)
   const [shareToast, setShareToast] = useState('')
   const [shareModal, setShareModal] = useState(null) // { dataUrl, kind, format, shareText, shareUrl }
   const individualStoryRef = useRef(null)
@@ -750,6 +877,7 @@ export default function LeaderboardPage({ currentUser = {} }) {
   const [municipalityRows, setMunicipalityRows] = useState([])
   const [municipalityTotals, setMunicipalityTotals] = useState([])
   const [archiveCounts, setArchiveCounts] = useState(EMPTY_ARCHIVE_COUNTS)
+  const phoneShareDevice = isPhoneShareDevice()
 
   const todayLabel = new Intl.DateTimeFormat('en-US', {
     month: 'long',
@@ -823,8 +951,10 @@ Honoring the heritage entrusted to us by those who came before. Join us in this 
         'municipality-post': municipalityPostRef,
       }
       const ref = refMap[`${kind}-${format}`]
-      if (ref?.current)
+      if (ref?.current) {
+        await waitForCardImages(ref.current)
         dataUrl = await toPng(ref.current, { pixelRatio: format === 'post' ? 3 : 2.5, cacheBust: true })
+      }
     } catch {
       setGeneratingCard(false)
       setShareModal((current) =>
@@ -864,12 +994,52 @@ Honoring the heritage entrusted to us by those who came before. Join us in this 
     await generateShareCard(kind, 'post', base)
   }
 
-  async function downloadFromModal() {
+  async function shareBlobFromModal() {
     if (!shareModal) return
     const response = await fetch(shareModal.dataUrl)
-    const blob = await response.blob()
     const formatName = shareModal.format === 'story' ? 'vertical-story' : 'square-post'
-    downloadBlob(blob, `${shareModal.filenameBase}-${formatName}.png`)
+    return {
+      blob: await response.blob(),
+      filename: `${shareModal.filenameBase}-${formatName}.png`,
+      title: shareModal.title,
+    }
+  }
+
+  async function shareFromModal() {
+    if (!shareModal) return
+    setSharingCard(true)
+    try {
+      const copied = await copyShareText({ text: shareModal.shareText, url: shareModal.shareUrl })
+      const payload = await shareBlobFromModal()
+      if (!payload) return
+      const didShare = await shareImageNative(payload.blob, payload.filename, {
+        title: payload.title,
+        text: shareModal.shareText,
+        url: shareModal.shareUrl,
+      })
+      if (!didShare) {
+        toast(
+          copied
+            ? 'Caption copied.'
+            : phoneShareDevice
+              ? 'Sharing is not available here. Please copy the caption manually.'
+              : 'Sharing is not available here.',
+        )
+        return
+      }
+      toast(copied ? 'Share sheet opened. Caption copied.' : 'Share sheet opened.')
+      setShareModal(null)
+    } finally {
+      setSharingCard(false)
+    }
+  }
+
+  async function downloadFromModal() {
+    if (!shareModal) return
+    const payload = await shareBlobFromModal()
+    if (!payload) return
+    const { blob, filename } = payload
+    downloadBlob(blob, filename)
     await copyShareText({ text: shareModal.shareText, url: shareModal.shareUrl })
     toast('Image downloaded and caption copied.')
     setShareModal(null)
@@ -894,8 +1064,8 @@ Honoring the heritage entrusted to us by those who came before. Join us in this 
         apiRequest('/api/folklore/entries'),
       ])
       setArchiveCounts({
-        dictionaryApproved: dictionaryPayload.counts?.approved ?? 0,
-        folkloreApproved: folklorePayload.counts?.approved ?? 0,
+        dictionaryLive: dictionaryPayload.counts?.visible_total ?? dictionaryPayload.counts?.approved ?? 0,
+        folkloreLive: folklorePayload.counts?.visible_total ?? folklorePayload.counts?.approved ?? 0,
       })
     } catch {
       setArchiveCounts(EMPTY_ARCHIVE_COUNTS)
@@ -958,11 +1128,11 @@ Honoring the heritage entrusted to us by those who came before. Join us in this 
         <article className="archive-count-card archive-count-inline">
           <div className="archive-count-grid">
             <div>
-              <p className="stat-value">{archiveCounts.dictionaryApproved}</p>
+              <p className="stat-value">{archiveCounts.dictionaryLive}</p>
               <p className="stat-label">Dictionary Terms</p>
             </div>
             <div>
-              <p className="stat-value">{archiveCounts.folkloreApproved}</p>
+              <p className="stat-value">{archiveCounts.folkloreLive}</p>
               <p className="stat-label">Folklore Entries</p>
             </div>
           </div>
@@ -1192,14 +1362,25 @@ Honoring the heritage entrusted to us by those who came before. Join us in this 
               <p>{shareModal.shareText}</p>
             </div>
             <div className="share-card-modal-actions">
-              <button
-                type="button"
-                className="share-card-modal-btn primary"
-                disabled={!shareModal.dataUrl || generatingCard}
-                onClick={downloadFromModal}
-              >
-                Download Image &amp; Copy Caption
-              </button>
+              {phoneShareDevice ? (
+                <button
+                  type="button"
+                  className="share-card-modal-btn primary"
+                  disabled={!shareModal.dataUrl || generatingCard || sharingCard}
+                  onClick={shareFromModal}
+                >
+                  {sharingCard ? 'Opening...' : 'Save / Share Image & Caption'}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="share-card-modal-btn primary"
+                  disabled={!shareModal.dataUrl || generatingCard || sharingCard}
+                  onClick={downloadFromModal}
+                >
+                  Download Image &amp; Copy Caption
+                </button>
+              )}
             </div>
           </div>
         </div>

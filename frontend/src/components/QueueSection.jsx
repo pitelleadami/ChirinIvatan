@@ -65,6 +65,17 @@ function formatPreviewValue(label, value) {
   return textValue
 }
 
+function isTruthy(value) {
+  return value === true || String(value || '').toLowerCase() === 'true'
+}
+
+function contributorSourceLabel(row) {
+  return (
+    row.contributor_display_name ||
+    (row.contributor_username ? `@${row.contributor_username}` : 'Contributor')
+  )
+}
+
 function liveEntryPath(kind, row) {
   if (!row.entry_id) return ''
   return kind === 'dictionary'
@@ -76,6 +87,11 @@ function canOpenLiveEntry(row) {
   if (!row.entry_id) return false
   if (!row.entry_status) return true
   return ['approved', 'approved_under_review'].includes(row.entry_status)
+}
+
+function latestApprovedSnapshot(row) {
+  const snapshots = row.revision_log || []
+  return snapshots[snapshots.length - 1] || null
 }
 
 function normalizedDictionarySnapshotPreview(snapshot = {}) {
@@ -96,7 +112,9 @@ function normalizedDictionarySnapshotPreview(snapshot = {}) {
     inflected_forms: snapshot.inflected_forms || '',
     source: snapshot.source || snapshot.source_text || '',
     audio_source: snapshot.audio_source || '',
+    audio_source_is_self_recorded: snapshot.audio_source_is_self_recorded || false,
     photo_source: snapshot.photo_source || '',
+    photo_source_is_contributor_owned: snapshot.photo_source_is_contributor_owned || false,
     audio_license: snapshot.audio_license || '',
     photo_license: snapshot.photo_license || '',
     variants: Array.isArray(snapshot.variants) ? snapshot.variants : [],
@@ -116,6 +134,13 @@ function normalizedFolkloreSnapshotPreview(snapshot = {}) {
 
 function previewRows(kind, row, { compact = false } = {}) {
   const preview = row.preview || {}
+  const contributorSource = contributorSourceLabel(row)
+  const dictionaryAudioSource = isTruthy(preview.audio_source_is_self_recorded)
+    ? `Audio Source: ${contributorSource}`
+    : preview.audio_source
+  const dictionaryPhotoSource = isTruthy(preview.photo_source_is_contributor_owned)
+    ? `Photo Source: ${contributorSource}`
+    : preview.photo_source
   const rows =
     kind === 'dictionary'
       ? [
@@ -134,8 +159,8 @@ function previewRows(kind, row, { compact = false } = {}) {
           ['Ivatan Antonyms', preview.ivatan_antonym],
           ['Inflected Forms', preview.inflected_forms],
           ['Term Source', preview.source],
-          ['Audio Source', preview.audio_source],
-          ['Image Source', preview.photo_source],
+          ['Audio Source', dictionaryAudioSource],
+          ['Image Source', dictionaryPhotoSource],
           ['License', [preview.audio_license, preview.photo_license].filter(Boolean).join(' | ')],
         ]
       : [
@@ -219,8 +244,13 @@ function renderQueueDictionaryPreview(row) {
   const usageNotes = displayText(fieldValue(row, 'usage_notes'))
   const etymology = displayText(fieldValue(row, 'etymology'))
   const source = displayText(fieldValue(row, 'source'))
-  const audioSource = displayText(fieldValue(row, 'audio_source'))
-  const photoSource = displayText(fieldValue(row, 'photo_source'))
+  const contributorSource = contributorSourceLabel(row)
+  const audioSource = isTruthy(fieldValue(row, 'audio_source_is_self_recorded'))
+    ? `Audio Source: ${contributorSource}`
+    : displayText(fieldValue(row, 'audio_source'))
+  const photoSource = isTruthy(fieldValue(row, 'photo_source_is_contributor_owned'))
+    ? `Photo Source: ${contributorSource}`
+    : displayText(fieldValue(row, 'photo_source'))
   const audioLicense = displayText(fieldValue(row, 'audio_license'))
   const photoLicense = displayText(fieldValue(row, 'photo_license'))
   const photoUrl = fieldValue(row, 'photo_url')
@@ -505,8 +535,8 @@ export default function QueueSection({
   }
 
   function handleReturn({ revisionId, kind, row }) {
+    const latestSnapshot = latestApprovedSnapshot(row)
     if (!returnOpenById[revisionId]) {
-      const latestSnapshot = row.revision_log?.[row.revision_log.length - 1]
       setReturnSourceById((current) => ({
         ...current,
         [revisionId]: latestSnapshot?.revision_id || '',
@@ -518,12 +548,15 @@ export default function QueueSection({
       setReturnOpenById((current) => ({ ...current, [revisionId]: true }))
       return
     }
+    const sourceRevisionId = returnSourceById[revisionId] || latestSnapshot?.revision_id || ''
+    const assignedToUsername =
+      returnAssigneeById[revisionId] || latestSnapshot?.contributor_username || row.contributor_username || ''
     submitDecision({
       kind,
       revisionId,
       decision: 'return',
-      assignedToUsername: returnAssigneeById[revisionId] || '',
-      sourceRevisionId: returnSourceById[revisionId] || '',
+      assignedToUsername,
+      sourceRevisionId,
     })
   }
 
@@ -536,6 +569,13 @@ export default function QueueSection({
     const canApprove = mode !== 'published' && mode !== 'awaiting'
     const canReject = mode !== 'published' && mode !== 'awaiting'
     const canReturn = mode === 'rereview'
+    const defaultReturnSource = latestApprovedSnapshot(row)
+    const selectedReturnSourceId = returnSourceById[revisionId] || defaultReturnSource?.revision_id || ''
+    const selectedReturnAssignee =
+      returnAssigneeById[revisionId] ||
+      defaultReturnSource?.contributor_username ||
+      row.contributor_username ||
+      ''
     const canFlag = mode === 'published'
     const livePath = liveEntryPath(kind, row)
     const liveEntryAvailable = canOpenLiveEntry(row)
@@ -644,7 +684,7 @@ export default function QueueSection({
                 <span>Which approved version needs fixing?</span>
                 <select
                   id={`preview-return-source-${revisionId}`}
-                  value={returnSourceById[revisionId] || ''}
+                  value={selectedReturnSourceId}
                   onChange={(event) => {
                     const sourceId = event.target.value
                     const source = row.revision_log?.find((item) => item.revision_id === sourceId)
@@ -668,7 +708,7 @@ export default function QueueSection({
                 <span>Assign correction to</span>
                 <select
                   id={`preview-return-assignee-${revisionId}`}
-                  value={returnAssigneeById[revisionId] || ''}
+                  value={selectedReturnAssignee}
                   onChange={(event) =>
                     setReturnAssigneeById((current) => ({
                       ...current,

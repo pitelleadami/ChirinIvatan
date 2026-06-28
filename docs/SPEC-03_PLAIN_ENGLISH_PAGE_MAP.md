@@ -28,6 +28,7 @@ Must include:
   - Steward's Desk
   - Reviews for reviewer/admin/consultant
   - Applications for reviewer/admin
+  - Resources
   - Add New Dictionary Entry
   - Add New Folklore Entry
   - FAQs
@@ -404,11 +405,16 @@ Can do:
 - approve
 - reject with notes
 - flag eligible public items with notes
+- send an approved-under-review item back to a contributor for fixing
 
 Rules:
 
 - own submissions do not appear for self-review
 - reject and flag require notes
+- one rejection returns an initial pending submission to Needs Changes
+- actionable review queues show newest eligible submissions first
+- items already reviewed by the signed-in reviewer/admin in the active round do
+  not remain actionable for that same person
 
 ### 4.2 Public Detail Review Actions
 
@@ -440,6 +446,7 @@ Admin must have access to all tabs:
 - Applications
 - Invitations
 - People
+- Resources
 - Contributions
 - Site Content
 
@@ -488,6 +495,9 @@ Must support:
 - user search/list
 - managed consultant profile creation
 - view user activity
+- view email log on demand for setup reminders and password reset emails
+- resend setup link for approved applicants who have not joined yet
+- show `Approved, not joined` status for approved applicants who have not created credentials
 - edit public visibility flags
 - hide/show from Yaru chart
 - hide/show live contributions
@@ -495,7 +505,18 @@ Must support:
 
 Leaderboard hiding is admin-only.
 
-### 5.5 Site Content Tab
+### 5.5 Resources Tab
+
+Must support:
+
+- browsing learning resources inside Steward's Desk
+- opening visible PDF/presentation files
+- admin upload and editing of title, description, category, visibility, published
+  status, and file
+- hiding reviewer/admin-only resources from contributor-only users
+- hiding all resources from logged-out visitors
+
+### 5.6 Site Content Tab
 
 Must support:
 
@@ -513,7 +534,7 @@ Must support:
 - FAQ image upload
 - Save Site Content button
 
-### 5.6 Django Admin Console
+### 5.7 Django Admin Console
 
 Route:
 

@@ -78,6 +78,7 @@ Rules:
 - Admins archive from the actual dictionary or folklore entry view. Steward's Desk includes an admin-only Archive tab for searching and restoring preserved records with required audit notes.
 - Automatic permanent deletion of archived entries is disabled. Archived records remain preserved unless the project owner explicitly approves a future deletion workflow.
 - Admin can edit public About/Digital Yaru copy, Statements of Support, Supporting Organizations, role-aware FAQ sections, and FAQ images through Steward's Desk -> Site Content.
+- Admin can manage steward learning documents through Steward's Desk -> Resources.
 - Each user profile has `include_in_leaderboard`; when false, contribution credits remain on the public profile but the user is excluded from Hall of Stewards leaderboard rows and municipality aggregate scores. Only admins can toggle this through `POST /api/users/<username>/leaderboard-visibility` or the admin profile/people controls.
 
 ---
@@ -420,6 +421,12 @@ Frontend display:
   - 1 reviewer + 1 admin
 - One reject immediately rejects pending revision.
 - Reject requires notes.
+- Reviewer dashboard pending queues exclude the signed-in user's own submissions.
+- Reviewer dashboard pending queues exclude revisions already reviewed by the
+  signed-in reviewer/admin in the active review round.
+- Pending review queues are sorted by latest submission first.
+- A revision with an initial-round rejection must not remain in pending or
+  awaiting-quorum lists.
 
 ### 6.4 Post-Publish Re-Review Rules
 
@@ -430,6 +437,8 @@ Frontend display:
   - Reject/Archive -> entry `archived` and removed from public view
   - Return for Fixing -> assigned correction draft appears as Needs Changes for the assignee
   - quorum approve -> entry back to `approved`
+- Return for Fixing requires a selected approved source snapshot, assigned
+  contributor, and non-empty fix instructions.
 
 ### 6.5 Admin Override Rules
 
@@ -585,12 +594,19 @@ Legacy compatibility aliases (still active):
     - `reviews.my_reviews`
     - `reviews.awaiting_quorum_after_my_approval`
   - Also includes legacy top-level aliases for backward compatibility
+  - Pending queues are viewer-specific: exclude own submissions and exclude rows
+    already reviewed by that actor in the active round.
+  - Pending queues are ordered newest first.
+  - Awaiting-quorum lists must not include revisions that already have a
+    rejection in the initial review round.
 
 - `POST /api/reviews/dictionary/submit`
   - Body:
     - `revision_id` required UUID
     - `decision` required (`approve|reject|flag`)
     - `notes` required for `reject|flag`
+    - `source_revision_id`, `assigned_to_username`, and non-empty `notes` are
+      required when returning an approved-under-review item for fixing
 
 - `POST /api/reviews/folklore/submit`
   - Canonical body:
@@ -742,7 +758,12 @@ Screen: `Reviewer Dashboard`
     so a reviewed entry never lingers in a stale preview
 - Queue filtering:
   - exclude rows where `contributor_username` matches the logged-in reviewer/admin
+  - exclude rows already reviewed by the signed-in actor in the active round
+  - exclude stale pending/awaiting-quorum rows once an initial-round rejection exists
   - backend still enforces self-review prevention even if a client bypasses UI filtering
+- Queue sorting:
+  - pending initial submissions newest first by submission/create time
+  - re-review rows newest first by approved/submission time
 - Expected outcomes:
   - reviewer/admin gets HTTP 200 with grouped payload
   - unauthenticated gets 401
@@ -827,17 +848,31 @@ Screen: `Steward Workspace`
   - Steward's Desk with indented subsections in this order:
     1. Reviews
     2. Applications
-    3. Add New Dictionary Entry
-    4. Add New Folklore Entry
+    3. Resources
+    4. Add New Dictionary Entry
+    5. Add New Folklore Entry
   - Help: FAQs
 - Hidden/retired:
   - Edit Profile
   - Role Center
   - Standalone User Manual (manual content is incorporated into role-aware FAQs)
 - Reviews and Applications must keep the Steward's Desk page title/tab frame instead of navigating to an unrelated-looking view.
+- Resources must keep the Steward's Desk page title/tab frame and should not be exposed as a visitor-only top-nav destination.
 - Contributions must show separate Needs Changes, Drafts, Approved, and Submitted for Review tabs for both dictionary and folklore.
 - Rejected cards must render `reviewer_notes` as visible reviewer feedback and link to the same revision for correction.
 - Assigned correction drafts created by Return for Fixing are stored as draft revisions but must be grouped and labeled as Needs Changes until resubmitted.
+
+Screen: `Steward Resources`
+
+- Route remains within `/admin-applications?tab=resources`.
+- Signed-in stewards browse available learning resources grouped by category.
+- Admin users can create, edit, hide/show, replace files, open, and delete PDF/PPT/PPTX/PPS/PPSX resources.
+- Each resource has title, description, category, visibility, published flag, filename, and updated timestamp.
+- Visibility labels:
+  - `public`: all signed-in stewards
+  - `members`: logged-in accounts
+  - `admin`: admins, reviewers, consultants, and superusers
+- Contributor-only users must not see reviewer/admin-only resources.
 
 Screen: `Notification Bell`
 
@@ -882,6 +917,8 @@ Screen: `Applications / Invitations`
 - Other eligible screeners who have not decided continue to see the same application under Pending.
 - Approve and reject actions show compact auto-dismiss popup notifications.
 - Approval notification distinguishes recorded approval awaiting quorum from final approval with active access.
+- Duplicate applications for an email/role are blocked with guidance to check the
+  activation email, wait for review, or log in if access is already active.
 - Do not also render a duplicate inline success message for the same decision.
 - Email invitation creation collects email, role, and endorsement notes only.
 - The invitation acceptance screen collects and saves first name, last name, municipality, username, and password.
@@ -895,6 +932,10 @@ Screen: `Admin People Activity Log`
 - The People list source `GET /api/admin/users` includes only users with active Admin, Consultant, Reviewer, or Contributor access, including role-assigned test accounts.
 - Exclude registered-only applicants who do not yet have an active role, even when they have a pending application.
 - Do not exclude an existing contributor merely because that person has a separate pending reviewer application.
+- Approved application users who have not created credentials appear in People with `pending_activation_applications` and should be labeled `Approved, not joined`.
+- Admins can resend the approved applicant setup link through `POST /api/admin/users/<username>/approval-reminder`.
+- `GET /api/admin/users` includes `email_log` rows for setup reminders and password reset messages sent to the selected person.
+- The People modal should hide email history until the admin clicks `View email log`.
 - Render the managed consultant profile panel after the people directory as the final People-section tool.
 - Include actions such as:
   - contribution credits
@@ -904,6 +945,7 @@ Screen: `Admin People Activity Log`
   - folklore reviews
   - role application decisions
   - role invitations sent
+  - account email actions such as password reset and approved applicant setup reminders
 - UI/API should show the latest 500 rows per person.
 - Do not auto-delete older audit records simply because the list exceeds 500; cap retrieval/display while preserving audit history.
 

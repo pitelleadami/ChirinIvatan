@@ -1368,6 +1368,31 @@ export default function DictionaryViewerPage({ currentUser }) {
                           </dd>
                         </div>
                       )}
+                      {((detail.attribution?.audio?.is_self_recorded &&
+                        detail.attribution.audio.contributed_by_actor) ||
+                        (detail.attribution?.photo?.is_contributor_owned &&
+                          detail.attribution.photo.contributed_by_actor)) && (
+                        <div>
+                          <dt>Media credit</dt>
+                          <dd>
+                            {[
+                              detail.attribution?.audio?.is_self_recorded
+                                ? ['Audio by', detail.attribution.audio.contributed_by_actor]
+                                : null,
+                              detail.attribution?.photo?.is_contributor_owned
+                                ? ['Photo by', detail.attribution.photo.contributed_by_actor]
+                                : null,
+                            ]
+                              .filter((item) => item?.[1])
+                              .map(([label, actor], index, rows) => (
+                                <span key={label}>
+                                  {index > 0 && (index === rows.length - 1 ? ' and ' : ', ')}
+                                  {label} <ActorLink actor={actor} />
+                                </span>
+                              ))}
+                          </dd>
+                        </div>
+                      )}
                       <div className="dictionary-attribution-source-row">
                         <dt>Sources</dt>
                         <dd>

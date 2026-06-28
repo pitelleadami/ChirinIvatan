@@ -405,6 +405,12 @@ If all items below pass and no item is blocked, you can reasonably mark backend/
   - Remarks:
   - Evidence:
 
+- [ ] `RV-10` Admin People email log and setup resend are visible on demand
+  - How to check: As admin, open People, select an approved applicant who has not joined, confirm `Approved, not joined`, use `Resend Setup Link`, then click `View email log` and confirm setup reminder/password reset sends are listed with date/time.
+  - Status:
+  - Remarks:
+  - Evidence:
+
 ---
 
 ## F) Contributions and Lifecycle

@@ -39,11 +39,29 @@ def normalize_username(value):
     return str(value or "").strip().lower()
 
 
+def clean_name_extension(first_name, last_name, extension):
+    suffix = str(extension or "").strip()
+    if not suffix:
+        return ""
+    first = normalize_person_name(first_name)
+    last = normalize_person_name(last_name)
+    if first and last and first.casefold() == last.casefold():
+        base_name = first
+    else:
+        base_name = " ".join([part for part in [first, last] if part]).strip()
+    if base_name and suffix.casefold() == base_name.casefold():
+        return ""
+    return suffix
+
+
 def name_with_extension(user, profile=None):
     first = normalize_person_name(getattr(user, "first_name", ""))
     last = normalize_person_name(getattr(user, "last_name", ""))
-    base_name = " ".join([part for part in [first, last] if part]).strip() or user.username
-    extension = str(getattr(profile, "name_extension", "") or "").strip()
+    if first and last and first.casefold() == last.casefold():
+        base_name = first
+    else:
+        base_name = " ".join([part for part in [first, last] if part]).strip() or user.username
+    extension = clean_name_extension(first, last, getattr(profile, "name_extension", ""))
     return f"{base_name} {extension}".strip()
 
 

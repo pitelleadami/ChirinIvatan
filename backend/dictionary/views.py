@@ -19,6 +19,7 @@ from django.db.models import Q
 from django.http import JsonResponse
 from django.views.decorators.http import require_GET, require_http_methods
 
+from dictionary.field_groups import SEMANTIC_CORE_FIELDS
 from dictionary.models import Entry, EntryRevision, EntryStatus
 from dictionary.services import create_revision_from_entry, get_visible_revision_history
 from dictionary.text import capitalize_first, normalize_headword, normalize_sentence
@@ -355,6 +356,46 @@ def _stored_media_url(request, stored_path):
         return ""
 
 
+def _variant_revision_context(entry, request=None):
+    if not entry or entry.is_mother:
+        return None
+    semantic_entry = _semantic_source_entry(entry)
+    if semantic_entry.id == entry.id:
+        return None
+    return {
+        "is_variant": True,
+        "variant_entry_id": str(entry.id),
+        "variant_term": entry.term,
+        "mother_entry_id": str(semantic_entry.id),
+        "mother_term": semantic_entry.term,
+        "mother_photo_url": _media_url(request, semantic_entry.photo) if request else "",
+        "shared_fields": list(SEMANTIC_CORE_FIELDS),
+        "semantic_core": {
+            "meaning": semantic_entry.meaning,
+            "part_of_speech": semantic_entry.part_of_speech,
+            "english_synonym": semantic_entry.english_synonym,
+            "ivatan_synonym": semantic_entry.ivatan_synonym,
+            "english_antonym": semantic_entry.english_antonym,
+            "ivatan_antonym": semantic_entry.ivatan_antonym,
+            "inflected_forms": semantic_entry.inflected_forms,
+            "source_text": semantic_entry.source_text,
+            "term_source_is_self_knowledge": semantic_entry.term_source_is_self_knowledge,
+            "photo_source": semantic_entry.photo_source,
+            "photo_source_is_contributor_owned": semantic_entry.photo_source_is_contributor_owned,
+            "photo_license": semantic_entry.photo_license,
+        },
+    }
+
+
+def _strip_variant_shared_updates(revision, updates):
+    if not revision.entry_id:
+        return updates
+    entry = revision.entry
+    if not entry or entry.is_mother:
+        return updates
+    return {key: value for key, value in updates.items() if key not in SEMANTIC_CORE_FIELDS}
+
+
 def _serialize_revision_row(revision, request=None):
     proposed = revision.proposed_data or {}
     audio_path = proposed.get("audio_pronunciation", "")
@@ -377,6 +418,11 @@ def _serialize_revision_row(revision, request=None):
         "reviewer_notes": revision.reviewer_notes,
         "created_at": revision.created_at.isoformat(),
         "approved_at": revision.approved_at.isoformat() if revision.approved_at else None,
+        "variant_context": (
+            _variant_revision_context(revision.entry, request=request)
+            if revision.entry_id
+            else None
+        ),
         "correction_assignment": (
             {
                 "assignment_id": str(correction.id),
@@ -585,7 +631,7 @@ def start_dictionary_entry_revision_view(request, entry_id):
         return auth_error
 
     try:
-        entry = Entry.objects.get(
+        entry = Entry.objects.select_related("variant_group__mother_entry").get(
             id=entry_id,
             status__in=[EntryStatus.APPROVED, EntryStatus.APPROVED_UNDER_REVIEW],
         )
@@ -622,6 +668,7 @@ def update_dictionary_revision_view(request, revision_id):
     try:
         updates = _editable_revision_payload(payload)
         updates.update(_uploaded_revision_media_payload(request, proposed_data=updates))
+        updates = _strip_variant_shared_updates(revision, updates)
     except ValidationError as exc:
         return JsonResponse({"detail": exc.messages[0]}, status=400)
 
@@ -824,11 +871,15 @@ def _serialize_attribution(entry: Entry):
         },
         "audio": {
             "contributed_by": audio_contributor,
+            "contributed_by_actor": _public_actor(entry.audio_contributor),
+            "is_self_recorded": entry.audio_source_is_self_recorded,
             "source": "" if entry.audio_source_is_self_recorded else entry.audio_source,
             "license": entry.audio_license if entry.audio_source_is_self_recorded else "",
         },
         "photo": {
             "contributed_by": photo_contributor,
+            "contributed_by_actor": _public_actor(semantic_entry.photo_contributor),
+            "is_contributor_owned": semantic_entry.photo_source_is_contributor_owned,
             "source": (
                 ""
                 if semantic_entry.photo_source_is_contributor_owned

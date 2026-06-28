@@ -100,6 +100,7 @@ Work completed:
 - Added role invitations and activation.
 - Added onboarding prompt for new users to complete or skip profile setup.
 - Added people/account management features for administrators.
+- Added admin follow-up tools for approved applicants who have not joined yet, including resend setup links and an on-demand email log for setup reminder/password reset messages.
 - Added role demotion/revocation support.
 
 Defense value:

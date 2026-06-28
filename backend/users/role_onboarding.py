@@ -28,11 +28,12 @@ from users.models import (
     UserProfile,
 )
 from users.names import (
-    display_name as formatted_display_name,
-)
-from users.names import (
+    clean_name_extension,
     normalize_affiliation_text,
     normalize_person_name,
+)
+from users.names import (
+    display_name as formatted_display_name,
 )
 
 User = get_user_model()
@@ -133,8 +134,55 @@ def _user_already_has_role(*, user, target_role):
     return False
 
 
+def role_application_duplicate_message(*, applicant, target_role, public=False):
+    if public and applicant.has_usable_password():
+        return "An account with this email already exists. Please log in instead."
+
+    approved_unclaimed = (
+        RoleApplication.objects.filter(
+            applicant=applicant,
+            status=RoleApplication.Status.APPROVED,
+        )
+        .filter(applicant__password__startswith="!")
+        .order_by("-decided_at", "-created_at")
+        .first()
+    )
+    if approved_unclaimed:
+        return (
+            "Your application was already approved. Please check your email for the activation "
+            "link, or use the status checker to resend the activation email."
+        )
+
+    pending_application = (
+        RoleApplication.objects.filter(
+            applicant=applicant,
+            status=RoleApplication.Status.PENDING,
+        )
+        .order_by("-created_at")
+        .first()
+    )
+    if pending_application:
+        if pending_application.target_role == target_role:
+            return (
+                f"This email already has a pending {target_role} application. "
+                "Please check your email or use the status checker."
+            )
+        return (
+            "This email already has an application under review. Please wait for the review "
+            "result before applying for another role."
+        )
+
+    if _user_already_has_role(user=applicant, target_role=target_role):
+        return (
+            f"This email is already connected to active {target_role} access. "
+            "Please log in instead."
+        )
+
+    return ""
+
+
 @transaction.atomic
-def create_role_application(*, applicant, target_role, reviewer_reason=""):
+def create_role_application(*, applicant, target_role, reviewer_reason="", public=False):
     if target_role not in set(RoleApplication.TargetRole.values):
         raise ValidationError("Invalid target role.")
     reviewer_reason = str(reviewer_reason or "").strip()
@@ -144,18 +192,11 @@ def create_role_application(*, applicant, target_role, reviewer_reason=""):
     )
     if is_contributor_upgrade and not reviewer_reason:
         raise ValidationError("Reason for applying as reviewer is required.")
-    if _user_already_has_role(user=applicant, target_role=target_role):
-        raise ValidationError(
-            f"This email is already connected to active {target_role} access. Please log in instead."
-        )
-    if RoleApplication.objects.filter(
-        applicant=applicant,
-        target_role=target_role,
-        status=RoleApplication.Status.PENDING,
-    ).exists():
-        raise ValidationError(
-            f"This email already has a pending {target_role} application. Please check your email or use the status checker."
-        )
+    duplicate_message = role_application_duplicate_message(
+        applicant=applicant, target_role=target_role, public=public
+    )
+    if duplicate_message:
+        raise ValidationError(duplicate_message)
 
     return RoleApplication.objects.create(
         applicant=applicant,
@@ -330,13 +371,16 @@ def create_email_role_invitation(
         status=RoleInvitation.Status.PENDING,
     ).update(status=RoleInvitation.Status.REPLACED)
 
+    first_name = normalize_person_name(first_name)
+    last_name = normalize_person_name(last_name)
+
     return RoleInvitation.objects.create(
         email=normalized_email,
         role=role,
         invited_by=inviter,
-        first_name=normalize_person_name(first_name),
-        last_name=normalize_person_name(last_name),
-        name_extension=str(name_extension or "").strip(),
+        first_name=first_name,
+        last_name=last_name,
+        name_extension=clean_name_extension(first_name, last_name, name_extension),
         municipality=str(municipality or "").strip(),
         notes=notes or "",
         expires_at=timezone.now()
@@ -384,7 +428,7 @@ def create_consultant_profile(
     user.save(update_fields=["password"])
 
     profile, _ = UserProfile.objects.get_or_create(user=user)
-    profile.name_extension = str(name_extension or "").strip()
+    profile.name_extension = clean_name_extension(first_name, last_name, name_extension)
     profile.municipality = str(municipality or "").strip()
     profile.post_nominals = str(post_nominals or "").strip()
     profile.cultural_affiliations = [
@@ -487,7 +531,7 @@ def update_managed_consultant_profile(
     user.save(update_fields=["first_name", "last_name", "email"])
 
     profile, _ = UserProfile.objects.get_or_create(user=user)
-    profile.name_extension = str(name_extension or "").strip()
+    profile.name_extension = clean_name_extension(first_name, last_name, name_extension)
     profile.municipality = str(municipality or "").strip()
     profile.post_nominals = str(post_nominals or "").strip()
     profile.cultural_affiliations = [
@@ -585,9 +629,11 @@ def accept_email_role_invitation(
     last_name = normalize_person_name(
         last_name or invitation.last_name or (user.last_name if user else "")
     )
-    name_extension = str(
-        name_extension or invitation.name_extension or existing_name_extension
-    ).strip()
+    name_extension = clean_name_extension(
+        first_name,
+        last_name,
+        name_extension or invitation.name_extension or existing_name_extension,
+    )
     municipality = str(municipality or invitation.municipality or existing_municipality).strip()
     username = str(username or "").strip().lower()
     if not first_name or not last_name or not municipality:

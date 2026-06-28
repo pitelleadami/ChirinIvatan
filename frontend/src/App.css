@@ -2074,6 +2074,66 @@ button.admin-site-content-menu-card.active {
   line-height: 1.35;
 }
 
+.admin-resource-manager {
+  gap: 14px;
+}
+
+.admin-resource-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.9fr) minmax(320px, 1.1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.admin-resource-form-panel,
+.admin-resource-list-panel {
+  display: grid;
+  gap: 12px;
+  border: 1px solid rgba(18, 35, 18, 0.1);
+  border-radius: 8px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.52);
+}
+
+.admin-resource-list {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-resource-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  border: 1px solid rgba(18, 35, 18, 0.1);
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.admin-resource-row strong,
+.admin-resource-row p {
+  margin: 0;
+}
+
+.admin-resource-row strong {
+  color: var(--text-primary);
+}
+
+.admin-resource-row p:not(.meta) {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.admin-resource-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .admin-site-save-bar {
   position: sticky;
   bottom: 12px;
@@ -2101,6 +2161,15 @@ button.admin-site-content-menu-card.active {
 
   .admin-brand-footer-fields {
     grid-template-columns: 1fr;
+  }
+
+  .admin-resource-grid,
+  .admin-resource-row {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-resource-actions {
+    justify-content: flex-start;
   }
 }
 
@@ -2432,6 +2501,29 @@ button.admin-site-content-menu-card.active {
 .admin-account-controls .section-heading h3 {
   margin: 0;
   font-size: 20px;
+}
+
+.admin-person-email-log {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(18, 35, 18, 0.1);
+  border-radius: 8px;
+  margin-bottom: 12px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.52);
+}
+
+.admin-person-email-log .section-heading {
+  margin: 0;
+}
+
+.admin-person-email-log .section-heading h3,
+.admin-person-email-log .muted {
+  margin: 0;
+}
+
+.admin-email-log-list {
+  max-height: 180px;
 }
 
 .admin-account-flag-list {
@@ -4863,8 +4955,9 @@ button.danger:hover {
   border-radius: 14px;
   width: 100%;
   max-width: 400px;
+  max-height: 92vh;
   box-shadow: 0 8px 40px rgba(0, 0, 0, 0.22);
-  overflow: hidden;
+  overflow: auto;
 }
 .share-card-modal-header {
   display: flex;
@@ -4900,7 +4993,7 @@ button.danger:hover {
 }
 .share-card-modal-preview img {
   max-width: 100%;
-  max-height: 360px;
+  max-height: min(58vh, 520px);
   border-radius: 8px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
   object-fit: contain;
@@ -4973,6 +5066,28 @@ button.danger:hover {
 }
 .share-card-modal-btn.primary:hover {
   background: #174d20;
+}
+
+@media (max-width: 560px) {
+  .share-card-modal-overlay {
+    align-items: flex-start;
+    padding: 10px;
+    overflow-y: auto;
+  }
+
+  .share-card-modal {
+    max-width: 100%;
+    max-height: none;
+    border-radius: 12px;
+  }
+
+  .share-card-modal-preview img {
+    max-height: 54vh;
+  }
+
+  .share-card-modal-actions {
+    flex-direction: column;
+  }
 }
 
 .badge-grid-quality {
@@ -5678,12 +5793,21 @@ button.danger:hover {
   margin-top: 8px;
 }
 
+.role-application-card-target {
+  border-color: rgba(29, 102, 45, 0.32);
+  box-shadow: 0 10px 26px rgba(29, 102, 45, 0.11);
+}
+
 .role-claim-access {
   margin-top: 10px;
   border-top: 1px solid rgba(18, 35, 18, 0.1);
   padding-top: 10px;
   display: grid;
   gap: 8px;
+}
+
+.role-claim-access-prompt {
+  margin: 0;
 }
 
 .role-invitation-context {
@@ -5834,6 +5958,113 @@ button.danger:hover {
   color: #334032;
   font-size: 13px;
   line-height: 1.5;
+}
+
+.resources-page {
+  display: grid;
+  gap: 24px;
+  width: 100%;
+  max-width: 1180px;
+  margin: 26px 0 0;
+  padding: 10px 0 38px;
+}
+
+.resources-heading {
+  max-width: 920px;
+}
+
+.resources-heading h1 {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 38px;
+  font-weight: 800;
+  line-height: 1.08;
+  letter-spacing: 0;
+}
+
+.resources-heading p {
+  color: #394039;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.resource-group-list,
+.resource-card-list {
+  display: grid;
+  gap: 16px;
+}
+
+.resource-group {
+  display: grid;
+  gap: 14px;
+}
+
+.resource-group .resource-card-list {
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  align-items: stretch;
+}
+
+.resource-group h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+.resource-card {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid rgba(18, 35, 18, 0.12);
+  border-radius: 8px;
+  min-height: 128px;
+  padding: 18px;
+  background: rgba(255, 255, 255, 0.74);
+  box-shadow: 0 10px 24px rgba(18, 35, 18, 0.04);
+}
+
+.resource-card h3 {
+  margin: 2px 0 5px;
+  font-family: var(--font-body);
+  font-size: 19px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.resource-card p {
+  margin: 0;
+  color: #334032;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.resource-card-meta,
+.resource-card-date {
+  color: #5d6a57 !important;
+  font-size: 12px !important;
+  font-weight: 700;
+}
+
+.resource-open-link {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--action-primary);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.resource-open-link:hover {
+  background: var(--action-primary-hover);
 }
 
 .toolbar {
@@ -11354,6 +11585,50 @@ textarea:focus-visible {
   margin-top: 10px;
 }
 
+.variant-mother-context {
+  margin-top: 10px;
+  border: 1px solid rgba(29, 102, 45, 0.18);
+  border-radius: 8px;
+  padding: 12px;
+  background: rgba(238, 247, 231, 0.76);
+}
+
+.variant-mother-context-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.variant-mother-context-header h3 {
+  margin: 2px 0 0;
+  font-size: 20px;
+}
+
+.variant-mother-context-photo {
+  width: min(220px, 100%);
+  border-radius: 8px;
+  margin-top: 10px;
+}
+
+.variant-mother-context-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin: 12px 0 0;
+}
+
+.variant-mother-context-grid dt {
+  font-weight: 800;
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: 12px;
+}
+
+.variant-mother-context-grid dd {
+  margin: 3px 0 0;
+}
+
 .revision-prefilled-preview .dictionary-field-block {
   border-top: 0;
   padding-top: 0;
@@ -15320,4 +15595,19 @@ textarea:focus-visible {
 }
 .rte-output u {
   text-decoration: underline;
+}
+
+@media (max-width: 720px) {
+  .resources-heading h1 {
+    font-size: 30px;
+  }
+
+  .resource-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .resource-open-link {
+    width: 100%;
+  }
 }

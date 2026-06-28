@@ -102,7 +102,7 @@ export default function HomePage({ currentUser = {} }) {
   const [dictionaryRows, setDictionaryRows] = useState([])
   const [folkloreRows, setFolkloreRows] = useState([])
   const [siteContent, setSiteContent] = useState(DEFAULT_SITE_CONTENT)
-  const [archiveCounts, setArchiveCounts] = useState({ dictionaryApproved: 0, folkloreApproved: 0 })
+  const [archiveCounts, setArchiveCounts] = useState({ dictionaryLive: 0, folkloreLive: 0 })
   const [leaderMunicipality, setLeaderMunicipality] = useState('All')
   const todayLabel = new Intl.DateTimeFormat('en-US', {
     month: 'long',
@@ -135,13 +135,13 @@ export default function HomePage({ currentUser = {} }) {
         setDictionaryRows(dictionaryPayload.rows || [])
         setArchiveCounts((current) => ({
           ...current,
-          dictionaryApproved: dictionaryPayload.counts?.approved ?? 0,
+          dictionaryLive: dictionaryPayload.counts?.visible_total ?? dictionaryPayload.counts?.approved ?? 0,
         }))
       } catch {
         setDictionaryRows([])
         setArchiveCounts((current) => ({
           ...current,
-          dictionaryApproved: 0,
+          dictionaryLive: 0,
         }))
       }
 
@@ -150,13 +150,13 @@ export default function HomePage({ currentUser = {} }) {
         setFolkloreRows((folklorePayload.rows || []).slice(0, HOME_LATEST_FOLKLORE_LIMIT))
         setArchiveCounts((current) => ({
           ...current,
-          folkloreApproved: folklorePayload.counts?.approved ?? 0,
+          folkloreLive: folklorePayload.counts?.visible_total ?? folklorePayload.counts?.approved ?? 0,
         }))
       } catch {
         setFolkloreRows([])
         setArchiveCounts((current) => ({
           ...current,
-          folkloreApproved: 0,
+          folkloreLive: 0,
         }))
       }
 
@@ -250,11 +250,11 @@ export default function HomePage({ currentUser = {} }) {
           <article className="archive-count-card archive-count-inline">
             <div className="archive-count-grid">
               <div>
-                <p className="stat-value">{archiveCounts.dictionaryApproved}</p>
+                <p className="stat-value">{archiveCounts.dictionaryLive}</p>
                 <p className="stat-label">Dictionary Terms</p>
               </div>
               <div>
-                <p className="stat-value">{archiveCounts.folkloreApproved}</p>
+                <p className="stat-value">{archiveCounts.folkloreLive}</p>
                 <p className="stat-label">Folklore Entries</p>
               </div>
             </div>

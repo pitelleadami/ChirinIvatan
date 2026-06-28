@@ -86,6 +86,7 @@ urlpatterns = [
     path("about", frontend_redirect, {"route": "about"}, name="frontend_about"),
     path("yaru", frontend_redirect, {"route": "yaru"}, name="frontend_yaru"),
     path("faqs", frontend_redirect, {"route": "faqs"}, name="frontend_faqs"),
+    path("resources", frontend_redirect, {"route": "resources"}, name="frontend_resources"),
     path("manual", frontend_redirect, {"route": "faqs"}, name="frontend_manual"),
     path("dashboard", frontend_redirect, {"route": "dashboard"}, name="frontend_dashboard"),
     path(
@@ -132,6 +133,7 @@ urlpatterns = [
     path("", include("dictionary.urls")),
     path("", include("folklore.urls")),
     path("", include("reviews.urls")),
+    path("", include("resources.urls")),
     path(
         "accounts/reset/<uidb64>/<token>/",
         auth_views.PasswordResetConfirmView.as_view(),

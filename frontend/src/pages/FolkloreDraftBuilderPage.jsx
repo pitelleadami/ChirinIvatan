@@ -41,8 +41,18 @@ const INITIAL_FORM = {
   copyright_usage: '',
 }
 
-const SOURCE_OWNER_LABEL = 'K. Adami'
 const SOURCE_REMARKS_KEY = 'source_remarks'
+
+function sourceOwnerLabel(user) {
+  const nameParts = [user?.first_name, user?.last_name]
+    .map((part) => String(part || '').trim())
+    .filter(Boolean)
+  const nameExtension = String(user?.name_extension || '').trim()
+  const fullName = [...nameParts, nameExtension].filter(Boolean).join(' ')
+  if (fullName) return fullName
+  const username = String(user?.username || '').trim()
+  return username ? `@${username}` : 'Contributor'
+}
 
 const FOLKLORE_TEXT_SOURCE_TYPES = [
   {
@@ -362,7 +372,7 @@ function YesNoField({ legend, name, value, onChange, error = '', required = fals
   )
 }
 
-export default function FolkloreDraftBuilderPage() {
+export default function FolkloreDraftBuilderPage({ currentUser = {} }) {
   const [revisionId, setRevisionId] = useState('')
   const [entryId, setEntryId] = useState('')
   const [autoRevisionStarted, setAutoRevisionStarted] = useState(false)
@@ -411,6 +421,7 @@ export default function FolkloreDraftBuilderPage() {
   const selectedAudioSourceConfig = resolveSourceConfig(FOLKLORE_AUDIO_SOURCE_TYPES, audioSourceType)
   const selectedPhotoSourceConfig = resolveSourceConfig(FOLKLORE_PHOTO_SOURCE_TYPES, photoSourceType)
   const selectedVideoSourceConfig = resolveSourceConfig(FOLKLORE_VIDEO_SOURCE_TYPES, videoSourceType)
+  const currentSourceOwnerLabel = sourceOwnerLabel(currentUser)
   const subcategoryOptions = folkloreSubcategoryOptions(form.category)
   const previewTextSource = buildFolkloreTextSourceForSubmit()
   const previewMediaSource = buildFolkloreMediaSourceForSubmit()
@@ -646,7 +657,7 @@ export default function FolkloreDraftBuilderPage() {
         )}
         {value === true && (
           <p className="hint">
-            {ownedLabel}: {SOURCE_OWNER_LABEL}
+            {ownedLabel}: {currentSourceOwnerLabel}
           </p>
         )}
       </div>
@@ -662,21 +673,21 @@ export default function FolkloreDraftBuilderPage() {
     const lines = []
     if (hasAudioMedia) {
       if (audioOwnedByContributor === true) {
-        lines.push(`Audio Source: ${SOURCE_OWNER_LABEL}`)
+        lines.push(`Audio Source: ${currentSourceOwnerLabel}`)
       } else if (audioOwnedByContributor === false) {
         lines.push(buildSourceLine('Audio Source', selectedAudioSourceConfig, audioSourceValues))
       }
     }
     if (hasPhotoMedia) {
       if (photoOwnedByContributor === true) {
-        lines.push(`Photo Source: ${SOURCE_OWNER_LABEL}`)
+        lines.push(`Photo Source: ${currentSourceOwnerLabel}`)
       } else if (photoOwnedByContributor === false) {
         lines.push(buildSourceLine('Photo Source', selectedPhotoSourceConfig, photoSourceValues))
       }
     }
     if (hasVideoMedia) {
       if (videoOwnedByContributor === true) {
-        lines.push(`Video Source: ${SOURCE_OWNER_LABEL}`)
+        lines.push(`Video Source: ${currentSourceOwnerLabel}`)
       } else if (videoOwnedByContributor === false) {
         lines.push(buildSourceLine('Video Source', selectedVideoSourceConfig, videoSourceValues))
       }

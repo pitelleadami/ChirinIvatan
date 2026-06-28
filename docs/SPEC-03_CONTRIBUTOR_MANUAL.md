@@ -200,6 +200,8 @@ Approval requires:
 
 - one rejection can reject the pending submission immediately
 - rejection should include notes
+- when this happens, the submission returns to you under Needs Changes; you do
+  not need to wait for a second reviewer before fixing and resubmitting.
 
 ## 7.3 Re-review after publish
 
@@ -223,7 +225,21 @@ What you should do:
 
 ---
 
-## 8) Revisions (how to use them well)
+## 8) Learning resources
+
+Approved accounts can open shared learning resources from Steward's Desk ->
+Resources. These may include orthography guides, contributor guides, reviewer
+guides, or presentation files.
+
+Resource visibility depends on role:
+
+- general steward resources can be opened by approved signed-in accounts.
+- reviewer/admin-only resources are hidden from contributor-only accounts.
+- visitors who are not signed in do not see the resources area.
+
+---
+
+## 9) Revisions (how to use them well)
 
 Think of revisions as version upgrades, not direct overwrites.
 
@@ -243,7 +259,7 @@ Good revision habit:
 
 ---
 
-## 9) How contribution credit works
+## 10) How contribution credit works
 
 Recognition is based on approved contributions.
 
@@ -264,7 +280,7 @@ Historical contribution credit is preserved as an achievement record.
 
 ---
 
-## 10) How to maximize your impact (without burnout)
+## 11) How to maximize your impact (without burnout)
 
 Use this strategy:
 
@@ -282,7 +298,7 @@ High-impact contributor pattern:
 
 ---
 
-## 11) Common problems and exact fixes
+## 12) Common problems and exact fixes
 
 ## “My item is stuck in pending.”
 
@@ -326,7 +342,7 @@ Expected as contributor role. Approval is reviewer/admin responsibility.
 
 ---
 
-## 12) Contributor ethics and cultural care
+## 13) Contributor ethics and cultural care
 
 Follow these standards:
 
@@ -340,7 +356,7 @@ Cultural quality is more important than quantity.
 
 ---
 
-## 13) Suggested weekly workflow plan
+## 14) Suggested weekly workflow plan
 
 ### Monday
 
@@ -370,7 +386,7 @@ This rhythm is sustainable and usually leads to better approval rates.
 
 ---
 
-## 14) Personal growth path as contributor
+## 15) Personal growth path as contributor
 
 A healthy growth journey:
 
@@ -385,7 +401,7 @@ Your best metric is **lasting usefulness + cultural integrity**.
 
 ---
 
-## 15) Quick reference cards
+## 16) Quick reference cards
 
 ## Quick card: Before Submit
 
@@ -410,7 +426,7 @@ Your best metric is **lasting usefulness + cultural integrity**.
 
 ---
 
-## 16) Motivation: why your work matters
+## 17) Motivation: why your work matters
 
 Language loss happens quietly.
 Preservation happens through many small, careful acts.

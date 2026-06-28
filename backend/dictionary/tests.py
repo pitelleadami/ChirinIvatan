@@ -772,9 +772,13 @@ class DictionaryEntryDetailApiTests(TestCase):
         self.assertEqual(attribution["term"]["initially_contributed_by"], "api_contrib")
         self.assertEqual(attribution["term"]["source_text"], "")
         self.assertEqual(attribution["audio"]["source"], "")
+        self.assertTrue(attribution["audio"]["is_self_recorded"])
         self.assertIsNone(attribution["audio"]["contributed_by"])
+        self.assertEqual(attribution["audio"]["contributed_by_actor"]["username"], "api_contrib")
         self.assertEqual(attribution["photo"]["source"], "")
+        self.assertTrue(attribution["photo"]["is_contributor_owned"])
         self.assertEqual(attribution["photo"]["contributed_by"], "api_contrib")
+        self.assertEqual(attribution["photo"]["contributed_by_actor"]["username"], "api_contrib")
 
 
 class DictionaryRevisionApiTests(TestCase):
@@ -838,6 +842,87 @@ class DictionaryRevisionApiTests(TestCase):
                 notif_type=Notification.Type.SUBMISSION_RECEIVED,
             ).exists()
         )
+
+    def test_start_variant_revision_includes_mother_context(self):
+        mother = Entry.objects.create(
+            term="vahay",
+            meaning="house",
+            part_of_speech="noun",
+            english_synonym="home",
+            status=EntryStatus.APPROVED,
+            is_mother=True,
+            initial_contributor=self.contributor,
+            last_revised_by=self.contributor,
+        )
+        group = VariantGroup.objects.create(mother_entry=mother)
+        mother.variant_group = group
+        mother.save(update_fields=["variant_group"])
+        variant = Entry.objects.create(
+            term="bahay",
+            meaning="local stale meaning",
+            pronunciation_text="ba-hay",
+            variant_type="Isamurong",
+            status=EntryStatus.APPROVED,
+            is_mother=False,
+            variant_group=group,
+            initial_contributor=self.contributor,
+            last_revised_by=self.contributor,
+        )
+        self.client.force_login(self.contributor)
+
+        response = self.client.post(f"/api/dictionary/entries/{variant.id}/revisions/start")
+
+        self.assertEqual(response.status_code, 201)
+        context = response.json()["variant_context"]
+        self.assertTrue(context["is_variant"])
+        self.assertEqual(context["variant_entry_id"], str(variant.id))
+        self.assertEqual(context["mother_entry_id"], str(mother.id))
+        self.assertEqual(context["mother_term"], "vahay")
+        self.assertEqual(context["semantic_core"]["meaning"], "house")
+        self.assertIn("meaning", context["shared_fields"])
+
+    def test_variant_revision_update_ignores_mother_shared_fields(self):
+        mother = Entry.objects.create(
+            term="vahay",
+            meaning="house",
+            part_of_speech="noun",
+            status=EntryStatus.APPROVED,
+            is_mother=True,
+            initial_contributor=self.contributor,
+            last_revised_by=self.contributor,
+        )
+        group = VariantGroup.objects.create(mother_entry=mother)
+        mother.variant_group = group
+        mother.save(update_fields=["variant_group"])
+        variant = Entry.objects.create(
+            term="bahay",
+            meaning="local stale meaning",
+            pronunciation_text="ba-hay",
+            variant_type="Isamurong",
+            status=EntryStatus.APPROVED,
+            is_mother=False,
+            variant_group=group,
+            initial_contributor=self.contributor,
+            last_revised_by=self.contributor,
+        )
+        self.client.force_login(self.contributor)
+        start_response = self.client.post(f"/api/dictionary/entries/{variant.id}/revisions/start")
+        revision_id = start_response.json()["revision_id"]
+
+        update_response = self.client.post(
+            f"/api/dictionary/revisions/{revision_id}",
+            data={
+                "meaning": "changed through variant",
+                "part_of_speech": "verb",
+                "pronunciation_text": "BA-hay",
+            },
+        )
+
+        self.assertEqual(update_response.status_code, 200)
+        proposed = update_response.json()["proposed_data"]
+        self.assertEqual(proposed["meaning"], "house")
+        self.assertEqual(proposed["part_of_speech"], "noun")
+        self.assertEqual(proposed["pronunciation_text"], "BA-hay")
 
     def test_my_revisions_includes_reviewer_notes_for_rejected_submission(self):
         revision = EntryRevision.objects.create(

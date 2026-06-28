@@ -19,6 +19,7 @@ from users.views import (
     admin_role_application_release_email_view,
     admin_role_applications_view,
     admin_user_activity_view,
+    admin_user_approval_reminder_view,
     admin_user_password_reset_view,
     admin_user_revoke_role_view,
     admin_user_status_view,
@@ -46,6 +47,7 @@ from users.views import (
     notifications_mark_read_view,
     public_accept_role_invitation_view,
     public_claim_role_access_view,
+    public_role_application_resend_activation_view,
     public_role_application_status_view,
     public_role_invitation_view,
     public_user_profile_view,
@@ -150,6 +152,11 @@ urlpatterns = [
         name="admin_user_password_reset",
     ),
     path(
+        "api/admin/users/<str:username>/approval-reminder",
+        admin_user_approval_reminder_view,
+        name="admin_user_approval_reminder",
+    ),
+    path(
         "api/admin/users/<str:username>/roles/revoke",
         admin_user_revoke_role_view,
         name="admin_user_revoke_role",
@@ -200,6 +207,11 @@ urlpatterns = [
         "api/users/role-applications/status",
         public_role_application_status_view,
         name="public_role_application_status",
+    ),
+    path(
+        "api/users/role-applications/resend-activation",
+        public_role_application_resend_activation_view,
+        name="public_role_application_resend_activation",
     ),
     path(
         "api/users/role-applications/claim-access",

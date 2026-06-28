@@ -139,6 +139,7 @@ INSTALLED_APPS = [
     "dictionary",
     "folklore",
     "reviews",
+    "resources",
 ]
 
 MIDDLEWARE = [
@@ -260,6 +261,11 @@ STATIC_ROOT = os.getenv("DJANGO_STATIC_ROOT", str(BASE_DIR / "staticfiles"))
 
 MEDIA_URL = "/media/"
 MEDIA_ROOT = os.getenv("DJANGO_MEDIA_ROOT", str(BASE_DIR / "media"))
+
+# Private uploads (e.g. resource documents) are stored OUTSIDE MEDIA_ROOT so Nginx
+# never serves them directly; they are only reachable through permission-checked
+# views. Must be included in the backup strategy alongside MEDIA_ROOT.
+PRIVATE_MEDIA_ROOT = os.getenv("DJANGO_PRIVATE_MEDIA_ROOT", str(BASE_DIR / "private_media"))
 
 
 # Security hardening controls (enable for staging/production)

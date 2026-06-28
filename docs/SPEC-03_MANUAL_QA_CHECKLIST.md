@@ -105,6 +105,8 @@ Companion execution table:
 4. Select another `pending` revision and run `Reject selected revisions`.
 5. Expected:
    - revision becomes `rejected`
+   - the contributor sees it under Needs Changes with reviewer feedback
+   - it does not remain in any pending or awaiting-quorum review queue
 
 ## D. Public Entry View Behavior
 
@@ -160,6 +162,8 @@ Expected behavior on create/update/submit draft:
 3. Review decisions expected outcomes:
    - first approve: may remain pending until quorum
    - quorum approve: revision `approved`, entry `approved`
+   - one reject: revision immediately becomes `rejected` and appears for the
+     contributor under Needs Changes
    - flag approved entry from the live Folklore detail page with notes: entry `approved_under_review`
    - Reject/Archive during re-review: entry `archived` and removed from public view
    - Return for Fixing during re-review: assigned correction draft appears in Needs Changes
@@ -168,6 +172,11 @@ Note:
 
 - Published entries are not shown as review cards in the Reviews tab.
 - Reviewers/admins should not see their own submissions in review queues.
+- Reviewers/admins should not see items they already reviewed in the active round
+  as actionable queue cards.
+- Initial pending review cards should be ordered newest first.
+- Awaiting-quorum lists should not include items already rejected by any
+  reviewer/admin in the initial review round.
 
 ---
 
@@ -273,8 +282,20 @@ Note:
 - public profile contribution credits remain visible
 - profile owners cannot hide or restore leaderboard participation
 
-12. Open a public profile as admin and use the leaderboard visibility action.
-13. Expected:
+## 9.1 Steward Learning Resources
+
+1. Log in as admin and open Steward's Desk -> Resources.
+2. Upload a PDF or presentation file with title, description, category,
+   visibility, and published status.
+3. Confirm the resource appears in the Resources tab with filename and updated
+   date.
+4. Log in as a contributor-only account.
+5. Confirm general/member resources are visible, but reviewer/admin-only
+   resources are hidden.
+6. Confirm an anonymous visitor cannot list or open resource files.
+
+7. Open a public profile as admin and use the leaderboard visibility action.
+8. Expected:
 
 - admin can hide or restore that person's leaderboard participation
 - individual leaderboard rows no longer include hidden users

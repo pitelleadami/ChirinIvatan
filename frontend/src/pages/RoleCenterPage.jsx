@@ -7,7 +7,7 @@
   - reviewer/admin direct invitations
 */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import TurnstileWidget from '../components/TurnstileWidget'
 import { apiRequest } from '../lib/api'
@@ -35,6 +35,7 @@ function PasswordEyeIcon({ visible }) {
 }
 
 const MUNICIPALITIES = ['Basco', 'Mahatao', 'Ivana', 'Uyugan', 'Sabtang', 'Itbayat']
+const SUFFIX_OPTIONS = ['', 'Jr.', 'Sr.', 'II', 'III', 'IV']
 const EMPTY_CULTURAL_AFFILIATION = { role: '', organization: '' }
 const EMPTY_OTHER_AFFILIATION = { designation: '', institution: '' }
 const USERNAME_PATTERN = /^[\w.@+-]+$/
@@ -65,6 +66,16 @@ const ROLE_OPTIONS = [
   },
 ]
 
+function prioritizeApplication(rows, applicationId) {
+  if (!applicationId) return rows
+  return [...rows].sort((a, b) => {
+    const aMatches = a.application_id === applicationId
+    const bMatches = b.application_id === applicationId
+    if (aMatches === bMatches) return 0
+    return aMatches ? -1 : 1
+  })
+}
+
 function formatDate(value) {
   if (!value) return '-'
   return new Date(value).toLocaleString()
@@ -75,6 +86,45 @@ function roleLabel(value) {
   if (value === 'admin') return 'Admin'
   if (value === 'consultant') return 'Consultant'
   return value === 'reviewer' ? 'Reviewer' : 'Contributor'
+}
+
+function suffixSelectValue(value) {
+  const suffix = String(value || '').trim()
+  if (!suffix) return ''
+  return SUFFIX_OPTIONS.includes(suffix) ? suffix : 'Other'
+}
+
+function SuffixField({ id, value, onChange }) {
+  const [otherSelected, setOtherSelected] = useState(false)
+  const selectValue = otherSelected ? 'Other' : suffixSelectValue(value)
+
+  function handleSelectChange(event) {
+    const nextValue = event.target.value
+    if (nextValue === 'Other') {
+      setOtherSelected(true)
+      if (SUFFIX_OPTIONS.includes(String(value || '').trim())) onChange('')
+      return
+    }
+    setOtherSelected(false)
+    onChange(nextValue)
+  }
+
+  return (
+    <>
+      <select id={id} value={selectValue} onChange={handleSelectChange}>
+        <option value="">None</option>
+        {SUFFIX_OPTIONS.filter(Boolean).map((suffix) => (
+          <option key={suffix} value={suffix}>
+            {suffix}
+          </option>
+        ))}
+        <option value="Other">Other</option>
+      </select>
+      {selectValue === 'Other' && (
+        <input value={value} onChange={(event) => onChange(event.target.value)} placeholder="Enter suffix" />
+      )}
+    </>
+  )
 }
 
 function applicationHelp(row) {
@@ -113,7 +163,10 @@ export default function RoleCenterPage({ currentUser = {} }) {
   const [statusEmail, setStatusEmail] = useState('')
   const [publicApplications, setPublicApplications] = useState([])
   const [statusLookupFeedback, setStatusLookupFeedback] = useState({ tone: '', text: '' })
+  const [applicationConflictAction, setApplicationConflictAction] = useState('')
   const [claimForms, setClaimForms] = useState({})
+  const [resendingActivationId, setResendingActivationId] = useState('')
+  const [requestedApplicationId, setRequestedApplicationId] = useState('')
   const [invitationToken, setInvitationToken] = useState('')
   const [invitationDetails, setInvitationDetails] = useState(null)
   const [invitationClaimForm, setInvitationClaimForm] = useState({
@@ -174,6 +227,7 @@ export default function RoleCenterPage({ currentUser = {} }) {
         ? isContributorUser || isReviewerUser || isAdminUser
         : false
   const invitedRole = ROLE_OPTIONS.find((role) => role.value === invitationDetails?.role)
+  const focusedClaimApplicationRef = useRef('')
 
   function updateApplicantField(field, value) {
     setApplicantForm((current) => ({ ...current, [field]: value }))
@@ -441,7 +495,20 @@ export default function RoleCenterPage({ currentUser = {} }) {
         setStatusEmail(applicantForm.email)
         setPublicApplications([payload])
         setSubmittedApplication(payload)
+        setApplicationConflictAction('')
       } catch (requestError) {
+        const responseBody = requestError.body || {}
+        if (responseBody.code === 'email_already_used') {
+          const rows = responseBody.rows || []
+          setStatusEmail(applicantForm.email)
+          setPublicApplications(rows)
+          setSubmittedApplication(null)
+          setApplicationConflictAction(responseBody.action || '')
+          setStatusLookupFeedback({
+            tone: responseBody.action === 'login' ? 'neutral' : 'ok',
+            text: requestError.message || 'This email is already connected to an application or account.',
+          })
+        }
         const detail = requestError.message || 'Application could not be submitted.'
         setApplicantFormError(detail)
         setApplicantMissingFields(detail.toLowerCase().includes('email') ? ['email'] : [])
@@ -480,6 +547,7 @@ export default function RoleCenterPage({ currentUser = {} }) {
         setStatusEmail(applicantForm.email)
         setPublicApplications([payload])
       }
+      setApplicationConflictAction('')
       setSubmittedApplication(payload)
       setTurnstileToken('')
       if (isAuthenticated) {
@@ -491,10 +559,11 @@ export default function RoleCenterPage({ currentUser = {} }) {
   }
 
   const lookupPublicApplications = useCallback(
-    async (emailOverride = '') => {
+    async (emailOverride = '', applicationIdOverride = '') => {
       const email = String(emailOverride || statusEmail)
         .trim()
         .toLowerCase()
+      const applicationId = String(applicationIdOverride || requestedApplicationId).trim()
       setStatusLookupFeedback({ tone: '', text: '' })
       if (!email) {
         setStatusLookupFeedback({ tone: 'error', text: 'Enter the email address used in your application.' })
@@ -516,9 +585,10 @@ export default function RoleCenterPage({ currentUser = {} }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email }),
         })
-        const rows = payload.rows || []
+        const rows = prioritizeApplication(payload.rows || [], applicationId)
         setPublicApplications(rows)
         setSubmittedApplication(null)
+        setApplicationConflictAction('')
         if (rows.length) {
           setStatusLookupFeedback({
             tone: 'ok',
@@ -540,8 +610,52 @@ export default function RoleCenterPage({ currentUser = {} }) {
         setLoading(false)
       }
     },
-    [statusEmail],
+    [requestedApplicationId, statusEmail],
   )
+
+  async function resendActivationEmail(row) {
+    const email = statusEmail.trim().toLowerCase()
+    if (!email) {
+      setStatusLookupFeedback({
+        tone: 'error',
+        text: 'Enter the same application email address before resending activation.',
+      })
+      return
+    }
+    const emailError = emailValidationMessage(email)
+    if (emailError) {
+      setStatusLookupFeedback({ tone: 'error', text: emailError })
+      return
+    }
+
+    setResendingActivationId(row.application_id)
+    setError('')
+    try {
+      const payload = await apiRequest('/api/users/role-applications/resend-activation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, application_id: row.application_id }),
+      })
+      setPublicApplications((current) =>
+        current.map((application) =>
+          application.application_id === row.application_id
+            ? payload.application || application
+            : application,
+        ),
+      )
+      setStatusLookupFeedback({
+        tone: 'ok',
+        text: payload.detail || 'Activation email sent. Please check your inbox and spam folder.',
+      })
+    } catch (requestError) {
+      setStatusLookupFeedback({
+        tone: 'error',
+        text: requestError.message || 'Could not resend activation right now. Please try again.',
+      })
+    } finally {
+      setResendingActivationId('')
+    }
+  }
 
   async function claimRoleAccess(row) {
     const email = statusEmail.trim().toLowerCase()
@@ -748,10 +862,30 @@ export default function RoleCenterPage({ currentUser = {} }) {
 
   useEffect(() => {
     if (isAuthenticated) return
-    const requestedStatusEmail = new URLSearchParams(window.location.search).get('status_email') || ''
+    const params = new URLSearchParams(window.location.search)
+    const requestedStatusEmail = params.get('status_email') || ''
+    const requestedApplication = params.get('application') || ''
     if (!requestedStatusEmail) return
-    lookupPublicApplications(requestedStatusEmail)
+    setRequestedApplicationId(requestedApplication)
+    lookupPublicApplications(requestedStatusEmail, requestedApplication)
   }, [isAuthenticated, lookupPublicApplications])
+
+  useEffect(() => {
+    if (!requestedApplicationId || !publicApplications.length) return
+    const requestedApplication = publicApplications.find(
+      (row) => row.application_id === requestedApplicationId && row.can_claim_credentials,
+    )
+    if (!requestedApplication || focusedClaimApplicationRef.current === requestedApplicationId) return
+
+    focusedClaimApplicationRef.current = requestedApplicationId
+    window.setTimeout(() => {
+      const claimPanel = document.getElementById(`claim-access-${requestedApplicationId}`)
+      if (!claimPanel) return
+      claimPanel.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      const usernameInput = document.getElementById(`claim-username-${requestedApplicationId}`)
+      usernameInput?.focus({ preventScroll: true })
+    }, 150)
+  }, [publicApplications, requestedApplicationId])
 
   useEffect(() => {
     setApplicantPolicyAccepted(false)
@@ -964,12 +1098,11 @@ export default function RoleCenterPage({ currentUser = {} }) {
                   />
                 </label>
                 <label className="field" htmlFor="invite-claim-name-extension">
-                  <span>Name Extension</span>
-                  <input
+                  <span>Suffix</span>
+                  <SuffixField
                     id="invite-claim-name-extension"
                     value={invitationClaimForm.name_extension}
-                    onChange={(event) => updateInvitationClaimField('name_extension', event.target.value)}
-                    placeholder="e.g., Jr., Sr., III"
+                    onChange={(value) => updateInvitationClaimField('name_extension', value)}
                   />
                 </label>
                 <label className="field" htmlFor="invite-claim-username">
@@ -1190,12 +1323,11 @@ export default function RoleCenterPage({ currentUser = {} }) {
                     />
                   </label>
                   <label className="field" htmlFor="role-name-extension">
-                    <span>Name Extension</span>
-                    <input
+                    <span>Suffix</span>
+                    <SuffixField
                       id="role-name-extension"
                       value={applicantForm.name_extension}
-                      onChange={(event) => updateApplicantField('name_extension', event.target.value)}
-                      placeholder="e.g., Jr., Sr., III"
+                      onChange={(value) => updateApplicantField('name_extension', value)}
                     />
                   </label>
                 </div>
@@ -1470,6 +1602,11 @@ export default function RoleCenterPage({ currentUser = {} }) {
                   <button type="submit" disabled={loading}>
                     Check Status
                   </button>
+                  {applicationConflictAction === 'login' && (
+                    <button type="button" className="ghost" onClick={() => navigate(ROUTES.login)}>
+                      Go to Login
+                    </button>
+                  )}
                 </div>
               </form>
             )}
@@ -1477,7 +1614,13 @@ export default function RoleCenterPage({ currentUser = {} }) {
             {!isAuthenticated && publicApplications.length > 0 && (
               <div className="role-application-list role-public-status-list">
                 {publicApplications.map((row) => (
-                  <article key={row.application_id} className="role-application-card">
+                  <article
+                    key={row.application_id}
+                    id={`role-application-${row.application_id}`}
+                    className={`role-application-card${
+                      row.application_id === requestedApplicationId ? ' role-application-card-target' : ''
+                    }`}
+                  >
                     <div className="queue-header">
                       <strong>{roleLabel(row.target_role)}</strong>
                       <span className={`badge status-${row.status}`}>{publicStatusLabel(row)}</span>
@@ -1487,7 +1630,10 @@ export default function RoleCenterPage({ currentUser = {} }) {
                     <p className="meta">Submitted {formatDate(row.created_at)}</p>
                     {row.decided_at && <p className="meta">Decided {formatDate(row.decided_at)}</p>}
                     {row.can_claim_credentials && (
-                      <div className="role-claim-access">
+                      <div className="role-claim-access" id={`claim-access-${row.application_id}`}>
+                        <p className="inline-ok role-claim-access-prompt">
+                          Complete your account setup here by creating your username and password.
+                        </p>
                         <div className="field-grid">
                           <label className="field" htmlFor={`claim-username-${row.application_id}`}>
                             <span>Create Username</span>
@@ -1535,6 +1681,15 @@ export default function RoleCenterPage({ currentUser = {} }) {
                           </button>
                           <button className="ghost" disabled={loading} onClick={() => navigate(ROUTES.login)}>
                             Go to Login
+                          </button>
+                          <button
+                            className="ghost"
+                            disabled={loading || resendingActivationId === row.application_id}
+                            onClick={() => resendActivationEmail(row)}
+                          >
+                            {resendingActivationId === row.application_id
+                              ? 'Sending...'
+                              : 'Resend Activation Email'}
                           </button>
                         </div>
                       </div>

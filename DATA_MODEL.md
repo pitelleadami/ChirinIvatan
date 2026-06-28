@@ -1,7 +1,7 @@
 # Chirin Ivatan Data Model and Data Strategy
 
 Status: current implementation map
-Last updated: 2026-06-06
+Last updated: 2026-06-28
 Canonical detailed companion: `docs/SPEC-03_REBUILD_SPEC.md`
 
 This document explains how data is stored, governed, credited, displayed, retained, and protected in Chirin Ivatan.
@@ -89,6 +89,12 @@ These are Git-tracked source assets, unlike user-uploaded media.
 - site content
 - maintenance mode
 
+`resources` owns:
+
+- steward learning documents
+- private PDF/presentation file storage
+- role-aware resource visibility
+
 `dictionary` owns:
 
 - dictionary live entries
@@ -166,6 +172,37 @@ Maintenance mode:
 - visitors/non-admins see the maintenance page
 - non-admin public API calls receive `503`
 - admins can still log in and disable maintenance
+
+### 5.1 Learning Resource Documents
+
+`ResourceDocument` stores steward-facing PDF and presentation files. It is
+separate from public site copy and from user-submitted dictionary/folklore media.
+
+It contains:
+
+- title
+- slug
+- description
+- category
+- uploaded file
+- visibility
+- published/hidden status
+- uploader
+- timestamps
+
+Accepted file types:
+
+- PDF
+- PPT/PPTX
+- PPS/PPSX
+
+Visibility rules:
+
+- anonymous visitors cannot list or open resource documents.
+- `public` means all signed-in stewards, not anonymous public visitors.
+- `members` means logged-in accounts.
+- `admin` means admins, reviewers, consultants, and superusers.
+- admins manage resources from Steward's Desk -> Resources.
 
 ---
 
@@ -317,6 +354,15 @@ Governance rules:
 - flag requires notes
 - one review per reviewer per round
 - approval quorum is either two reviewers or one reviewer plus one admin
+- initial pending queues exclude the signed-in user's own submissions.
+- pending queues are ordered newest submission first.
+- after one reviewer/admin rejects an initial pending revision, that revision is
+  rejected immediately and must not remain in awaiting-quorum queues.
+- after a reviewer/admin approves an item that still needs quorum, that same
+  actor sees it only in their awaiting-quorum list; other eligible reviewers can
+  still see and decide it.
+- in post-publish re-review, Return for Fixing creates an assigned correction
+  draft; Reject/Archive removes the live entry from public view.
 
 `ReviewAdminOverride` stores:
 
@@ -343,6 +389,15 @@ It includes:
 - timestamps
 
 Reviewer applications require a reason.
+
+Role application rules:
+
+- pending duplicate applications for the same email/role are blocked.
+- if an email belongs to an approved but unclaimed application, admins can resend
+  the setup link and the applicant should use the activation email.
+- rejected applications do not appear in the ordinary People list unless the
+  applicant also has an active role.
+- existing contributors may still apply for reviewer access.
 
 `RoleApplicationDecision` stores:
 

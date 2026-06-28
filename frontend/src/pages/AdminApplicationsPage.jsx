@@ -15,6 +15,7 @@ import {
   textToParagraphs,
 } from '../lib/siteContent'
 import ReviewerDashboardPage from './ReviewerDashboardPage'
+import ResourcesPage from './ResourcesPage'
 
 const STATUSES = ['pending', 'awaiting_quorum', 'approved', 'rejected', 'all']
 const STATUS_LABELS = {
@@ -42,7 +43,16 @@ const APPLICATIONS_PER_PAGE = 5
 const MOBILE_PEOPLE_PER_PAGE = 5
 const INVITATIONS_PER_PAGE = 8
 const MOBILE_INVITATIONS_PER_PAGE = 4
-const DESK_TABS = ['overview', 'reviews', 'applications', 'people', 'archive', 'site', 'contributions']
+const DESK_TABS = [
+  'overview',
+  'reviews',
+  'applications',
+  'people',
+  'archive',
+  'site',
+  'resources',
+  'contributions',
+]
 const EMPTY_ARCHIVE_INVENTORY = {
   archived: [],
   counts: { archived: 0 },
@@ -89,6 +99,14 @@ const EMPTY_FAQ_SECTION = {
   intro: '',
   roles: FAQ_ROLE_OPTIONS.map((role) => role.value),
   items: [{ ...EMPTY_FAQ_ITEM }],
+}
+const EMPTY_RESOURCE_FORM = {
+  title: '',
+  description: '',
+  category: '',
+  visibility: 'public',
+  is_published: true,
+  file: null,
 }
 const CONTRIBUTION_STATUS_LABELS = {
   draft: 'Draft',
@@ -140,6 +158,12 @@ const SITE_CONTENT_SECTIONS = [
     description: 'Edit role-specific help sections, questions, answers, and images.',
   },
   {
+    id: 'resources',
+    eyebrow: 'Help Center',
+    title: 'Guide Files',
+    description: 'Upload PDFs and presentation files shown on the public Resources page.',
+  },
+  {
     id: 'policies',
     eyebrow: 'Governance',
     title: 'Policies & Consent',
@@ -152,6 +176,17 @@ function displayName(applicant) {
   const postNominals = applicant.post_nominals || applicant.profile?.post_nominals || ''
   const baseName = fullName || applicant.username
   return baseName && postNominals ? `${baseName}, ${postNominals}` : baseName || postNominals
+}
+
+function isTruthy(value) {
+  return value === true || String(value || '').toLowerCase() === 'true'
+}
+
+function contributionSourceLabel(contribution) {
+  return (
+    contribution.contributor_display_name ||
+    (contribution.contributor_username ? `@${contribution.contributor_username}` : 'Contributor')
+  )
 }
 
 function formatDate(value) {
@@ -230,6 +265,16 @@ function preferredContributionTab({ rejected, drafts, approved, submitted }) {
 
 function contributionStatusLabel(status) {
   return CONTRIBUTION_STATUS_LABELS[status] || status || 'Unknown'
+}
+
+function resourceVisibilityLabel(value) {
+  if (value === 'members') return 'Members only'
+  if (value === 'admin') return 'Review team'
+  return 'All stewards'
+}
+
+function resourceStatusLabel(resource) {
+  return resource.is_published ? 'Published' : 'Hidden'
 }
 
 function contributionStatusDetail(row) {
@@ -513,9 +558,11 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
   function normalizeDeskTab(requestedTab) {
     if (isAdmin) return requestedTab || 'overview'
     if (canReviewRoles) {
-      return ['applications', 'reviews', 'contributions'].includes(requestedTab) ? requestedTab : 'reviews'
+      return ['applications', 'reviews', 'resources', 'contributions'].includes(requestedTab)
+        ? requestedTab
+        : 'reviews'
     }
-    return 'contributions'
+    return requestedTab === 'resources' ? 'resources' : 'contributions'
   }
 
   const initialRequestedTab = tabFromQuery()
@@ -538,6 +585,7 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
   const [selectedActivityUser, setSelectedActivityUser] = useState(null)
   const [activityRows, setActivityRows] = useState([])
   const [showActivityLog, setShowActivityLog] = useState(false)
+  const [showEmailLog, setShowEmailLog] = useState(false)
   const [showAccountControls, setShowAccountControls] = useState(false)
   const [invitations, setInvitations] = useState([])
   const [invitationPage, setInvitationPage] = useState(1)
@@ -549,6 +597,9 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
   const [folklorePublished, setFolklorePublished] = useState([])
   const [siteContentForm, setSiteContentForm] = useState(() => siteContentToForm(DEFAULT_SITE_CONTENT))
   const [activeSiteContentSection, setActiveSiteContentSection] = useState('')
+  const [resourceRows, setResourceRows] = useState([])
+  const [resourceForm, setResourceForm] = useState(EMPTY_RESOURCE_FORM)
+  const [editingResourceId, setEditingResourceId] = useState('')
   const [dictionaryContributionTab, setDictionaryContributionTab] = useState('rejected')
   const [folkloreContributionTab, setFolkloreContributionTab] = useState('rejected')
   const [dictionaryContributionPage, setDictionaryContributionPage] = useState(1)
@@ -584,10 +635,13 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
   const [loadingInvitations, setLoadingInvitations] = useState(false)
   const [loadingDrafts, setLoadingDrafts] = useState(false)
   const [loadingSiteContent, setLoadingSiteContent] = useState(false)
+  const [loadingResources, setLoadingResources] = useState(false)
   const [sendingInvite, setSendingInvite] = useState(false)
   const [creatingConsultantProfile, setCreatingConsultantProfile] = useState(false)
   const [savingSiteMode, setSavingSiteMode] = useState(false)
   const [savingSiteContent, setSavingSiteContent] = useState(false)
+  const [savingResource, setSavingResource] = useState(false)
+  const [deletingResourceId, setDeletingResourceId] = useState('')
   const [uploadingFaqImageKey, setUploadingFaqImageKey] = useState('')
   const [uploadingPartnerLogoIndex, setUploadingPartnerLogoIndex] = useState(-1)
   const [uploadingBrandLogo, setUploadingBrandLogo] = useState(false)
@@ -1021,7 +1075,14 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
 
   function changeTab(nextTab) {
     setActiveTab(nextTab)
+    if (nextTab !== 'site') setActiveSiteContentSection('')
     window.history.replaceState({}, '', `${ROUTES.adminApplications}?tab=${nextTab}`)
+  }
+
+  function changeSiteContentSection(nextSection) {
+    setActiveSiteContentSection(nextSection)
+    const sectionQuery = nextSection ? `&section=${encodeURIComponent(nextSection)}` : ''
+    window.history.replaceState({}, '', `${ROUTES.adminApplications}?tab=site${sectionQuery}`)
   }
 
   async function loadAdminOverview() {
@@ -1167,6 +1228,7 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
     setSelectedActivityUser(person)
     setActivityRows([])
     setShowActivityLog(false)
+    setShowEmailLog(false)
     setShowAccountControls(false)
     setAccountActionNotes('')
     setRoleToRevoke(preferredRoleToRevoke(person))
@@ -1177,6 +1239,7 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
     setSelectedActivityUser(null)
     setActivityRows([])
     setShowActivityLog(false)
+    setShowEmailLog(false)
     setShowAccountControls(false)
     setAccountActionNotes('')
     setRoleToRevoke('contributor')
@@ -1304,6 +1367,9 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
       } else if (action === 'password-reset') {
         endpoint = `/api/admin/users/${encodeURIComponent(person.username)}/password-reset`
         body = { notes }
+      } else if (action === 'approval-reminder') {
+        endpoint = `/api/admin/users/${encodeURIComponent(person.username)}/approval-reminder`
+        body = { notes }
       } else if (action === 'revoke-role') {
         endpoint = `/api/admin/users/${encodeURIComponent(person.username)}/roles/revoke`
         body = { role: roleToRevoke, notes }
@@ -1325,6 +1391,7 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
       const successMessages = {
         activate: 'Account reactivated.',
         deactivate: 'Account deactivated.',
+        'approval-reminder': payload.detail || 'Approval reminder sent.',
         'password-reset': payload.detail || 'Password reset link sent.',
         'revoke-role':
           roleToRevoke === 'reviewer'
@@ -1446,6 +1513,93 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
       setError(requestError.message)
     } finally {
       setLoadingSiteContent(false)
+    }
+  }
+
+  async function loadResources() {
+    if (!isAdmin) return
+    setLoadingResources(true)
+    setError('')
+    setMessage('')
+    try {
+      const payload = await apiRequest('/api/admin/resources')
+      setResourceRows(payload.rows || [])
+    } catch (requestError) {
+      setError(requestError.message)
+    } finally {
+      setLoadingResources(false)
+    }
+  }
+
+  function resetResourceForm() {
+    setResourceForm(EMPTY_RESOURCE_FORM)
+    setEditingResourceId('')
+  }
+
+  function updateResourceForm(field, value) {
+    setResourceForm((current) => ({ ...current, [field]: value }))
+  }
+
+  function editResource(resource) {
+    setEditingResourceId(resource.id)
+    setResourceForm({
+      title: resource.title || '',
+      description: resource.description || '',
+      category: resource.category === 'General' ? '' : resource.category || '',
+      visibility: resource.visibility || 'public',
+      is_published: Boolean(resource.is_published),
+      file: null,
+    })
+  }
+
+  async function saveResource() {
+    if (!isAdmin) return
+    setSavingResource(true)
+    setError('')
+    setMessage('')
+    try {
+      await apiRequest('/api/auth/csrf')
+      const body = new FormData()
+      body.append('title', resourceForm.title)
+      body.append('description', resourceForm.description)
+      body.append('category', resourceForm.category)
+      body.append('visibility', resourceForm.visibility)
+      body.append('is_published', resourceForm.is_published ? 'true' : 'false')
+      if (resourceForm.file) body.append('file', resourceForm.file)
+      const path = editingResourceId ? `/api/admin/resources/${editingResourceId}` : '/api/admin/resources'
+      const payload = await apiRequest(path, {
+        method: 'POST',
+        body,
+      })
+      setResourceRows((current) => {
+        const saved = payload.resource
+        if (!editingResourceId) return [saved, ...current]
+        return current.map((resource) => (resource.id === saved.id ? saved : resource))
+      })
+      resetResourceForm()
+      setMessage('Guide file saved.')
+    } catch (requestError) {
+      setError(requestError.message)
+    } finally {
+      setSavingResource(false)
+    }
+  }
+
+  async function deleteResource(resource) {
+    if (!isAdmin || !window.confirm(`Delete "${resource.title}"?`)) return
+    setDeletingResourceId(resource.id)
+    setError('')
+    setMessage('')
+    try {
+      await apiRequest('/api/auth/csrf')
+      await apiRequest(`/api/admin/resources/${resource.id}`, { method: 'DELETE' })
+      setResourceRows((current) => current.filter((row) => row.id !== resource.id))
+      if (editingResourceId === resource.id) resetResourceForm()
+      setMessage('Guide file deleted.')
+    } catch (requestError) {
+      setError(requestError.message)
+    } finally {
+      setDeletingResourceId('')
     }
   }
 
@@ -1931,6 +2085,11 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
       inflectedForms && typeof inflectedForms === 'object' && !Array.isArray(inflectedForms)
         ? Object.entries(inflectedForms).filter(([, value]) => value)
         : []
+    const contributorSource = contributionSourceLabel(contribution)
+    const audioSource = isTruthy(data.audio_source_is_self_recorded) ? contributorSource : data.audio_source
+    const photoSource = isTruthy(data.photo_source_is_contributor_owned)
+      ? contributorSource
+      : data.photo_source
     const relatedRows = [
       ['English synonym', data.english_synonym],
       ['Ivatan synonym', data.ivatan_synonym],
@@ -2068,8 +2227,8 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
             <p>
               {[
                 data.source_text ? `Term Source: ${data.source_text}` : '',
-                data.audio_source ? `Audio Source: ${data.audio_source}` : '',
-                data.photo_source ? `Image Source: ${data.photo_source}` : '',
+                audioSource ? `Audio Source: ${audioSource}` : '',
+                photoSource ? `Image Source: ${photoSource}` : '',
               ]
                 .filter(Boolean)
                 .join(', ') || 'No external source notes.'}
@@ -2642,11 +2801,11 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
   useEffect(() => {
     if (!isAuthenticated) return
     if (isAdmin) return
-    if (canReviewRoles && !['applications', 'reviews', 'contributions'].includes(activeTab)) {
+    if (canReviewRoles && !['applications', 'reviews', 'resources', 'contributions'].includes(activeTab)) {
       setActiveTab('reviews')
       return
     }
-    if (!canReviewRoles && activeTab !== 'contributions') {
+    if (!canReviewRoles && !['resources', 'contributions'].includes(activeTab)) {
       setActiveTab('contributions')
     }
   }, [activeTab, canReviewRoles, isAdmin, isAuthenticated])
@@ -2655,6 +2814,12 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
     function syncTabFromUrl() {
       const requestedTab = tabFromQuery()
       if (requestedTab) setActiveTab(normalizeDeskTab(requestedTab))
+      const requestedSection = new URLSearchParams(window.location.search).get('section') || ''
+      if (SITE_CONTENT_SECTIONS.some((section) => section.id === requestedSection)) {
+        setActiveSiteContentSection(requestedSection)
+      } else if (requestedTab !== 'site') {
+        setActiveSiteContentSection('')
+      }
     }
 
     syncTabFromUrl()
@@ -2752,6 +2917,12 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
   }, [activeTab, isAdmin])
 
   useEffect(() => {
+    if (!isAdmin || activeTab !== 'site' || activeSiteContentSection !== 'resources') return
+    loadResources()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, activeSiteContentSection, isAdmin])
+
+  useEffect(() => {
     setApplicationPage(1)
   }, [statusFilter])
 
@@ -2777,6 +2948,9 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
 
   const selectedRevokableRoles = revokableRolesForPerson(selectedActivityUser)
   const selectedCanRevokeRole = selectedRevokableRoles.includes(roleToRevoke)
+  const selectedPendingActivationApplication =
+    selectedActivityUser?.pending_activation_applications?.[0] || null
+  const selectedEmailLog = selectedActivityUser?.email_log || []
 
   if (!isAuthenticated) {
     return (
@@ -2884,64 +3058,68 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
         </button>
       </div>
 
-      {canReviewRoles && (
-        <div className="admin-tabs" aria-label="Admin sections">
-          {isAdmin && (
-            <button
-              className={activeTab === 'overview' ? 'admin-tab active' : 'admin-tab'}
-              onClick={() => changeTab('overview')}
-            >
-              Overview
-            </button>
-          )}
-          {canReviewRoles && (
-            <button
-              className={activeTab === 'reviews' ? 'admin-tab active' : 'admin-tab'}
-              onClick={() => changeTab('reviews')}
-            >
-              Reviews
-            </button>
-          )}
-          {canReviewRoles && (
-            <button
-              className={activeTab === 'applications' ? 'admin-tab active' : 'admin-tab'}
-              onClick={() => changeTab('applications')}
-            >
-              Applications
-            </button>
-          )}
-          {isAdmin && (
-            <button
-              className={activeTab === 'people' ? 'admin-tab active' : 'admin-tab'}
-              onClick={() => changeTab('people')}
-            >
-              People
-            </button>
-          )}
-          {isAdmin && (
-            <button
-              className={activeTab === 'archive' ? 'admin-tab active' : 'admin-tab'}
-              onClick={() => changeTab('archive')}
-            >
-              Archive
-            </button>
-          )}
-          {isAdmin && (
-            <button
-              className={activeTab === 'site' ? 'admin-tab active' : 'admin-tab'}
-              onClick={() => changeTab('site')}
-            >
-              Site Content
-            </button>
-          )}
+      <div className="admin-tabs" aria-label="Steward's Desk sections">
+        {isAdmin && (
           <button
-            className={activeTab === 'contributions' ? 'admin-tab active' : 'admin-tab'}
-            onClick={() => changeTab('contributions')}
+            className={activeTab === 'overview' ? 'admin-tab active' : 'admin-tab'}
+            onClick={() => changeTab('overview')}
           >
-            Contributions
+            Overview
           </button>
-        </div>
-      )}
+        )}
+        {canReviewRoles && (
+          <button
+            className={activeTab === 'reviews' ? 'admin-tab active' : 'admin-tab'}
+            onClick={() => changeTab('reviews')}
+          >
+            Reviews
+          </button>
+        )}
+        {canReviewRoles && (
+          <button
+            className={activeTab === 'applications' ? 'admin-tab active' : 'admin-tab'}
+            onClick={() => changeTab('applications')}
+          >
+            Applications
+          </button>
+        )}
+        {isAdmin && (
+          <button
+            className={activeTab === 'people' ? 'admin-tab active' : 'admin-tab'}
+            onClick={() => changeTab('people')}
+          >
+            People
+          </button>
+        )}
+        {isAdmin && (
+          <button
+            className={activeTab === 'archive' ? 'admin-tab active' : 'admin-tab'}
+            onClick={() => changeTab('archive')}
+          >
+            Archive
+          </button>
+        )}
+        {isAdmin && (
+          <button
+            className={activeTab === 'site' ? 'admin-tab active' : 'admin-tab'}
+            onClick={() => changeTab('site')}
+          >
+            Site Content
+          </button>
+        )}
+        <button
+          className={activeTab === 'resources' ? 'admin-tab active' : 'admin-tab'}
+          onClick={() => changeTab('resources')}
+        >
+          Resources
+        </button>
+        <button
+          className={activeTab === 'contributions' ? 'admin-tab active' : 'admin-tab'}
+          onClick={() => changeTab('contributions')}
+        >
+          Contributions
+        </button>
+      </div>
 
       {isAdmin && activeTab === 'overview' && (
         <>
@@ -3314,7 +3492,7 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
                         />
                       </label>
                       <label className="field" htmlFor="consultant-post-nominals">
-                        <span>Post-nominals / honorifics</span>
+                        <span>Credentials</span>
                         <input
                           id="consultant-post-nominals"
                           value={consultantProfile.post_nominals}
@@ -3641,6 +3819,14 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
                           </span>
                         </dd>
                       </div>
+                      {selectedPendingActivationApplication && (
+                        <div>
+                          <dt>Join Status</dt>
+                          <dd>
+                            <span className="badge status-pending">Approved, not joined</span>
+                          </dd>
+                        </div>
+                      )}
                       <div>
                         <dt>Suspicious Review</dt>
                         <dd>
@@ -3708,6 +3894,26 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
                       >
                         Edit Managed Profile
                       </button>
+                    )}
+                    {selectedPendingActivationApplication && (
+                      <>
+                        <button
+                          className="compact-button"
+                          type="button"
+                          disabled={Boolean(accountActionLoading)}
+                          onClick={() => runAccountAction(selectedActivityUser, 'approval-reminder')}
+                        >
+                          {accountActionLoading === 'approval-reminder' ? 'Sending...' : 'Resend Setup Link'}
+                        </button>
+                        <a
+                          className="ghost compact-button admin-invite-link"
+                          href={selectedPendingActivationApplication.access_url}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Open setup link
+                        </a>
+                      </>
                     )}
                     <button
                       className="ghost compact-button"
@@ -3785,6 +3991,15 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
                     </button>
                     <button
                       className="ghost compact-button"
+                      type="button"
+                      aria-expanded={showEmailLog}
+                      onClick={() => setShowEmailLog((current) => !current)}
+                    >
+                      {showEmailLog ? 'Hide email log' : 'View email log'}
+                    </button>
+                    <button
+                      className="ghost compact-button"
+                      type="button"
                       disabled={loadingActivity}
                       onClick={() => loadPersonActivity(selectedActivityUser)}
                     >
@@ -3942,6 +4157,41 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
                         </button>
                       </div>
                     </div>
+                  )}
+                  {showEmailLog && (
+                    <section className="admin-person-email-log">
+                      <div className="section-heading">
+                        <div>
+                          <p className="profile-kicker">Email Log</p>
+                          <h3>Messages Sent</h3>
+                        </div>
+                      </div>
+                      {selectedEmailLog.length === 0 ? (
+                        <p className="muted">
+                          No setup reminder or password reset emails have been sent yet.
+                        </p>
+                      ) : (
+                        <div className="admin-activity-list admin-email-log-list">
+                          {selectedEmailLog.map((row) => (
+                            <article key={row.action_id} className="admin-activity-row">
+                              <div>
+                                <strong>{row.label}</strong>
+                                <p>
+                                  {[
+                                    row.recipient_email,
+                                    row.sent_by ? `sent by @${row.sent_by}` : '',
+                                    row.notes,
+                                  ]
+                                    .filter(Boolean)
+                                    .join(' · ')}
+                                </p>
+                              </div>
+                              <time>{formatDate(row.created_at)}</time>
+                            </article>
+                          ))}
+                        </div>
+                      )}
+                    </section>
                   )}
                   {showActivityLog && loadingActivity && <p className="muted">Loading action log...</p>}
                   {showActivityLog && !loadingActivity && activityRows.length === 0 && (
@@ -4106,9 +4356,14 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
           {error && <p className="alert error">{error}</p>}
           {message && <p className="alert ok">{message}</p>}
           {loadingSiteContent && <p className="muted">Loading site content...</p>}
-          {activeSiteContentSection && (
+          {activeSiteContentSection && activeSiteContentSection !== 'resources' && (
             <p className="alert warning">
               You are editing live public site text. Saving will publish this change for visitors immediately.
+            </p>
+          )}
+          {activeSiteContentSection === 'resources' && (
+            <p className="alert warning">
+              Guide file changes update the Resources page as soon as each file is saved.
             </p>
           )}
 
@@ -4130,7 +4385,7 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
                 <button
                   type="button"
                   className="ghost compact-button"
-                  onClick={() => setActiveSiteContentSection('')}
+                  onClick={() => changeSiteContentSection('')}
                 >
                   Close Editor
                 </button>
@@ -4143,7 +4398,7 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
                   key={section.id}
                   className={`admin-site-content-menu-card${activeSiteContentSection === section.id ? ' active' : ''}`}
                   aria-pressed={activeSiteContentSection === section.id}
-                  onClick={() => setActiveSiteContentSection(section.id)}
+                  onClick={() => changeSiteContentSection(section.id)}
                 >
                   <span className="profile-kicker">{section.eyebrow}</span>
                   <strong>{section.title}</strong>
@@ -4737,6 +4992,181 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
             </section>
           )}
 
+          {activeSiteContentSection === 'resources' && (
+            <section
+              className="admin-app-card admin-site-content-card admin-site-editor-card admin-resource-manager"
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && event.target?.tagName !== 'TEXTAREA') event.preventDefault()
+              }}
+            >
+              <div className="section-heading">
+                <div>
+                  <p className="profile-kicker">Help Center</p>
+                  <h2>Guide Files</h2>
+                  <p className="muted">Upload PDFs and presentation files for the public Resources page.</p>
+                </div>
+                <a className="ghost compact-button" href={ROUTES.resources} target="_blank" rel="noreferrer">
+                  View Resources Page
+                </a>
+              </div>
+
+              <div className="admin-resource-grid">
+                <section className="admin-resource-form-panel">
+                  <div className="section-heading compact-heading">
+                    <h3>{editingResourceId ? 'Edit Guide File' : 'Add Guide File'}</h3>
+                    {editingResourceId && (
+                      <button type="button" className="ghost compact-button" onClick={resetResourceForm}>
+                        New File
+                      </button>
+                    )}
+                  </div>
+                  <label className="field" htmlFor="resource-title">
+                    <span>Title</span>
+                    <input
+                      id="resource-title"
+                      value={resourceForm.title}
+                      onChange={(event) => updateResourceForm('title', event.target.value)}
+                    />
+                  </label>
+                  <label className="field" htmlFor="resource-description">
+                    <span>Description</span>
+                    <textarea
+                      id="resource-description"
+                      rows={4}
+                      value={resourceForm.description}
+                      onChange={(event) => updateResourceForm('description', event.target.value)}
+                    />
+                  </label>
+                  <div className="field-grid">
+                    <label className="field" htmlFor="resource-category">
+                      <span>Category</span>
+                      <input
+                        id="resource-category"
+                        value={resourceForm.category}
+                        onChange={(event) => updateResourceForm('category', event.target.value)}
+                        placeholder="Language Guides"
+                      />
+                    </label>
+                    <label className="field" htmlFor="resource-visibility">
+                      <span>Visibility</span>
+                      <select
+                        id="resource-visibility"
+                        value={resourceForm.visibility}
+                        onChange={(event) => updateResourceForm('visibility', event.target.value)}
+                      >
+                        <option value="public">All stewards</option>
+                        <option value="members">Members only</option>
+                        <option value="admin">Review team</option>
+                      </select>
+                    </label>
+                  </div>
+                  <label className="field" htmlFor="resource-file">
+                    <span>{editingResourceId ? 'Replace file' : 'File'}</span>
+                    <input
+                      id="resource-file"
+                      type="file"
+                      accept=".pdf,.ppt,.pptx,.pps,.ppsx,application/pdf,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                      onChange={(event) => updateResourceForm('file', event.target.files?.[0] || null)}
+                    />
+                  </label>
+                  <label className="checkbox-inline checkbox-inline-spacious" htmlFor="resource-published">
+                    <input
+                      id="resource-published"
+                      type="checkbox"
+                      checked={resourceForm.is_published}
+                      onChange={(event) => updateResourceForm('is_published', event.target.checked)}
+                    />
+                    <span>Show this file on the Resources page</span>
+                  </label>
+                  <div className="actions">
+                    <button
+                      type="button"
+                      disabled={
+                        savingResource ||
+                        !resourceForm.title.trim() ||
+                        (!editingResourceId && !resourceForm.file)
+                      }
+                      onClick={saveResource}
+                    >
+                      {savingResource
+                        ? 'Saving...'
+                        : editingResourceId
+                          ? 'Save Guide File'
+                          : 'Upload Guide File'}
+                    </button>
+                    <button type="button" className="ghost" onClick={resetResourceForm}>
+                      Clear
+                    </button>
+                  </div>
+                </section>
+
+                <section className="admin-resource-list-panel">
+                  <div className="section-heading compact-heading">
+                    <h3>Uploaded Files</h3>
+                    <button
+                      type="button"
+                      className="ghost compact-button"
+                      disabled={loadingResources}
+                      onClick={loadResources}
+                    >
+                      {loadingResources ? 'Loading...' : 'Refresh'}
+                    </button>
+                  </div>
+                  {!loadingResources && resourceRows.length === 0 && (
+                    <p className="muted">No guide files uploaded yet.</p>
+                  )}
+                  <div className="admin-resource-list">
+                    {resourceRows.map((resource) => (
+                      <article className="admin-resource-row" key={resource.id}>
+                        <div>
+                          <strong>{resource.title}</strong>
+                          {resource.description && <p>{resource.description}</p>}
+                          <p className="meta">
+                            {[
+                              resource.category,
+                              resourceVisibilityLabel(resource.visibility),
+                              resourceStatusLabel(resource),
+                            ]
+                              .filter(Boolean)
+                              .join(' · ')}
+                          </p>
+                          {resource.filename && <p className="meta">{resource.filename}</p>}
+                        </div>
+                        <div className="admin-resource-actions">
+                          {resource.download_url && (
+                            <a
+                              className="ghost compact-button"
+                              href={`${import.meta.env.VITE_API_BASE || ''}${resource.download_url}`}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              Open
+                            </a>
+                          )}
+                          <button
+                            type="button"
+                            className="ghost compact-button"
+                            onClick={() => editResource(resource)}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            className="ghost compact-button danger"
+                            disabled={deletingResourceId === resource.id}
+                            onClick={() => deleteResource(resource)}
+                          >
+                            {deletingResourceId === resource.id ? 'Deleting...' : 'Delete'}
+                          </button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </section>
+              </div>
+            </section>
+          )}
+
           {activeSiteContentSection === 'policies' && (
             <section className="admin-app-card admin-site-content-card admin-site-editor-card">
               <div className="section-heading">
@@ -4779,7 +5209,7 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
             </section>
           )}
 
-          {activeSiteContentSection && (
+          {activeSiteContentSection && activeSiteContentSection !== 'resources' && (
             <div className="admin-site-save-bar">
               <button type="submit" disabled={savingSiteContent || loadingSiteContent}>
                 {savingSiteContent ? 'Saving...' : 'Save Site Content'}
@@ -4808,6 +5238,8 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
           />
         </form>
       )}
+
+      {activeTab === 'resources' && <ResourcesPage currentUser={currentUser} />}
 
       {activeTab === 'contributions' && (
         <section className="admin-contributions-layout">
@@ -4932,9 +5364,15 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
                     {contribution.status === 'approved' && (
                       <button
                         className="ghost compact-button"
-                        onClick={() => navigate(ROUTES.dictionaryView)}
+                        onClick={() =>
+                          navigate(
+                            contribution.entry_id
+                              ? `${ROUTES.dictionaryView}?entry_id=${encodeURIComponent(contribution.entry_id)}`
+                              : ROUTES.dictionaryView,
+                          )
+                        }
                       >
-                        View Dictionary
+                        View Published Entry
                       </button>
                     )}
                   </article>
@@ -5049,8 +5487,17 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
                       </button>
                     )}
                     {contribution.status === 'approved' && (
-                      <button className="ghost compact-button" onClick={() => navigate(ROUTES.folkloreView)}>
-                        View Folklore
+                      <button
+                        className="ghost compact-button"
+                        onClick={() =>
+                          navigate(
+                            contribution.entry_id
+                              ? `${ROUTES.folkloreView}?entry_id=${encodeURIComponent(contribution.entry_id)}`
+                              : ROUTES.folkloreView,
+                          )
+                        }
+                      >
+                        View Published Entry
                       </button>
                     )}
                   </article>

@@ -70,6 +70,13 @@ function errorMessageFor(response, rawText, body) {
   return body.detail || SUPPORT_ERRORS.RESPONSE
 }
 
+function apiErrorFor(response, rawText, body) {
+  const error = new Error(errorMessageFor(response, rawText, body))
+  error.status = response.status
+  error.body = body
+  return error
+}
+
 export async function apiRequest(path, options = {}) {
   // Single fetch wrapper used by all pages.
   const response = await fetchApi(path, options)
@@ -90,13 +97,13 @@ export async function apiRequest(path, options = {}) {
       if (isCsrfFailure(retryResponse, retryParsed.rawText, retryParsed.body)) {
         throw new Error(SUPPORT_ERRORS.SESSION)
       }
-      throw new Error(errorMessageFor(retryResponse, retryParsed.rawText, retryParsed.body))
+      throw apiErrorFor(retryResponse, retryParsed.rawText, retryParsed.body)
     }
     return retryParsed.body
   }
 
   if (!response.ok) {
-    throw new Error(errorMessageFor(response, rawText, body))
+    throw apiErrorFor(response, rawText, body)
   }
   return body
 }
