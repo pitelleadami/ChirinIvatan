@@ -451,9 +451,17 @@ def reviewer_dashboard_view(request):
     pending_initial_qs = EntryRevision.objects.filter(
         status=EntryRevision.Status.PENDING,
     ).select_related("contributor", "contributor__profile", "entry")
-    pending_initial_qs = pending_initial_qs.exclude(
-        reviews__reviewer=user,
-        reviews__review_round=0,
+    pending_initial_qs = pending_initial_qs.exclude(contributor=user)
+    pending_initial_qs = (
+        pending_initial_qs.exclude(
+            reviews__reviewer=user,
+            reviews__review_round=0,
+        )
+        .exclude(
+            reviews__decision=Review.Decision.REJECT,
+            reviews__review_round=0,
+        )
+        .order_by("-created_at")
     )
 
     pending_initial = [
@@ -463,9 +471,17 @@ def reviewer_dashboard_view(request):
     pending_folklore_qs = FolkloreRevision.objects.filter(
         status=FolkloreRevision.Status.PENDING
     ).select_related("contributor", "contributor__profile", "entry")
-    pending_folklore_qs = pending_folklore_qs.exclude(
-        reviews__reviewer=user,
-        reviews__review_round=0,
+    pending_folklore_qs = pending_folklore_qs.exclude(contributor=user)
+    pending_folklore_qs = (
+        pending_folklore_qs.exclude(
+            reviews__reviewer=user,
+            reviews__review_round=0,
+        )
+        .exclude(
+            reviews__decision=FolkloreReview.Decision.REJECT,
+            reviews__review_round=0,
+        )
+        .order_by("-created_at")
     )
     pending_folklore = [
         _serialize_pending_folklore(revision, request=request) for revision in pending_folklore_qs
@@ -479,6 +495,8 @@ def reviewer_dashboard_view(request):
             entry__status=EntryStatus.APPROVED_UNDER_REVIEW,
         )
         .select_related("contributor", "contributor__profile", "entry")
+        .exclude(contributor=user)
+        .order_by("-approved_at", "-created_at")
         .distinct()
     )
     pending_rereview = []
@@ -500,6 +518,9 @@ def reviewer_dashboard_view(request):
         status=FolkloreRevision.Status.APPROVED,
         entry__status=FolkloreEntry.Status.APPROVED_UNDER_REVIEW,
     ).select_related("contributor", "contributor__profile", "entry")
+    pending_folklore_rereview_qs = pending_folklore_rereview_qs.exclude(contributor=user).order_by(
+        "-approved_at", "-created_at"
+    )
     pending_folklore_rereview = []
     for revision in pending_folklore_rereview_qs:
         current_round = (
@@ -549,6 +570,12 @@ def reviewer_dashboard_view(request):
 
         if review.review_round == 0:
             if rev.status != EntryRevision.Status.PENDING:
+                continue
+            if Review.objects.filter(
+                revision=rev,
+                review_round=0,
+                decision=Review.Decision.REJECT,
+            ).exists():
                 continue
             reviewer_ids, admin_ids = _approval_sets_for_round(rev, 0)
             item = _serialize_pending_revision(rev, request=request)
@@ -607,6 +634,12 @@ def reviewer_dashboard_view(request):
 
         if review.review_round == 0:
             if revision.status != FolkloreRevision.Status.PENDING:
+                continue
+            if FolkloreReview.objects.filter(
+                folklore_revision=revision,
+                review_round=0,
+                decision=FolkloreReview.Decision.REJECT,
+            ).exists():
                 continue
             reviewer_ids, admin_ids = _folklore_approval_sets_for_round(
                 revision,

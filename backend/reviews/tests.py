@@ -1,11 +1,13 @@
 import json
 import tempfile
+from datetime import timedelta
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
+from django.utils import timezone
 
 from dictionary.models import Entry, EntryRevision, EntryStatus
 from folklore.models import FolkloreEntry, FolkloreRevision
@@ -446,6 +448,35 @@ class ReviewerDashboardApiTests(TestCase):
         pending_ids = {item["revision_id"] for item in payload["pending_submissions"]}
         self.assertNotIn(str(rev.id), pending_ids)
 
+    def test_dashboard_excludes_own_pending_dictionary_submission(self):
+        own_revision = self._pending_revision(contributor=self.reviewer1, term="own-term")
+        other_revision = self._pending_revision(contributor=self.contributor, term="other-term")
+
+        self.client.force_login(self.reviewer1)
+        response = self.client.get("/api/reviews/dashboard")
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        pending_ids = {item["revision_id"] for item in payload["pending_submissions"]}
+        self.assertNotIn(str(own_revision.id), pending_ids)
+        self.assertIn(str(other_revision.id), pending_ids)
+
+    def test_dashboard_orders_pending_dictionary_submissions_newest_first(self):
+        older_revision = self._pending_revision(contributor=self.contributor, term="older")
+        newer_revision = self._pending_revision(contributor=self.contributor, term="newer")
+        EntryRevision.objects.filter(id=older_revision.id).update(
+            created_at=timezone.now() - timedelta(days=1)
+        )
+        EntryRevision.objects.filter(id=newer_revision.id).update(created_at=timezone.now())
+
+        self.client.force_login(self.reviewer1)
+        response = self.client.get("/api/reviews/dashboard")
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        terms = [item["term"] for item in payload["pending_submissions"]]
+        self.assertEqual(terms[:2], ["newer", "older"])
+
     def test_awaiting_quorum_after_my_approval_lists_pending_item(self):
         rev = self._pending_revision(contributor=self.contributor, term="awaiting")
         submit_review(
@@ -476,6 +507,68 @@ class ReviewerDashboardApiTests(TestCase):
             awaiting_row["quorum_requirement"],
             "Needs 1 more reviewer/admin approval",
         )
+
+    def test_dashboard_keeps_item_pending_for_other_reviewer_after_first_approval(self):
+        rev = self._pending_revision(contributor=self.contributor, term="needs-second")
+        submit_review(
+            revision=rev,
+            reviewer=self.reviewer1,
+            decision=Review.Decision.APPROVE,
+            notes="first approval",
+        )
+
+        self.client.force_login(self.admin)
+        response = self.client.get("/api/reviews/dashboard")
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        pending_ids = {item["revision_id"] for item in payload["pending_submissions"]}
+        self.assertIn(str(rev.id), pending_ids)
+
+    def test_dashboard_excludes_stale_pending_dictionary_revision_with_rejection(self):
+        rev = self._pending_revision(contributor=self.contributor, term="stale-rejected")
+        Review.objects.create(
+            revision=rev,
+            reviewer=self.reviewer1,
+            decision=Review.Decision.REJECT,
+            notes="Reject once",
+            review_round=0,
+        )
+
+        self.client.force_login(self.admin)
+        response = self.client.get("/api/reviews/dashboard")
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        pending_ids = {item["revision_id"] for item in payload["pending_submissions"]}
+        self.assertNotIn(str(rev.id), pending_ids)
+
+    def test_dashboard_excludes_stale_awaiting_dictionary_revision_with_rejection(self):
+        rev = self._pending_revision(contributor=self.contributor, term="stale-awaiting")
+        Review.objects.create(
+            revision=rev,
+            reviewer=self.reviewer1,
+            decision=Review.Decision.REJECT,
+            notes="Reject once",
+            review_round=0,
+        )
+        Review.objects.create(
+            revision=rev,
+            reviewer=self.reviewer2,
+            decision=Review.Decision.APPROVE,
+            notes="Late approval",
+            review_round=0,
+        )
+
+        self.client.force_login(self.reviewer2)
+        response = self.client.get("/api/reviews/dashboard")
+
+        self.assertEqual(response.status_code, 200)
+        payload = json.loads(response.content)
+        awaiting_ids = {
+            item["revision_id"] for item in payload["awaiting_quorum_after_my_approval"]
+        }
+        self.assertNotIn(str(rev.id), awaiting_ids)
 
     def test_dashboard_returns_grouped_sections_with_legacy_keys(self):
         rev = self._pending_revision(contributor=self.contributor, term="grouped")
