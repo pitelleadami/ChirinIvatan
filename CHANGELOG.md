@@ -4,6 +4,37 @@ Plain-language record of visible product changes, workflow decisions, and public
 
 This file is reconstructed from Git history, project specs, deployment notes, and recent implementation work. It is not a full commit log. Use Git history for exact file-level changes.
 
+## 2026-06-28
+
+### Review And Re-Review Governance
+
+- Clarified and enforced that one rejection on an initial pending submission returns
+  the revision to the contributor as rejected/Needs Changes.
+- Tightened reviewer queues so reviewers/admins see eligible items in newest-first
+  order, excluding their own submissions and items they already reviewed in the
+  current round.
+- Hid stale quorum rows once a revision has already received a rejection in the
+  active initial review round.
+- Fixed Return for Fixing in re-review so the selected approved snapshot and
+  assigned contributor are sent correctly.
+
+### Accounts And Onboarding
+
+- Added duplicate role-application handling for reused email/application cases,
+  with guidance to check activation email, wait for review, or log in if already
+  activated.
+- Improved profile suffix/credentials handling so names do not duplicate when a
+  user enters their name again in the suffix field.
+
+### Public Counts, Resources, And Sharing
+
+- Standardized public live-entry totals across home, dictionary, and leaderboard
+  views.
+- Moved learning resources into Steward's Desk instead of the public top bar.
+- Added admin-managed resource documents with title, description, category, file,
+  publication status, and role-based visibility.
+- Improved mobile recognition image export and caption-copy behavior.
+
 ## 2026-06-22
 
 ### Admin Account Follow-Up

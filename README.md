@@ -60,12 +60,16 @@ trustworthy.
 - Revision-based submission workflow with reviewer approval before publishing
 - Reviewer approval that requires a quorum (two reviewers, or one reviewer and an admin)
 - Reject and request-revision flow with feedback sent back to the contributor
-- Role application and invitation process for reviewers and consultants
+- Role application and invitation process with duplicate-application protection,
+  activation follow-up, and reviewer application reasons
+- Steward-only learning resources for approved accounts, with admin-managed PDF
+  and presentation uploads
 - Contribution recognition: levels, badges, and leaderboards
 - Notifications for submission status and review activity
 - Admin maintenance mode and content moderation tools
 - Source privacy: a contributor's personal source is hidden when the entry is from
-  their own knowledge
+  their own knowledge, while contributor-owned media can display "Audio by" or
+  "Photo by" attribution
 
 ## Screenshots
 

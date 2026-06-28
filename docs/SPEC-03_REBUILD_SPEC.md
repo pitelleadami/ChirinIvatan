@@ -599,6 +599,12 @@ Rules:
 
 - reviewer applications require `reviewer_reason`.
 - pending duplicate application for same role is rejected.
+- duplicate applications using an email address already tied to a pending,
+  approved, or active application should be blocked with a user-facing message
+  that points the applicant to the right next step: wait for review, check the
+  activation email, or log in if already activated.
+- rejected applications do not make the applicant visible in the People list
+  unless that person also has an active role.
 - users with active role access cannot apply for that same/lower access.
 
 ### 4.13 RoleApplicationDecision
@@ -867,6 +873,13 @@ Rules:
 - reject requires notes
 - one reject immediately rejects revision
 - approve waits for quorum
+- pending queues exclude the signed-in user's own submissions.
+- pending queues exclude rows already reviewed by the signed-in reviewer/admin in
+  the active round.
+- pending queues are sorted newest submission first.
+- once any reviewer/admin rejects an initial pending revision, it must disappear
+  from pending and awaiting-quorum queues and return to the contributor as
+  rejected/Needs Changes.
 
 Approval quorum:
 
@@ -896,6 +909,9 @@ Re-review decisions:
 - Return for Fixing creates an assigned correction draft from the selected approved snapshot
 - returned correction drafts remain editable as draft revisions internally but appear in the assignee workspace as Needs Changes
 - approval quorum restores entry to `approved`
+- the reviewer/admin who flagged an item must not decide that same re-review
+  round unless separately allowed by policy; the default queue behavior excludes
+  items already acted on by the signed-in reviewer/admin in that round.
 
 ### 6.3 Admin Override
 
@@ -1212,7 +1228,29 @@ Login returns authenticated user plus groups/profile status and the two onboardi
 - `POST/PATCH /api/site-content` admin only
 - `POST /api/site-content/faq-media` admin only
 
-### 11.3 Profiles and Users
+### 11.3 Learning Resources
+
+- `GET /api/resources`
+  - authentication required
+  - returns published resources visible to the signed-in user's role
+- `GET /api/resources/<slug>/download`
+  - authentication required
+  - returns the file inline only if the signed-in user can view it
+- `GET /api/admin/resources`
+  - admin only
+  - returns all resource documents, including hidden rows
+- `POST /api/admin/resources`
+  - admin only
+  - multipart upload for title, description, category, visibility, published flag,
+    and PDF/presentation file
+- `POST /api/admin/resources/<resource_id>`
+  - admin only
+  - updates metadata and optionally replaces the file
+- `DELETE /api/admin/resources/<resource_id>`
+  - admin only
+  - deletes the database row and stored file
+
+### 11.4 Profiles and Users
 
 - `GET/PATCH /api/profile/my`
 - `GET /api/users/<username>`
@@ -1223,7 +1261,7 @@ Login returns authenticated user plus groups/profile status and the two onboardi
 - `GET /api/admin/users` admin only
 - `GET /api/admin/users/<username>/activity` admin only
 
-### 11.4 Role Onboarding
+### 11.5 Role Onboarding
 
 - `POST /api/users/role-applications`
 - `GET /api/users/role-applications/my`
@@ -1237,7 +1275,7 @@ Login returns authenticated user plus groups/profile status and the two onboardi
 - `POST /api/admin/role-invitations/email`
 - `POST /api/admin/consultant-profiles`
 
-### 11.5 Dictionary
+### 11.6 Dictionary
 
 - `GET /api/dictionary/entries`
 - `GET /api/dictionary/english-terms`
@@ -1249,7 +1287,7 @@ Login returns authenticated user plus groups/profile status and the two onboardi
 - `POST /api/dictionary/revisions/<revision_id>/delete`
 - `POST /api/dictionary/entries/<entry_id>/revisions/start`
 
-### 11.6 Folklore
+### 11.7 Folklore
 
 - `GET /api/folklore/entries`
 - `GET /api/folklore/entries/<entry_id>`
@@ -1266,14 +1304,14 @@ Compatibility aliases:
 - `PATCH /api/folklore/entries/<revision_id>/draft`
 - `POST /api/folklore/entries/<revision_id>/submit`
 
-### 11.7 Reviews
+### 11.8 Reviews
 
 - `GET /api/reviews/dashboard`
 - `POST /api/reviews/dictionary/submit`
 - `POST /api/reviews/folklore/submit`
 - `POST /api/reviews/admin/override`
 
-### 11.8 Leaderboards and Yaru
+### 11.9 Leaderboards and Yaru
 
 - `GET /api/leaderboard/global`
 - `GET /api/leaderboard/municipality`
@@ -1281,7 +1319,7 @@ Compatibility aliases:
 - `GET /api/leaderboard/municipality-winners`
 - `GET /api/yaru/members`
 
-### 11.9 Notifications
+### 11.10 Notifications
 
 - `GET /api/notifications`
   - authentication required
@@ -1507,6 +1545,8 @@ Must include:
   - dictionary audio/photo URLs, source and license fields, variants with variant audio, etymology, examples, and related words
   - folklore rich text content, uploaded photo/audio, external media URL, source/media source, and license
 - no self-submissions in queues
+- pending queues sorted newest first
+- no stale awaiting-quorum rows after any initial-round rejection
 - my recent reviews
 - items awaiting quorum after my approval
 
@@ -1521,6 +1561,7 @@ Must include tabs/sections:
 - Applications
 - Invitations
 - People
+- Resources
 - Contributions
 - Site Content
 
@@ -1586,6 +1627,15 @@ Site Content section:
 - role visibility checkboxes
 - FAQ image URL/upload
 - sticky save bar
+
+Resources section:
+
+- available to signed-in steward accounts through Steward's Desk, not as a
+  visitor-only public top-nav page
+- admins can create, edit, hide/show, replace files, open, and delete resources
+- non-admin stewards can browse/open only resources visible to their role
+- each resource shows title, optional description, category, filename, visibility,
+  published status where relevant, and updated date
 
 ### 12.13 Public Profile
 
