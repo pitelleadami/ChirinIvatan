@@ -1075,7 +1075,14 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
 
   function changeTab(nextTab) {
     setActiveTab(nextTab)
+    if (nextTab !== 'site') setActiveSiteContentSection('')
     window.history.replaceState({}, '', `${ROUTES.adminApplications}?tab=${nextTab}`)
+  }
+
+  function changeSiteContentSection(nextSection) {
+    setActiveSiteContentSection(nextSection)
+    const sectionQuery = nextSection ? `&section=${encodeURIComponent(nextSection)}` : ''
+    window.history.replaceState({}, '', `${ROUTES.adminApplications}?tab=site${sectionQuery}`)
   }
 
   async function loadAdminOverview() {
@@ -2807,6 +2814,12 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
     function syncTabFromUrl() {
       const requestedTab = tabFromQuery()
       if (requestedTab) setActiveTab(normalizeDeskTab(requestedTab))
+      const requestedSection = new URLSearchParams(window.location.search).get('section') || ''
+      if (SITE_CONTENT_SECTIONS.some((section) => section.id === requestedSection)) {
+        setActiveSiteContentSection(requestedSection)
+      } else if (requestedTab !== 'site') {
+        setActiveSiteContentSection('')
+      }
     }
 
     syncTabFromUrl()
@@ -4372,7 +4385,7 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
                 <button
                   type="button"
                   className="ghost compact-button"
-                  onClick={() => setActiveSiteContentSection('')}
+                  onClick={() => changeSiteContentSection('')}
                 >
                   Close Editor
                 </button>
@@ -4385,7 +4398,7 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
                   key={section.id}
                   className={`admin-site-content-menu-card${activeSiteContentSection === section.id ? ' active' : ''}`}
                   aria-pressed={activeSiteContentSection === section.id}
-                  onClick={() => setActiveSiteContentSection(section.id)}
+                  onClick={() => changeSiteContentSection(section.id)}
                 >
                   <span className="profile-kicker">{section.eyebrow}</span>
                   <strong>{section.title}</strong>
@@ -5351,9 +5364,15 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
                     {contribution.status === 'approved' && (
                       <button
                         className="ghost compact-button"
-                        onClick={() => navigate(ROUTES.dictionaryView)}
+                        onClick={() =>
+                          navigate(
+                            contribution.entry_id
+                              ? `${ROUTES.dictionaryView}?entry_id=${encodeURIComponent(contribution.entry_id)}`
+                              : ROUTES.dictionaryView,
+                          )
+                        }
                       >
-                        View Dictionary
+                        View Published Entry
                       </button>
                     )}
                   </article>
@@ -5468,8 +5487,17 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
                       </button>
                     )}
                     {contribution.status === 'approved' && (
-                      <button className="ghost compact-button" onClick={() => navigate(ROUTES.folkloreView)}>
-                        View Folklore
+                      <button
+                        className="ghost compact-button"
+                        onClick={() =>
+                          navigate(
+                            contribution.entry_id
+                              ? `${ROUTES.folkloreView}?entry_id=${encodeURIComponent(contribution.entry_id)}`
+                              : ROUTES.folkloreView,
+                          )
+                        }
+                      >
+                        View Published Entry
                       </button>
                     )}
                   </article>

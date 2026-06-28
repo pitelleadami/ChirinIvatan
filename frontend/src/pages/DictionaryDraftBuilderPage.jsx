@@ -98,6 +98,22 @@ const PART_OF_SPEECH_OPTIONS = [
 
 const SOURCE_REMARKS_KEY = 'source_remarks'
 const DICTIONARY_MUNICIPALITY_OPTIONS = ['Basco', 'Mahatao', 'Ivana', 'Uyugan', 'Sabtang', 'Itbayat']
+const MOTHER_SHARED_FIELDS = new Set([
+  'meaning',
+  'part_of_speech',
+  'photo',
+  'photo_source',
+  'photo_source_is_contributor_owned',
+  'photo_license',
+  'english_synonym',
+  'ivatan_synonym',
+  'english_antonym',
+  'ivatan_antonym',
+  'source_text',
+  'term_source_is_self_knowledge',
+  'inflected_forms',
+  'variants',
+])
 
 function sourceOwnerLabel(user) {
   const nameParts = [user?.first_name, user?.last_name]
@@ -768,6 +784,7 @@ export default function DictionaryDraftBuilderPage({ currentUser = {} }) {
   const [message, setMessage] = useState('')
   const [form, setForm] = useState(INITIAL_FORM)
   const [prefilledForm, setPrefilledForm] = useState(null)
+  const [variantContext, setVariantContext] = useState(null)
   const [audioFile, setAudioFile] = useState(null)
   const [photoFile, setPhotoFile] = useState(null)
   const [hasExistingAudioMedia, setHasExistingAudioMedia] = useState(false)
@@ -1211,6 +1228,7 @@ export default function DictionaryDraftBuilderPage({ currentUser = {} }) {
     setCurrentRevisionCreatedAt(revision.created_at || '')
     setCurrentReviewerNotes(revision.reviewer_notes || '')
     setCorrectionAssignment(revision.correction_assignment || null)
+    setVariantContext(revision.variant_context || null)
   }
 
   function validateRequiredFields() {
@@ -1598,6 +1616,7 @@ export default function DictionaryDraftBuilderPage({ currentUser = {} }) {
     setAutoRevisionStarted(false)
     setForm(INITIAL_FORM)
     setPrefilledForm(null)
+    setVariantContext(null)
     setInflectionRows([])
     setPrefilledInflectionRows([])
     setAudioFile(null)
@@ -1683,6 +1702,12 @@ export default function DictionaryDraftBuilderPage({ currentUser = {} }) {
     (row) => row.label && row.value,
   )
   const snapshotInflectedFormsValue = rowsToObject(prefilledForm ? prefilledInflectionRows : inflectionRows)
+  const motherContext = variantContext?.semantic_core || null
+  const motherInflectedRows = motherContext
+    ? objectToRows(motherContext.inflected_forms || {}, motherContext.part_of_speech).filter(
+        (row) => row.label && row.value,
+      )
+    : []
   const snapshotRelatedWords = mergeRelatedWords(
     snapshotForm.english_synonym,
     snapshotForm.ivatan_synonym,
@@ -1717,16 +1742,30 @@ export default function DictionaryDraftBuilderPage({ currentUser = {} }) {
     return prefilledForm[fieldName]
   }
 
+  function isMotherSharedField(fieldName) {
+    return Boolean(variantContext?.is_variant) && MOTHER_SHARED_FIELDS.has(fieldName)
+  }
+
+  function canEditSnapshotField(fieldName) {
+    return !isMotherSharedField(fieldName)
+  }
+
   function isFieldLocked(fieldName, currentValue) {
     const snapshotValue = snapshotValueFor(fieldName, currentValue)
-    return isSnapshotEditMode && hasContent(snapshotValue) && !unlockedFields[fieldName]
+    return (
+      isSnapshotEditMode &&
+      hasContent(snapshotValue) &&
+      (isMotherSharedField(fieldName) || !unlockedFields[fieldName])
+    )
   }
 
   function showInEditableSection(fieldName, currentValue) {
+    if (isMotherSharedField(fieldName)) return false
     return !isFieldLocked(fieldName, currentValue)
   }
 
   function unlockField(fieldName) {
+    if (isMotherSharedField(fieldName)) return
     setUnlockedFields((current) => ({ ...current, [fieldName]: true }))
   }
 
@@ -1897,7 +1936,8 @@ export default function DictionaryDraftBuilderPage({ currentUser = {} }) {
   ].some(([field, value]) => showInEditableSection(field, value))
   const showAudioUploadField =
     !isSnapshotEditMode || !hasExistingAudioMedia || unlockedFields.audio_pronunciation
-  const showPhotoUploadField = !isSnapshotEditMode || !hasExistingPhotoMedia || unlockedFields.photo
+  const showPhotoUploadField =
+    !isMotherSharedField('photo') && (!isSnapshotEditMode || !hasExistingPhotoMedia || unlockedFields.photo)
   const showSourceField =
     !isSnapshotEditMode ||
     showInEditableSection('term_source_is_self_knowledge', form.term_source_is_self_knowledge)
@@ -2109,6 +2149,65 @@ export default function DictionaryDraftBuilderPage({ currentUser = {} }) {
             <p className="profile-kicker">
               {isRevisionMode ? 'Prefilled from Approved Entry' : 'Rejected Submission Copy'}
             </p>
+            {variantContext?.is_variant && motherContext && (
+              <article className="variant-mother-context">
+                <div className="variant-mother-context-header">
+                  <div>
+                    <p className="profile-kicker">Mother Term Context</p>
+                    <h3>{variantContext.mother_term}</h3>
+                  </div>
+                  <button
+                    type="button"
+                    className="ghost compact-button"
+                    onClick={() => revisePublishedEntry(variantContext.mother_entry_id)}
+                  >
+                    Edit mother term
+                  </button>
+                </div>
+                <p className="muted">
+                  You are editing the variant {variantContext.variant_term}. Shared meaning, part of speech,
+                  source, photo, synonyms, and inflected forms belong to the mother term and are shown here
+                  for context.
+                </p>
+                {variantContext.mother_photo_url && (
+                  <img
+                    className="variant-mother-context-photo"
+                    src={variantContext.mother_photo_url}
+                    alt=""
+                  />
+                )}
+                <dl className="variant-mother-context-grid">
+                  {motherContext.meaning && (
+                    <div>
+                      <dt>Meaning</dt>
+                      <dd>{capitalizeFirst(motherContext.meaning)}</dd>
+                    </div>
+                  )}
+                  {motherContext.part_of_speech && (
+                    <div>
+                      <dt>Part of Speech</dt>
+                      <dd>{motherContext.part_of_speech}</dd>
+                    </div>
+                  )}
+                  {relatedWordGroups(motherContext).length > 0 && (
+                    <div>
+                      <dt>Synonyms / Antonyms</dt>
+                      <dd>
+                        {relatedWordGroups(motherContext)
+                          .map(([label, rows]) => `${label}: ${rows.join(', ')}`)
+                          .join(' | ')}
+                      </dd>
+                    </div>
+                  )}
+                  {motherInflectedRows.length > 0 && (
+                    <div>
+                      <dt>Inflected Forms</dt>
+                      <dd>{motherInflectedRows.map((row) => `${row.label}: ${row.value}`).join(' | ')}</dd>
+                    </div>
+                  )}
+                </dl>
+              </article>
+            )}
             <article className="dictionary-entry-detail revision-prefilled-preview">
               <header className="dictionary-headword">
                 <div className="dictionary-readonly-label-row">
@@ -2136,12 +2235,13 @@ export default function DictionaryDraftBuilderPage({ currentUser = {} }) {
                       <small>Part of Speech</small>
                       <span>
                         {snapshotForm.part_of_speech}{' '}
-                        {isFieldLocked('part_of_speech', snapshotForm.part_of_speech) && (
-                          <EditButton
-                            label="Edit part of speech"
-                            onClick={() => unlockField('part_of_speech')}
-                          />
-                        )}
+                        {canEditSnapshotField('part_of_speech') &&
+                          isFieldLocked('part_of_speech', snapshotForm.part_of_speech) && (
+                            <EditButton
+                              label="Edit part of speech"
+                              onClick={() => unlockField('part_of_speech')}
+                            />
+                          )}
                       </span>
                     </div>
                   )}
@@ -2190,7 +2290,7 @@ export default function DictionaryDraftBuilderPage({ currentUser = {} }) {
               {snapshotPhotoPreview && (
                 <div className="revision-prefilled-media">
                   <img className="dictionary-photo-preview" src={snapshotPhotoPreview} alt="" />
-                  {isSnapshotEditMode && !unlockedFields.photo && (
+                  {canEditSnapshotField('photo') && isSnapshotEditMode && !unlockedFields.photo && (
                     <EditButton
                       label="Replace photo"
                       text="Replace photo"
@@ -2215,7 +2315,7 @@ export default function DictionaryDraftBuilderPage({ currentUser = {} }) {
                   <p className="definition-number">1</p>
                   <p>
                     {capitalizeFirst(snapshotForm.meaning)}{' '}
-                    {isFieldLocked('meaning', snapshotForm.meaning) && (
+                    {canEditSnapshotField('meaning') && isFieldLocked('meaning', snapshotForm.meaning) && (
                       <EditButton label="Edit meaning" onClick={() => unlockField('meaning')} />
                     )}
                   </p>
@@ -2265,34 +2365,38 @@ export default function DictionaryDraftBuilderPage({ currentUser = {} }) {
                     ))}
                   </div>
                   <p className="meta">
-                    {isFieldLocked('english_synonym', snapshotForm.english_synonym) && (
-                      <EditButton
-                        label="Edit English synonyms"
-                        text="Edit English Synonyms"
-                        onClick={() => unlockField('english_synonym')}
-                      />
-                    )}{' '}
-                    {isFieldLocked('ivatan_synonym', snapshotForm.ivatan_synonym) && (
-                      <EditButton
-                        label="Edit Ivatan synonyms"
-                        text="Edit Ivatan Synonyms"
-                        onClick={() => unlockField('ivatan_synonym')}
-                      />
-                    )}{' '}
-                    {isFieldLocked('english_antonym', snapshotForm.english_antonym) && (
-                      <EditButton
-                        label="Edit English antonyms"
-                        text="Edit English Antonyms"
-                        onClick={() => unlockField('english_antonym')}
-                      />
-                    )}{' '}
-                    {isFieldLocked('ivatan_antonym', snapshotForm.ivatan_antonym) && (
-                      <EditButton
-                        label="Edit Ivatan antonyms"
-                        text="Edit Ivatan Antonyms"
-                        onClick={() => unlockField('ivatan_antonym')}
-                      />
-                    )}
+                    {canEditSnapshotField('english_synonym') &&
+                      isFieldLocked('english_synonym', snapshotForm.english_synonym) && (
+                        <EditButton
+                          label="Edit English synonyms"
+                          text="Edit English Synonyms"
+                          onClick={() => unlockField('english_synonym')}
+                        />
+                      )}{' '}
+                    {canEditSnapshotField('ivatan_synonym') &&
+                      isFieldLocked('ivatan_synonym', snapshotForm.ivatan_synonym) && (
+                        <EditButton
+                          label="Edit Ivatan synonyms"
+                          text="Edit Ivatan Synonyms"
+                          onClick={() => unlockField('ivatan_synonym')}
+                        />
+                      )}{' '}
+                    {canEditSnapshotField('english_antonym') &&
+                      isFieldLocked('english_antonym', snapshotForm.english_antonym) && (
+                        <EditButton
+                          label="Edit English antonyms"
+                          text="Edit English Antonyms"
+                          onClick={() => unlockField('english_antonym')}
+                        />
+                      )}{' '}
+                    {canEditSnapshotField('ivatan_antonym') &&
+                      isFieldLocked('ivatan_antonym', snapshotForm.ivatan_antonym) && (
+                        <EditButton
+                          label="Edit Ivatan antonyms"
+                          text="Edit Ivatan Antonyms"
+                          onClick={() => unlockField('ivatan_antonym')}
+                        />
+                      )}
                   </p>
                 </section>
               )}
@@ -2301,12 +2405,13 @@ export default function DictionaryDraftBuilderPage({ currentUser = {} }) {
                 <section className="dictionary-field-block">
                   <div className="dictionary-readonly-label-row">
                     <h4>Inflected Forms</h4>
-                    {isFieldLocked('inflected_forms', snapshotInflectedFormsValue) && (
-                      <EditButton
-                        label="Edit inflected forms"
-                        onClick={() => unlockFieldAndShow('inflected_forms', setShowInflectedForms)}
-                      />
-                    )}
+                    {canEditSnapshotField('inflected_forms') &&
+                      isFieldLocked('inflected_forms', snapshotInflectedFormsValue) && (
+                        <EditButton
+                          label="Edit inflected forms"
+                          onClick={() => unlockFieldAndShow('inflected_forms', setShowInflectedForms)}
+                        />
+                      )}
                   </div>
                   <div className="dictionary-chip-row">
                     {snapshotInflectedFormsPreviewRows.map((row) => (
@@ -2356,7 +2461,7 @@ export default function DictionaryDraftBuilderPage({ currentUser = {} }) {
                 <section className="dictionary-field-block">
                   <div className="dictionary-readonly-label-row">
                     <h4>Additional Variants</h4>
-                    {isFieldLocked('variants', snapshotForm.variants) && (
+                    {canEditSnapshotField('variants') && isFieldLocked('variants', snapshotForm.variants) && (
                       <EditButton
                         label="Edit variants"
                         onClick={() => unlockFieldAndShow('variants', setShowVariants)}
@@ -2391,12 +2496,13 @@ export default function DictionaryDraftBuilderPage({ currentUser = {} }) {
                 <section className="dictionary-field-block">
                   <div className="dictionary-readonly-label-row">
                     <h4>Attribution</h4>
-                    {isFieldLocked('term_source_is_self_knowledge', form.term_source_is_self_knowledge) && (
-                      <EditButton
-                        label="Edit source settings"
-                        onClick={() => unlockField('term_source_is_self_knowledge')}
-                      />
-                    )}
+                    {canEditSnapshotField('term_source_is_self_knowledge') &&
+                      isFieldLocked('term_source_is_self_knowledge', form.term_source_is_self_knowledge) && (
+                        <EditButton
+                          label="Edit source settings"
+                          onClick={() => unlockField('term_source_is_self_knowledge')}
+                        />
+                      )}
                   </div>
                   <div className="detail-list">
                     {snapshotTermSource && <p>{snapshotTermSource.replace(/^Source:\s*/, '')}</p>}
@@ -2974,7 +3080,8 @@ export default function DictionaryDraftBuilderPage({ currentUser = {} }) {
               style={{ order: 100 }}
               aria-label="Optional entry detail sections"
             >
-              {showVariants && isFieldLocked('variants', form.variants) ? (
+              {!canEditSnapshotField('variants') ? null : showVariants &&
+                isFieldLocked('variants', form.variants) ? (
                 <button
                   className="ghost"
                   type="button"
@@ -3007,7 +3114,8 @@ export default function DictionaryDraftBuilderPage({ currentUser = {} }) {
                   Add Variants
                 </button>
               )}
-              {showInflectedForms && isFieldLocked('inflected_forms', inflectedFormsValue) ? (
+              {!canEditSnapshotField('inflected_forms') ? null : showInflectedForms &&
+                isFieldLocked('inflected_forms', inflectedFormsValue) ? (
                 <button
                   className="ghost"
                   type="button"
@@ -3035,10 +3143,10 @@ export default function DictionaryDraftBuilderPage({ currentUser = {} }) {
                   Add Inflected Forms
                 </button>
               )}
-              {showRelatedWords &&
-              ['english_synonym', 'ivatan_synonym', 'english_antonym', 'ivatan_antonym'].some((field) =>
-                isFieldLocked(field, form[field]),
-              ) ? (
+              {!canEditSnapshotField('english_synonym') ? null : showRelatedWords &&
+                ['english_synonym', 'ivatan_synonym', 'english_antonym', 'ivatan_antonym'].some((field) =>
+                  isFieldLocked(field, form[field]),
+                ) ? (
                 <button
                   className="ghost"
                   type="button"

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import { apiRequest } from '../lib/api'
+import { ROUTES, navigate } from '../lib/router'
 
 function visibilityLabel(value) {
   if (value === 'members') return 'Members only'
@@ -32,9 +33,15 @@ function formatDate(value) {
 
 export default function ResourcesPage({ currentUser }) {
   const isSignedIn = Boolean(currentUser?.is_authenticated)
-  const [rows, setRows] = useState([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  const isAdmin = Boolean(currentUser?.is_superuser || currentUser?.groups?.includes('Admin'))
+  const resourceUserKey = isSignedIn
+    ? String(currentUser?.username || currentUser?.email || currentUser?.id || 'signed-in')
+    : ''
+  const [resourceState, setResourceState] = useState({
+    userKey: '',
+    rows: [],
+    error: '',
+  })
   const apiBase = import.meta.env.VITE_API_BASE || ''
 
   useEffect(() => {
@@ -43,38 +50,55 @@ export default function ResourcesPage({ currentUser }) {
     apiRequest('/api/resources')
       .then((payload) => {
         if (!isMounted) return
-        setRows(Array.isArray(payload.rows) ? payload.rows : [])
-        setError('')
+        setResourceState({
+          userKey: resourceUserKey,
+          rows: Array.isArray(payload.rows) ? payload.rows : [],
+          error: '',
+        })
       })
       .catch((err) => {
         if (!isMounted) return
-        setRows([])
-        setError(err.message || 'Resources could not be loaded.')
-      })
-      .finally(() => {
-        if (isMounted) setLoading(false)
+        setResourceState({
+          userKey: resourceUserKey,
+          rows: [],
+          error: err.message || 'Resources could not be loaded.',
+        })
       })
     return () => {
       isMounted = false
     }
-  }, [isSignedIn])
+  }, [isSignedIn, resourceUserKey])
 
-  const visibleRows = isSignedIn ? rows : []
+  const hasLoadedCurrentResources = isSignedIn && resourceState.userKey === resourceUserKey
+  const loading = isSignedIn && !hasLoadedCurrentResources
+  const error = hasLoadedCurrentResources ? resourceState.error : ''
 
   const groupedRows = useMemo(() => {
     const groups = new Map()
+    const visibleRows = hasLoadedCurrentResources ? resourceState.rows : []
     visibleRows.forEach((row) => {
       const category = row.category || 'General'
       if (!groups.has(category)) groups.set(category, [])
       groups.get(category).push(row)
     })
     return Array.from(groups.entries()).map(([category, items]) => ({ category, items }))
-  }, [visibleRows])
+  }, [hasLoadedCurrentResources, resourceState.rows])
 
   return (
     <section className="resources-page">
       <div className="resources-heading">
-        <h1>Learning Resources</h1>
+        <div>
+          <h1>Learning Resources</h1>
+        </div>
+        {isAdmin && (
+          <button
+            type="button"
+            className="ghost compact-button"
+            onClick={() => navigate(`${ROUTES.adminApplications}?tab=site&section=resources`)}
+          >
+            Manage resource files
+          </button>
+        )}
       </div>
 
       {!isSignedIn && (
