@@ -9,6 +9,6 @@ documentation in this repository.
 
 The license does not grant rights to live production data, user accounts,
 submitted dictionary or folklore content, uploaded media, private operator
-notes, server credentials, backup paths, deployment runbooks, project defense
+notes, server credentials, backup paths, deployment runbooks, private project
 materials kept outside this repository, or third-party assets that carry their
 own licenses.
