@@ -515,6 +515,42 @@ class DictionaryEntryDetailApiTests(TestCase):
         self.assertEqual(payload["header"]["term"], "api-term")
         self.assertEqual(payload["semantic_core"]["meaning"], entry.meaning)
 
+    def test_entry_detail_resolves_linkable_related_terms(self):
+        matched = Entry.objects.create(
+            term="Vahay",
+            status=EntryStatus.APPROVED,
+            is_mother=True,
+            initial_contributor=self.contributor,
+        )
+        entry = Entry.objects.create(
+            term="Rahin",
+            status=EntryStatus.APPROVED,
+            is_mother=True,
+            initial_contributor=self.contributor,
+            ivatan_synonym="vahay, missing-term",
+        )
+
+        response = self.client.get(f"/api/dictionary/entries/{entry.id}")
+        self.assertEqual(response.status_code, 200)
+        related_terms = response.json()["semantic_core"]["related_terms"]
+
+        self.assertEqual(
+            related_terms["ivatan_synonym"][0],
+            {
+                "label": "vahay",
+                "entry_id": str(matched.id),
+                "term": "Vahay",
+            },
+        )
+        self.assertEqual(
+            related_terms["ivatan_synonym"][1],
+            {
+                "label": "missing-term",
+                "entry_id": None,
+                "term": "missing-term",
+            },
+        )
+
     def test_initial_approval_does_not_claim_a_reviser_and_returns_linkable_actors(self):
         entry = Entry.objects.create(
             term="first-version",

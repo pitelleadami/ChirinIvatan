@@ -16,6 +16,7 @@ import re
 from django.core.exceptions import ValidationError
 from django.core.files.storage import default_storage
 from django.db.models import Q
+from django.db.models.functions import Lower
 from django.http import JsonResponse
 from django.views.decorators.http import require_GET, require_http_methods
 
@@ -949,6 +950,60 @@ def _latest_approved_revision(entry: Entry):
     )
 
 
+def _split_related_terms(value):
+    return [item.strip() for item in re.split(r"[,;\n]", value or "") if item and item.strip()]
+
+
+def _serialize_related_terms(semantic_entry):
+    fields = {
+        "english_synonym": semantic_entry.english_synonym,
+        "ivatan_synonym": semantic_entry.ivatan_synonym,
+        "english_antonym": semantic_entry.english_antonym,
+        "ivatan_antonym": semantic_entry.ivatan_antonym,
+    }
+    terms_by_field = {field: _split_related_terms(value) for field, value in fields.items()}
+    term_keys = {
+        normalize_headword(term).lower()
+        for terms in terms_by_field.values()
+        for term in terms
+        if normalize_headword(term)
+    }
+    matches = {}
+    if term_keys:
+        matched_entries = (
+            Entry.objects.annotate(term_key=Lower("term"))
+            .select_related("initial_contributor")
+            .filter(
+                _live_contributor_q("initial_contributor"),
+                status__in=VISIBLE_PUBLIC_STATUSES,
+                term_key__in=term_keys,
+            )
+            .order_by("-is_mother", "term")
+        )
+        for match in matched_entries:
+            matches.setdefault(normalize_headword(match.term).lower(), match)
+
+    return {
+        field: [
+            {
+                "label": term,
+                "entry_id": (
+                    str(matches[normalize_headword(term).lower()].id)
+                    if normalize_headword(term).lower() in matches
+                    else None
+                ),
+                "term": (
+                    matches[normalize_headword(term).lower()].term
+                    if normalize_headword(term).lower() in matches
+                    else term
+                ),
+            }
+            for term in terms
+        ]
+        for field, terms in terms_by_field.items()
+    }
+
+
 @require_GET
 def dictionary_entry_detail_view(request, entry_id):
     """
@@ -1012,6 +1067,7 @@ def dictionary_entry_detail_view(request, entry_id):
                 "ivatan_synonym": semantic_entry.ivatan_synonym,
                 "english_antonym": semantic_entry.english_antonym,
                 "ivatan_antonym": semantic_entry.ivatan_antonym,
+                "related_terms": _serialize_related_terms(semantic_entry),
                 "inflected_forms": semantic_entry.inflected_forms,
                 "photo_url": _media_url(request, semantic_entry.photo),
                 "photo_source": semantic_entry.photo_source,

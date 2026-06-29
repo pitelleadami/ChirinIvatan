@@ -97,26 +97,49 @@ function RelatedWords({ title, value }) {
   )
 }
 
-function RelatedWordGroup({ rows }) {
+function splitRelatedWords(value) {
+  return String(value || '')
+    .split(/[,;\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((label) => ({ label, term: label, entry_id: null }))
+}
+
+function RelatedWordChip({ item, onOpen }) {
+  const label = item?.label || item?.term || ''
+  if (!label) return null
+  if (item?.entry_id) {
+    return (
+      <button type="button" className="dictionary-related-link" onClick={() => onOpen?.(item.entry_id)}>
+        {label}
+      </button>
+    )
+  }
+  return <span>{label}</span>
+}
+
+function RelatedWordGroup({ rows, relatedTerms = {}, onOpen }) {
   const groups = rows
-    .filter(([, value]) => hasValue(value))
-    .map(([title, value]) => {
-      const items = String(value || '')
-        .split(',')
-        .map((item) => item.trim())
-        .filter(Boolean)
-      return [title, items]
+    .map(([field, title, value]) => {
+      const resolvedItems = Array.isArray(relatedTerms[field]) ? relatedTerms[field] : null
+      const items = resolvedItems || splitRelatedWords(value)
+      return [title, items.filter((item) => item?.label || item?.term)]
     })
     .filter(([, items]) => items.length > 0)
   if (!groups.length) return null
   return (
     <section className="dictionary-field-block">
       <h4>Related Words</h4>
-      <div className="dictionary-chip-row">
+      <div className="dictionary-related-groups">
         {groups.map(([title, items]) => (
-          <span key={title}>
-            {title}: {items.join(', ')}
-          </span>
+          <div key={title} className="dictionary-related-group">
+            <p>{title}</p>
+            <div className="dictionary-chip-row">
+              {items.map((item) => (
+                <RelatedWordChip key={`${title}-${item.label || item.term}`} item={item} onOpen={onOpen} />
+              ))}
+            </div>
+          </div>
         ))}
       </div>
     </section>
@@ -1326,11 +1349,13 @@ export default function DictionaryViewerPage({ currentUser }) {
                   <FieldBlock title="Etymology">{detail.variant_section?.etymology}</FieldBlock>
                   <RelatedWords title="Inflected Forms" value={detail.semantic_core?.inflected_forms} />
                   <RelatedWordGroup
+                    relatedTerms={detail.semantic_core?.related_terms}
+                    onOpen={(entryId) => loadEntry(entryId)}
                     rows={[
-                      ['English synonyms', detail.semantic_core?.english_synonym],
-                      ['Ivatan synonyms', detail.semantic_core?.ivatan_synonym],
-                      ['English antonyms', detail.semantic_core?.english_antonym],
-                      ['Ivatan antonyms', detail.semantic_core?.ivatan_antonym],
+                      ['english_synonym', 'English synonyms', detail.semantic_core?.english_synonym],
+                      ['ivatan_synonym', 'Ivatan synonyms', detail.semantic_core?.ivatan_synonym],
+                      ['english_antonym', 'English antonyms', detail.semantic_core?.english_antonym],
+                      ['ivatan_antonym', 'Ivatan antonyms', detail.semantic_core?.ivatan_antonym],
                     ]}
                   />
                   <ConnectedVariants

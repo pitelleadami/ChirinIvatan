@@ -10989,13 +10989,42 @@ textarea:focus-visible {
   gap: 8px;
 }
 
-.dictionary-chip-row span {
+.dictionary-chip-row span,
+.dictionary-related-link {
   border: 1px solid rgba(18, 35, 18, 0.12);
   border-radius: 999px;
   padding: 5px 10px;
   background: rgba(255, 255, 255, 0.58);
   color: #263222;
   font-size: 12px;
+}
+
+.dictionary-related-groups {
+  display: grid;
+  gap: 10px;
+}
+
+.dictionary-related-group {
+  display: grid;
+  gap: 6px;
+}
+
+.dictionary-related-group p {
+  margin: 0;
+  color: #56634f;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.dictionary-related-link {
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.dictionary-related-link:hover,
+.dictionary-related-link:focus-visible {
+  border-color: rgba(31, 103, 44, 0.42);
+  color: #1f672c;
 }
 
 .dictionary-connected-variants {
@@ -15270,7 +15299,8 @@ textarea:focus-visible {
   }
 
   .english-translation-chip,
-  .dictionary-chip-row span {
+  .dictionary-chip-row span,
+  .dictionary-related-link {
     font-size: 11px;
   }
 }
