@@ -26,7 +26,7 @@ Examples:
 
 - `fix/review-preview-blank-page`
 - `feature/dictionary-variant-labels`
-- `docs/adr-log`
+- `docs/system-requirements`
 - `chore/ci-workflow`
 
 ## Local Checks
@@ -68,7 +68,7 @@ Do not commit directly to `main`.
 - Confirm migrations, if any, are understood.
 - Confirm deployment notes are updated when the change affects operations.
 - Update `CHANGELOG.md` for visible user-facing or governance changes.
-- Add or update ADRs for meaningful decisions.
+- Add or update private decision notes for meaningful governance or architecture decisions.
 
 ## Public Documentation Rule
 

@@ -8,52 +8,36 @@ This is the single entry point for project documentation.
 
 - Plain-language record of visible product changes and public release notes.
 
-2. `docs/adr/README.md`
-
-- Architecture Decision Records: short rationale notes explaining why meaningful governance, product, and architecture decisions were made.
-
-3. `docs/SYSTEM_REQUIREMENTS.md`
+2. `docs/SYSTEM_REQUIREMENTS.md`
 
 - Adviser/turnover-ready summary of functional requirements, non-functional requirements, roles, security/privacy expectations, testing expectations, and turnover expectations.
 
-4. `DATA_MODEL.md`
+3. `DATA_MODEL.md`
 
 - Current data model and data-handling strategy overview.
 
-5. `docs/SPEC-03_DEVELOPER_HANDOFF_SPEC.md`
+4. `docs/SPEC-03_DEVELOPER_HANDOFF_SPEC.md`
 
 - Backend + integration behavior and implementation handoff details.
 
-6. `docs/SPEC-03_GAMIFICATION_FEATURE_SPEC_DRAFT.md`
-
-- Gamification v2.2 rules and editable policy draft.
-
-7. `docs/SPEC-03_MANUAL_QA_CHECKLIST.md`
+5. `docs/SPEC-03_MANUAL_QA_CHECKLIST.md`
 
 - End-to-end manual QA procedure.
 
-8. `docs/SPEC-03_FRONTEND_FIGMA_HANDOFF.md`
-
-- Detailed beginner Figma build instructions for final UI.
-
-9. `docs/SPEC-03_PLAIN_ENGLISH_PAGE_MAP.md`
+6. `docs/SPEC-03_PLAIN_ENGLISH_PAGE_MAP.md`
 
 - Role-by-role and screen-by-screen map for visitor, contributor, reviewer, consultant, and admin experiences.
 
-10. `docs/SPEC-03_GAMIFICATION_IMPLEMENTATION_NOTES.md`
-
-- What is already implemented in backend gamification.
-
-11. `docs/SPEC-03_SYSTEM_ARCHITECTURE_PACK.md`
+7. `docs/SPEC-03_SYSTEM_ARCHITECTURE_PACK.md`
 
 - Presentation-ready diagrams: ERD, state machines, and sequence flows.
 
-12. `docs/PUBLIC_DEPLOYMENT_TEMPLATE.md`
+8. `docs/PUBLIC_DEPLOYMENT_TEMPLATE.md`
 
 - Public-safe deployment overview with placeholder domains, placeholder server
   paths, and environment-variable guidance.
 
-13. `deploy/README.md`
+9. `deploy/README.md`
 
 - Server deployment templates (systemd + Nginx) and how to apply them.
 
@@ -67,7 +51,7 @@ This is the single entry point for project documentation.
 
 - `CONTRIBUTING.md` defines the feature branch -> pull request -> CI -> review -> merge workflow.
 - `.github/pull_request_template.md` gives every PR a lightweight review checklist.
-- `docs/BRANCH_PROTECTION_SETUP.md` records the required GitHub branch protection settings for `main`.
+- Branch protection setup notes are kept privately with other operator/governance notes.
 
 ## Backups And Restore Testing
 
@@ -77,6 +61,10 @@ This is the single entry point for project documentation.
   private project notes to avoid publishing internal-only operational material.
 - Editable QA worksheets, capstone work logs, and historical archived specs are
   kept in private project notes so the public documentation stays focused.
+- Frontend build scripts, Figma handoff notes, gamification planning drafts, and
+  post-beta planning notes are kept in private project notes.
+- Architecture decision records and branch-protection setup notes are kept in
+  private project notes.
 
 ## Canonical Project Paths
 
@@ -90,5 +78,5 @@ If two docs conflict, treat these as precedence:
 1. `SYSTEM_REQUIREMENTS.md`
 2. `DATA_MODEL.md`
 3. `SPEC-03_DEVELOPER_HANDOFF_SPEC.md`
-4. `SPEC-03_GAMIFICATION_FEATURE_SPEC_DRAFT.md`
-5. `SPEC-03_MANUAL_QA_CHECKLIST.md`
+4. `SPEC-03_MANUAL_QA_CHECKLIST.md`
+5. `SPEC-03_PLAIN_ENGLISH_PAGE_MAP.md`
