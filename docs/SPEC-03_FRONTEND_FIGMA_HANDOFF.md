@@ -8,8 +8,8 @@ Important:
 
 - Active frontend app is `frontend/` at project root.
 - There is one canonical frontend path only: `frontend/`.
-- Current screen/content requirements live in `docs/SPEC-03_REBUILD_SPEC.md` and `docs/SPEC-03_PLAIN_ENGLISH_PAGE_MAP.md`.
-- If this older Figma handoff conflicts with the rebuild spec or screen map, use the rebuild spec and screen map.
+- Current screen/content requirements live in `docs/SYSTEM_REQUIREMENTS.md`, `docs/SPEC-03_DEVELOPER_HANDOFF_SPEC.md`, and `docs/SPEC-03_PLAIN_ENGLISH_PAGE_MAP.md`.
+- If this older Figma handoff conflicts with those docs, use the system requirements, developer handoff, and screen map.
 
 ---
 

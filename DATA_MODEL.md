@@ -2,7 +2,7 @@
 
 Status: current implementation map
 Last updated: 2026-06-28
-Canonical detailed companion: `docs/SPEC-03_REBUILD_SPEC.md`
+Canonical detailed companions: `docs/SYSTEM_REQUIREMENTS.md` and `docs/SPEC-03_DEVELOPER_HANDOFF_SPEC.md`
 
 This document explains how data is stored, governed, credited, displayed, retained, and protected in Chirin Ivatan.
 
@@ -499,7 +499,7 @@ Operational privacy:
 
 Use this file for the data model overview.
 
-Use `docs/SPEC-03_REBUILD_SPEC.md` for:
+Use `docs/SYSTEM_REQUIREMENTS.md` and `docs/SPEC-03_DEVELOPER_HANDOFF_SPEC.md` for:
 
 - all models and fields
 - all screens
@@ -507,4 +507,4 @@ Use `docs/SPEC-03_REBUILD_SPEC.md` for:
 - permissions
 - lifecycle rules
 - deployment requirements
-- rebuild order
+- implementation and handoff expectations

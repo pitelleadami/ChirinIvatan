@@ -1,15 +1,114 @@
-# SPEC-03 Defense Architecture Pack
+# SPEC-03 System Architecture Pack
 
-Purpose: ready-to-present architecture visuals for capstone defense.
+Purpose: presentation-ready architecture visuals for project review, handoff,
+and technical walkthroughs.
 
 How to use this file:
 
 - GitHub/Markdown viewers that support Mermaid can render these diagrams directly.
 - You can also copy each Mermaid block into mermaid.live for export to PNG/SVG.
+- Read Section 0 first if you need the short explanation before presenting the diagrams.
+- For panel slides, use the diagrams as visuals and the short notes below each diagram as speaker notes.
+
+---
+
+## 0) Architecture At A Glance
+
+Chirin Ivatan uses a standard web application architecture:
+
+- **React frontend** renders public pages, contributor forms, reviewer queues, and admin tools.
+- **Django backend** owns authentication, validation, review rules, publishing rules, and API responses.
+- **PostgreSQL database** stores users, submissions, reviews, published entries, logs, and recognition data.
+- **Uploaded media storage** keeps dictionary photos, pronunciation audio, folklore photos, and folklore audio outside the code repository.
+- **Nginx + Gunicorn** serve the production application.
+- **Sentry and CI checks** support production monitoring and release safety.
+
+Important design idea:
+
+> The frontend can collect and preview data, but the backend is the source of truth for validation, review decisions, publishing, permissions, and contribution credit.
+
+### 0.1 System Context Diagram
+
+```mermaid
+flowchart LR
+    Visitor[Visitor]
+    Contributor[Contributor]
+    Reviewer[Reviewer]
+    Admin[Admin]
+
+    Browser[Web Browser<br/>React UI]
+    API[Django API<br/>Auth, validation, workflows]
+    DB[(PostgreSQL<br/>application data)]
+    Media[(Uploaded Media<br/>photos, audio, PDFs)]
+    Email[Email Service<br/>invites and reminders]
+    Monitor[Sentry<br/>error monitoring]
+
+    Visitor --> Browser
+    Contributor --> Browser
+    Reviewer --> Browser
+    Admin --> Browser
+
+    Browser --> API
+    API --> DB
+    API --> Media
+    API --> Email
+    API --> Monitor
+```
+
+How to read it:
+
+- Users only interact with the browser.
+- The browser talks to the Django API.
+- The API writes to the database and media storage.
+- Email and monitoring are supporting services, not the main source of data.
+
+### 0.2 Main Backend Modules
+
+```mermaid
+flowchart TB
+    Frontend[React Frontend]
+    Users[users app<br/>accounts, roles, profiles, site content]
+    Dictionary[dictionary app<br/>terms, variants, revisions]
+    Folklore[folklore app<br/>stories, categories, revisions]
+    Reviews[reviews app<br/>approval, rejection, re-review, archive]
+    Resources[resources app<br/>admin-managed learning files]
+    DB[(Database)]
+
+    Frontend --> Users
+    Frontend --> Dictionary
+    Frontend --> Folklore
+    Frontend --> Reviews
+    Frontend --> Resources
+
+    Users --> DB
+    Dictionary --> DB
+    Folklore --> DB
+    Reviews --> DB
+    Resources --> DB
+```
+
+The modules are separated by responsibility, but they work together. For example,
+a dictionary submission is stored by the `dictionary` app, reviewed through the
+`reviews` app, credited through user contribution records, and shown in the React
+frontend after approval.
 
 ---
 
 ## 1) System ERD (Core Domain + Governance + Recognition)
+
+This ERD is a simplified system view of the full data model. It focuses on the
+tables that explain the main capstone logic: people, dictionary entries,
+folklore entries, review governance, role onboarding, and recognition.
+
+Reading guide:
+
+- `USER` is the account at the center of most actions.
+- `ENTRY` is a published or in-progress dictionary term.
+- `ENTRY_REVISION` is the submitted snapshot that reviewers approve or reject.
+- `FOLKLORE_ENTRY` and `FOLKLORE_REVISION` mirror the same pattern for folklore.
+- `REVIEW` and `FOLKLORE_REVIEW` store reviewer decisions.
+- `CONTRIBUTION_EVENT` is the credit ledger for badges, levels, and leaderboards.
+- Role application tables keep account approval and onboarding auditable.
 
 ```mermaid
 erDiagram
@@ -221,7 +320,6 @@ stateDiagram-v2
     REJECTED --> ARCHIVED : auto/manual archive rules
     APPROVED --> ARCHIVED : manual archive
     ARCHIVED --> APPROVED : restore
-    ARCHIVED --> DELETED : auto-delete window reached
 ```
 
 ## 2.2 Dictionary Revision State Machine
@@ -250,8 +348,16 @@ stateDiagram-v2
     REJECTED --> ARCHIVED : auto/manual archive rules
     APPROVED --> ARCHIVED : manual archive
     ARCHIVED --> APPROVED : restore
-    ARCHIVED --> DELETED : auto-delete window reached
 ```
+
+Notes:
+
+- `DRAFT` means the contributor can still edit before submission.
+- `PENDING` means reviewers/admins can act on the submission.
+- `APPROVED` means the content can appear publicly.
+- `APPROVED_UNDER_REVIEW` means a published entry was flagged but not yet removed.
+- `ARCHIVED` means hidden from normal public use but still preserved.
+- Permanent deletion is not part of the normal content lifecycle.
 
 ## 2.4 Folklore Revision State Machine
 
@@ -266,6 +372,14 @@ stateDiagram-v2
 ---
 
 ## 3) Sequence Diagrams
+
+Sequence diagrams show time from top to bottom. They explain what happens after
+a user clicks a button. In this system, the important pattern is:
+
+1. the user acts in the frontend;
+2. the frontend calls a Django API endpoint;
+3. the backend updates a revision, review, entry, or contribution record;
+4. the frontend receives the new status and updates the screen.
 
 ## 3.1 Dictionary Submit + Initial Review + Publish
 
@@ -375,7 +489,7 @@ sequenceDiagram
 
 ---
 
-## 4) Presentation Notes (for defense slides)
+## 4) Presentation Notes
 
 Use 4 slides:
 
@@ -389,3 +503,4 @@ Key message to panel:
 - "All changes are revision-first and governance-validated before publication."
 - "Auditability and accountability are first-class, not afterthoughts."
 - "Contribution and recognition are backend-authoritative and non-inflationary."
+- "Archived cultural records are preserved by default instead of being treated as disposable content."

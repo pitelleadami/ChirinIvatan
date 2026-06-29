@@ -5,7 +5,7 @@ Status: Accepted
 
 ## Context
 
-The project is public and now involves contributors, reviewers, administrators, and a capstone defense audience. Git history captures code changes but is not readable enough for non-developers. Existing specs explain what the system does, but not always why decisions were made.
+The project is public and now involves contributors, reviewers, administrators, and a capstone review audience. Git history captures code changes but is not readable enough for non-developers. Existing specs explain what the system does, but not always why decisions were made.
 
 ## Decision
 
@@ -13,17 +13,17 @@ Maintain:
 
 - `CHANGELOG.md` for plain-language public-facing changes
 - `docs/adr/` for decision records and rationale
-- `docs/CAPSTONE_WORK_LOG.md` for presentation-friendly development history
+- private capstone work logs for presentation-friendly development history
 
 ## Alternatives Considered
 
 - Use Git commits only.
-- Put all history into the rebuild spec.
+- Put all history into one large internal specification.
 - Keep informal notes in chat only.
 
 ## Rationale
 
-The changelog helps users and reviewers understand what changed. ADRs prevent major decisions from being re-litigated without context. The capstone work log supports defense and presentation needs.
+The changelog helps users and reviewers understand what changed. ADRs prevent major decisions from being re-litigated without context. Private capstone work logs support project review and presentation needs.
 
 ## Consequences
 

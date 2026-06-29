@@ -5,7 +5,7 @@ This folder contains public, repository-safe documentation for Chirin Ivatan.
 Start with:
 
 - `SPEC-03_DOCS_INDEX.md` for the canonical documentation map
-- `SPEC-03_REBUILD_SPEC.md` for the full system specification
+- `SYSTEM_REQUIREMENTS.md` for adviser/turnover-ready requirements
 - `SPEC-03_DEVELOPER_HANDOFF_SPEC.md` for backend/frontend handoff details
 - `SPEC-03_MANUAL_QA_CHECKLIST.md` for release checks
 - `SPEC-03_CONTRIBUTOR_MANUAL.md` for contributor-facing workflow guidance

@@ -42,7 +42,7 @@ This project now has section comments inside core files. This guide tells you wh
 
 1. Change one rule area only (review, onboarding, or recognition).
 2. Update tests near that area.
-3. Update the relevant spec whenever a change makes or changes a product, governance, data, workflow, or display-normalization decision. Use `docs/SPEC-03_REBUILD_SPEC.md` as the master source.
+3. Update the relevant public docs whenever a change makes or changes a product, governance, data, workflow, or display-normalization decision. Use `docs/SYSTEM_REQUIREMENTS.md`, `DATA_MODEL.md`, and `docs/SPEC-03_DEVELOPER_HANDOFF_SPEC.md` as the public source set.
 4. Run:
    - `cd backend && python3 manage.py test users reviews dictionary folklore`
    - `cd frontend && npm run build`

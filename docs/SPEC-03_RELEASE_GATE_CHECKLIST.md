@@ -1,8 +1,31 @@
 # SPEC-03 Release Gate Checklist (Code Perfection Pass)
 
-Use this before demo, defense, or merge-to-main.
+Use this before demo, project review, or merge-to-main.
 
 Mark each item `PASS` or `FAIL`.
+
+Purpose:
+
+- decide whether the current build is safe to demo, deploy, or merge;
+- make release decisions repeatable instead of based on memory;
+- separate blocking failures from minor known limitations.
+
+Release evidence to attach or record:
+
+- branch or commit hash tested;
+- date/time tested;
+- environment tested (`local`, `staging`, or `production`);
+- command output summary for tests/builds;
+- screenshots or links for failed browser checks;
+- final `GO` or `NO-GO` decision.
+
+Severity guide:
+
+| Severity | Meaning                                                            | Release Decision                           |
+| -------- | ------------------------------------------------------------------ | ------------------------------------------ |
+| Blocker  | login, submission, review, publish, or data preservation is broken | `NO-GO` until fixed                        |
+| Major    | important workflow works only partially or confuses users          | fix before public/demo release if possible |
+| Minor    | cosmetic issue or low-risk wording/layout issue                    | may release if documented                  |
 
 ---
 
@@ -123,7 +146,7 @@ python3 manage.py test users reviews dictionary folklore
 - [ ] no dead helper functions left in active modules
 - [ ] beginner comments remain present in core workflow files
 - [ ] docs point to canonical frontend path (`frontend/`)
-- [ ] `docs/SPEC-03_REBUILD_SPEC.md`, `DATA_MODEL.md`, and the screen map match the implemented behavior
+- [ ] `docs/SYSTEM_REQUIREMENTS.md`, `DATA_MODEL.md`, developer handoff, and the screen map match the implemented behavior
 
 ---
 
@@ -132,6 +155,8 @@ python3 manage.py test users reviews dictionary folklore
 - [ ] All sections A-G are PASS
 - [ ] Known limitations listed and accepted
 - [ ] Demo path rehearsed end-to-end
+- [ ] Rollback or backup point exists for production deploys
+- [ ] Private credentials/operator notes were not copied into public docs or commits
 
 Decision:
 
@@ -142,4 +167,6 @@ Owner:
 
 - Name:
 - Date:
+- Branch/Commit:
+- Environment:
 - Notes:
