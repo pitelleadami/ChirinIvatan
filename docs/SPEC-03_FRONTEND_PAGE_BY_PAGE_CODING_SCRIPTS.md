@@ -2,12 +2,12 @@
 
 Use this after:
 
-- `docs/SPEC-03_REBUILD_SPEC.md`
+- `docs/SYSTEM_REQUIREMENTS.md`
 - `docs/SPEC-03_PLAIN_ENGLISH_PAGE_MAP.md`
 - `docs/SPEC-03_FRONTEND_FIGMA_HANDOFF.md`
 - `docs/SPEC-03_FRONTEND_FIRST_PAGE_CODING_SCRIPT.md`
 
-This document gives practical coding steps. For current screen contents, permissions, and route behavior, the rebuild spec and screen map are authoritative.
+This document gives practical coding steps. For current screen contents, permissions, and route behavior, the system requirements, developer handoff, and screen map are authoritative.
 
 ---
 

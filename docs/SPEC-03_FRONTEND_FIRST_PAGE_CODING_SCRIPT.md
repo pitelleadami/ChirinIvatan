@@ -8,9 +8,9 @@ Follow it in order.
 
 Canonical note:
 
-- Current app-wide rebuild rules live in `docs/SPEC-03_REBUILD_SPEC.md`.
+- Current app-wide requirements live in `docs/SYSTEM_REQUIREMENTS.md`.
 - Current screen inventory lives in `docs/SPEC-03_PLAIN_ENGLISH_PAGE_MAP.md`.
-- If this older first-page script conflicts with those files, use the rebuild spec and screen map.
+- If this older first-page script conflicts with those files, use the system requirements, developer handoff, and screen map.
 
 ---
 

@@ -2,6 +2,62 @@
 
 > Auto-generated from backend models. All PKs are UUID unless noted.
 
+## How To Read This ERD
+
+This ERD describes how the main database tables relate to one another. It is
+more detailed than the system architecture ERD because it includes support
+tables for role applications, admin actions, recognition, site content, and
+runtime settings.
+
+Use this guide while reading the diagram:
+
+- **User** is the account table. Most actions connect back to a user.
+- **Profile and stats** extend a user with public profile details and cached
+  contribution totals.
+- **Entry** is a dictionary term. Related dialect or spelling forms are grouped
+  through **VariantGroup**.
+- **EntryRevision** is the submitted dictionary snapshot that reviewers evaluate.
+- **FolkloreEntry** is a published or in-progress folklore record.
+- **FolkloreRevision** is the submitted folklore snapshot that reviewers evaluate.
+- **Review** and **FolkloreReview** record reviewer/admin decisions.
+- **ContributionEvent** is the official credit ledger for levels, badges, and
+  leaderboards.
+- **RoleApplication**, **RoleInvitation**, and **RoleOnboardingRecord** document
+  how people receive contributor/reviewer/admin access.
+
+Cardinality shorthand:
+
+| Symbol   | Meaning      | Example                           |
+| -------- | ------------ | --------------------------------- | -------------------------------------------- | ------------------------ |
+| `        |              | `                                 | exactly one                                  | one user has one profile |
+| `o       | `            | zero or one                       | a variant group may point to one mother term |
+| `o{`     | zero or many | one entry may have many revisions |
+| `}o--o{` | many-to-many | users can belong to many groups   |
+
+## Domain Summary
+
+| Area              | Main entities                                                                  | Purpose                                                                |
+| ----------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
+| Accounts          | User, Group, UserProfile                                                       | Login identity, roles, public profile, visibility settings             |
+| Role onboarding   | RoleApplication, RoleApplicationDecision, RoleInvitation, RoleOnboardingRecord | Tracks applications, invites, approvals, reminders, and accountability |
+| Dictionary        | VariantGroup, Entry, EntryRevision                                             | Stores terms, variants, semantic fields, source/media data, revisions  |
+| Folklore          | FolkloreEntry, FolkloreRevision, FolkloreComment                               | Stores folklore content, category/source/media data, variants/comments |
+| Review governance | Review, FolkloreReview, ReviewAdminOverride                                    | Stores review decisions and privileged moderation actions              |
+| Recognition       | ContributionEvent, UserContributionStats, RecognitionEvent, MunicipalityStats  | Tracks contribution credit, badges, levels, and leaderboard aggregates |
+| Site operations   | SiteContentSettings, GamificationConfig, GamificationRuntimeState              | Stores editable site content and runtime configuration                 |
+
+## Core Data Flow
+
+The most important pattern is the **revision-first workflow**:
+
+1. A contributor saves or submits a draft.
+2. The system stores the submitted content as a revision snapshot.
+3. Reviewers/admins evaluate the revision.
+4. If approved, the revision is published into the live entry table.
+5. A contribution event is recorded for recognition and leaderboard accounting.
+
+That pattern is used for both dictionary and folklore content.
+
 ```mermaid
 erDiagram
 
@@ -429,3 +485,67 @@ erDiagram
 | Role pipeline           | `RoleInvitation → RoleOnboardingRecord` (invite path) or `RoleApplication → RoleApplicationDecision → RoleOnboardingRecord` (application path)                                                                                                                                                                        |
 | Audit trail             | `AdminAccountAction` logs privileged account operations, including activation/deactivation, role revocation, suspicious-account handling, password reset sends, and approved-applicant setup reminders.                                                                                                               |
 | Contribution credit     | `ContributionEvent` is the canonical credit ledger; four nullable FKs (to Entry, EntryRevision, FolkloreEntry, FolkloreRevision) with unique constraints prevent double-counting                                                                                                                                      |
+
+## Design Rationale Notes
+
+These notes explain why the main tables are separated this way.
+
+### Why Use Revisions?
+
+Dictionary and folklore content is not written directly into the public record.
+Instead, a submitted version is stored first as `EntryRevision` or
+`FolkloreRevision`. Reviewers then approve or reject that snapshot.
+
+This protects the public archive because:
+
+- contributors can draft and revise without immediately changing public content;
+- reviewers can see exactly what was submitted;
+- approved and rejected versions remain auditable;
+- published entries can be re-reviewed without losing the previous record.
+
+### Why Use Variant Groups?
+
+Ivatan terms may have common, municipal, dialect, pronunciation, or spelling
+variants. `VariantGroup` keeps those related entries together. One entry acts as
+the mother term and stores the shared meaning. Other entries can keep
+variant-specific pronunciation, examples, audio, or usage notes.
+
+This avoids duplicating the same meaning across several related terms while
+still preserving local differences.
+
+### Why Use Contribution Events?
+
+The system does not calculate badges and recognition only from the current
+visible page. It records credit in `ContributionEvent`. This creates a stable
+ledger for:
+
+- approved dictionary entries;
+- approved dictionary revisions;
+- approved folklore entries;
+- approved folklore revisions;
+- review activity and recognition updates.
+
+Using a ledger helps prevent double-counting and makes leaderboard totals easier
+to explain.
+
+### Why Keep Role Applications Separate From Users?
+
+A user account and a role approval are different things. `RoleApplication`,
+`RoleApplicationDecision`, `RoleInvitation`, and `RoleOnboardingRecord` keep that
+history separate so admins can answer:
+
+- who applied;
+- what role they requested;
+- who approved or rejected the request;
+- when the activation/reminder email was sent;
+- whether the user completed onboarding.
+
+This is important because the system handles cultural content and reviewer
+authority, not just ordinary login access.
+
+### Why Keep Admin Actions?
+
+`AdminAccountAction` records sensitive actions such as account activation,
+deactivation, role changes, flags, and password/setup reminders. This gives the
+project an operational audit trail and helps future maintainers understand what
+happened to an account without relying on memory.

@@ -26,7 +26,7 @@ Dictionary and folklore submissions use a revision-first workflow:
 
 ## Rationale
 
-Revision-first publishing supports accountability, reviewer validation, contributor credit, and defense-ready auditability. It also fits the governance nature of the project: cultural records should not silently change.
+Revision-first publishing supports accountability, reviewer validation, contributor credit, and review-ready auditability. It also fits the governance nature of the project: cultural records should not silently change.
 
 ## Consequences
 

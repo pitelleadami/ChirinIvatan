@@ -3,13 +3,51 @@
 This version is optimized for browser/site QA.  
 Use Postman only if you want extra API-only checks.
 
-Companion execution table:
+Purpose:
 
-- `docs/SPEC-03_QA_EXECUTION_SHEET.md`
-  Simple editable worksheet (no table):
-- `docs/SPEC-03_QA_WORKSHEET_EDITABLE.md`
+- confirm that the system works from the point of view of visitors,
+  contributors, reviewers, and admins;
+- verify that governance rules work in the browser, not only in unit tests;
+- create repeatable evidence before adviser demo, deployment, or turnover.
+
+Recommended evidence to keep:
+
+- date tested;
+- tester name or initials;
+- environment tested (`local`, `staging`, or `production`);
+- browser/device used;
+- screenshots for failures or confusing behavior;
+- bug IDs or notes for unresolved items.
+
+Pass/fail rule:
+
+- Mark an item `PASS` when the expected result is observed.
+- Mark an item `FAIL` when the expected result is missing, broken, or unclear.
+- Mark an item `N/A` only when the feature is intentionally outside the current test environment.
+
+Companion QA records:
+
+- Private QA execution sheets may be used for table-style pass/fail tracking.
+- Private QA worksheets may be used for simpler editable pass/fail notes during
+  live testing sessions.
 
 ---
+
+## 0) QA Coverage Map
+
+| Area                | What This Checklist Confirms                                        |
+| ------------------- | ------------------------------------------------------------------- |
+| Access control      | unauthenticated, contributor, reviewer, and admin boundaries        |
+| Dictionary workflow | draft, submit, review, publish, variants, masking, revision view    |
+| Folklore workflow   | draft, upload, submit, review, publish, alternate versions          |
+| Governance          | quorum, rejection, re-review, archive/restore, self-review blocks   |
+| Public experience   | dictionary/folklore detail pages, shareable URLs, public profiles   |
+| Admin operations    | applications, people, messages, site content, resources, logs       |
+| Mobile behavior     | key browsing and admin lists remain usable on small screens         |
+| Preservation        | archived and historical records remain traceable, not silently lost |
+
+Use this map when explaining the QA process: the checklist is not just a click
+test; it verifies the content lifecycle and accountability rules.
 
 ## 1) Setup
 
@@ -383,3 +421,13 @@ If any check fails, log:
 - user role used
 - payload/field values entered
 - actual vs expected outcome
+
+QA summary to record:
+
+- Tested by:
+- Date:
+- Environment:
+- Browser/device:
+- Result: `GO` / `NO-GO`
+- Unresolved issues:
+- Notes for next tester:

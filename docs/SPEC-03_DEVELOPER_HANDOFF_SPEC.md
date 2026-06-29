@@ -1,23 +1,48 @@
 # SPEC-03 Developer Handoff Specification (Authoritative, Exhaustive)
 
-Status: implementation handoff; superseded by `SPEC-03_REBUILD_SPEC.md` where conflicts exist
+Status: implementation handoff; public implementation reference for current maintainers
 Audience: backend + frontend engineers rebuilding this exact system  
 Goal: zero room for interpretation drift
 
-Implementation status snapshot (2026-06-13):
+## How To Use This Document
+
+Use this as the detailed engineering handoff after reading:
+
+1. `README.md` for the project overview.
+2. `docs/SYSTEM_REQUIREMENTS.md` for functional and non-functional requirements.
+3. `docs/SPEC-03_SYSTEM_ARCHITECTURE_PACK.md` for diagrams and workflow visuals.
+4. `docs/ERD.md` and `DATA_MODEL.md` for database structure.
+
+This document is intentionally more detailed than the adviser-facing
+documentation. It records implementation contracts, API expectations, workflow
+rules, and edge cases future maintainers should preserve.
+
+When maintaining the project:
+
+- treat backend validation as the source of truth;
+- keep public docs and private operator notes separate;
+- preserve revision and review history unless the project owner explicitly
+  approves a future deletion workflow;
+- update this handoff when a workflow, endpoint, role rule, or data contract
+  changes.
+
+Implementation status snapshot (2026-06-29):
 
 - Backend core workflows are implemented and test-backed.
 - Frontend product screens are implemented and build successfully.
 - In-app notifications, contribution status tracking, one-time onboarding, and HTML role invitations are implemented and deployed.
 - Admin-managed maintenance mode is implemented.
-- Use `SPEC-03_REBUILD_SPEC.md` as the rebuild-grade master specification.
+- Admin application reminders, email-history logs, resource management, source
+  attribution fixes, variant duplicate warnings, and linkable related dictionary
+  terms are implemented.
+- Use `docs/SYSTEM_REQUIREMENTS.md`, `DATA_MODEL.md`, and this handoff as the public source set for maintenance.
 
 Canonical path note:
 
 - Active backend root: `backend/`
 - Active frontend root: `frontend/`
 - Use only these two roots for all new development and onboarding.
-- If this file conflicts with `docs/SPEC-03_REBUILD_SPEC.md`, the rebuild spec wins.
+- If public docs conflict, resolve the conflict by checking the current code and updating the affected documentation.
 
 Display normalization decisions:
 
@@ -26,6 +51,36 @@ Display normalization decisions:
 - Invalid login errors may include a generic hint to try lowercase usernames, but must not confirm whether a username exists.
 - Person names may be display-normalized when obvious all-caps input is detected.
 - Profile affiliation rows and generated affiliation/occupation summaries use title-style capitalization; post-nominals and credentials remain as entered.
+
+## System Responsibility Summary
+
+| Layer             | Responsibility                                                                   |
+| ----------------- | -------------------------------------------------------------------------------- |
+| React frontend    | Forms, previews, navigation, role-specific screens, client-side usability checks |
+| Django API        | Authentication, permissions, validation, review rules, publishing, attribution   |
+| PostgreSQL        | Source of truth for users, submissions, reviews, entries, logs, recognition      |
+| Uploaded media    | Stores photos, audio, PDFs, and other non-code assets outside the repository     |
+| CI and monitoring | Catch build/test failures and production errors before they become silent issues |
+
+Important boundary:
+
+> Frontend checks help users, but backend checks enforce the real rules.
+
+## Quick Navigation
+
+| Need To Understand                          | Read Section |
+| ------------------------------------------- | ------------ |
+| Roles, permissions, and admin powers        | Section 2    |
+| Content status lifecycle                    | Section 3    |
+| Dictionary terms, variants, media, sources  | Section 4    |
+| Folklore entries, alternate versions, media | Section 5    |
+| Review quorum and re-review behavior        | Section 6    |
+| Revision history and visibility             | Section 7    |
+| Contribution credit and leaderboards        | Section 8    |
+| Public masking and attribution              | Section 9    |
+| API endpoints and expected payloads         | Section 10   |
+| Frontend form expectations                  | Section 13   |
+| Operational and QA notes                    | Section 14   |
 
 ---
 
@@ -95,7 +150,7 @@ Allowed values:
 - `approved_under_review`
 - `rejected`
 - `archived`
-- `deleted`
+- `deleted` (reserved; not part of the normal operational lifecycle)
 
 Allowed transitions only:
 
@@ -104,10 +159,16 @@ Allowed transitions only:
 - `approved -> approved_under_review | archived`
 - `approved_under_review -> approved | rejected`
 - `rejected -> archived`
-- `archived -> approved | deleted`
+- `archived -> approved`
 - `deleted ->` none
 
 No transition outside this table is legal.
+
+Operational note:
+
+- Automatic permanent deletion is disabled. `deleted` remains a reserved model
+  state only and should not be used by normal admin workflows unless a future
+  owner-approved deletion process is designed and documented.
 
 ### 3.2 Revision States (Dictionary and Folklore)
 
@@ -276,6 +337,7 @@ The revision payload must follow `ENTRY_SNAPSHOT_FIELDS` in `backend/dictionary/
 - `copyright_usage`: string
 - `contributor`: FK user required
 - `status`: `draft|pending|approved|approved_under_review|rejected|archived|deleted`
+  (`deleted` is reserved and not part of normal admin operations)
 - `archived_at`: datetime nullable
 - `created_at`, `updated_at`: datetime
 

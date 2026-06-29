@@ -147,10 +147,8 @@ def _create_additional_variants(*, entry: Entry, revision, approvers) -> list[En
         if not term:
             continue
 
-        variant_type = str(variant_data.get("variant_type") or "").strip()
         duplicate = group.entries.filter(
             term__iexact=term,
-            variant_type__iexact=variant_type,
             status__in=[EntryStatus.APPROVED, EntryStatus.APPROVED_UNDER_REVIEW],
         ).first()
         if duplicate:

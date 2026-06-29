@@ -16,6 +16,7 @@ import re
 from django.core.exceptions import ValidationError
 from django.core.files.storage import default_storage
 from django.db.models import Q
+from django.db.models.functions import Lower
 from django.http import JsonResponse
 from django.views.decorators.http import require_GET, require_http_methods
 
@@ -286,13 +287,37 @@ def _validate_submittable_revision_data(data):
         raise ValidationError(
             "English translation is required when an Ivatan example sentence is provided."
         )
+    variant_type_counts = {}
+    normalized_variant_terms = {}
     for index, variant in enumerate(data.get("variants") or [], start=1):
+        variant_term = normalize_headword(variant.get("term", ""))
+        variant_term_key = variant_term.lower()
+        if variant_term_key:
+            if variant_term_key in normalized_variant_terms:
+                raise ValidationError(
+                    f"Variant {index} repeats the same headword as Variant {normalized_variant_terms[variant_term_key]}."
+                )
+            normalized_variant_terms[variant_term_key] = index
+        variant_type_key = str(variant.get("variant_type", "")).strip().lower()
+        if variant_type_key:
+            variant_type_counts[variant_type_key] = variant_type_counts.get(variant_type_key, 0) + 1
         if (
             str(variant.get("example_sentence", "")).strip()
             and not str(variant.get("example_translation", "")).strip()
         ):
             raise ValidationError(
                 f"English translation is required for Variant {index} when an Ivatan example sentence is provided."
+            )
+    for index, variant in enumerate(data.get("variants") or [], start=1):
+        variant_type = str(variant.get("variant_type", "")).strip()
+        variant_type_key = variant_type.lower()
+        if (
+            variant_type_key
+            and variant_type_counts.get(variant_type_key, 0) > 1
+            and not str(variant.get("usage_notes", "")).strip()
+        ):
+            raise ValidationError(
+                f"Variant {index} uses a duplicate {variant_type} variant type. Add a usage note explaining the different spelling, pronunciation, place, or source."
             )
     if (
         not _as_bool(data.get("term_source_is_self_knowledge"))
@@ -925,6 +950,60 @@ def _latest_approved_revision(entry: Entry):
     )
 
 
+def _split_related_terms(value):
+    return [item.strip() for item in re.split(r"[,;\n]", value or "") if item and item.strip()]
+
+
+def _serialize_related_terms(semantic_entry):
+    fields = {
+        "english_synonym": semantic_entry.english_synonym,
+        "ivatan_synonym": semantic_entry.ivatan_synonym,
+        "english_antonym": semantic_entry.english_antonym,
+        "ivatan_antonym": semantic_entry.ivatan_antonym,
+    }
+    terms_by_field = {field: _split_related_terms(value) for field, value in fields.items()}
+    term_keys = {
+        normalize_headword(term).lower()
+        for terms in terms_by_field.values()
+        for term in terms
+        if normalize_headword(term)
+    }
+    matches = {}
+    if term_keys:
+        matched_entries = (
+            Entry.objects.annotate(term_key=Lower("term"))
+            .select_related("initial_contributor")
+            .filter(
+                _live_contributor_q("initial_contributor"),
+                status__in=VISIBLE_PUBLIC_STATUSES,
+                term_key__in=term_keys,
+            )
+            .order_by("-is_mother", "term")
+        )
+        for match in matched_entries:
+            matches.setdefault(normalize_headword(match.term).lower(), match)
+
+    return {
+        field: [
+            {
+                "label": term,
+                "entry_id": (
+                    str(matches[normalize_headword(term).lower()].id)
+                    if normalize_headword(term).lower() in matches
+                    else None
+                ),
+                "term": (
+                    matches[normalize_headword(term).lower()].term
+                    if normalize_headword(term).lower() in matches
+                    else term
+                ),
+            }
+            for term in terms
+        ]
+        for field, terms in terms_by_field.items()
+    }
+
+
 @require_GET
 def dictionary_entry_detail_view(request, entry_id):
     """
@@ -988,6 +1067,7 @@ def dictionary_entry_detail_view(request, entry_id):
                 "ivatan_synonym": semantic_entry.ivatan_synonym,
                 "english_antonym": semantic_entry.english_antonym,
                 "ivatan_antonym": semantic_entry.ivatan_antonym,
+                "related_terms": _serialize_related_terms(semantic_entry),
                 "inflected_forms": semantic_entry.inflected_forms,
                 "photo_url": _media_url(request, semantic_entry.photo),
                 "photo_source": semantic_entry.photo_source,

@@ -515,6 +515,42 @@ class DictionaryEntryDetailApiTests(TestCase):
         self.assertEqual(payload["header"]["term"], "api-term")
         self.assertEqual(payload["semantic_core"]["meaning"], entry.meaning)
 
+    def test_entry_detail_resolves_linkable_related_terms(self):
+        matched = Entry.objects.create(
+            term="Vahay",
+            status=EntryStatus.APPROVED,
+            is_mother=True,
+            initial_contributor=self.contributor,
+        )
+        entry = Entry.objects.create(
+            term="Rahin",
+            status=EntryStatus.APPROVED,
+            is_mother=True,
+            initial_contributor=self.contributor,
+            ivatan_synonym="vahay, missing-term",
+        )
+
+        response = self.client.get(f"/api/dictionary/entries/{entry.id}")
+        self.assertEqual(response.status_code, 200)
+        related_terms = response.json()["semantic_core"]["related_terms"]
+
+        self.assertEqual(
+            related_terms["ivatan_synonym"][0],
+            {
+                "label": "vahay",
+                "entry_id": str(matched.id),
+                "term": "Vahay",
+            },
+        )
+        self.assertEqual(
+            related_terms["ivatan_synonym"][1],
+            {
+                "label": "missing-term",
+                "entry_id": None,
+                "term": "missing-term",
+            },
+        )
+
     def test_initial_approval_does_not_claim_a_reviser_and_returns_linkable_actors(self):
         entry = Entry.objects.create(
             term="first-version",
@@ -1096,6 +1132,52 @@ class DictionaryRevisionApiTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn("Variant 1", response.json()["detail"])
+
+    def test_submit_rejects_duplicate_variant_headwords(self):
+        revision = EntryRevision.objects.create(
+            contributor=self.contributor,
+            proposed_data={
+                "term": "duplicate-variant-term",
+                "meaning": "has duplicate variant terms",
+                "term_source_is_self_knowledge": True,
+                "variants": [
+                    {"term": "same form", "variant_type": "Itbayaten"},
+                    {"term": "Same Form", "variant_type": "Other / Spelling Variant"},
+                ],
+            },
+            status=EntryRevision.Status.DRAFT,
+        )
+        self.client.force_login(self.contributor)
+
+        response = self.client.post(f"/api/dictionary/revisions/{revision.id}/submit")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("repeats the same headword", response.json()["detail"])
+
+    def test_submit_requires_usage_note_for_duplicate_variant_type(self):
+        revision = EntryRevision.objects.create(
+            contributor=self.contributor,
+            proposed_data={
+                "term": "duplicate-variant-type",
+                "meaning": "has duplicate variant types",
+                "term_source_is_self_knowledge": True,
+                "variants": [
+                    {
+                        "term": "first form",
+                        "variant_type": "Itbayaten",
+                        "usage_notes": "Used in one source context.",
+                    },
+                    {"term": "second form", "variant_type": "Itbayaten"},
+                ],
+            },
+            status=EntryRevision.Status.DRAFT,
+        )
+        self.client.force_login(self.contributor)
+
+        response = self.client.post(f"/api/dictionary/revisions/{revision.id}/submit")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("duplicate Itbayaten variant type", response.json()["detail"])
 
     def test_submit_requires_audio_source_when_audio_not_self_recorded(self):
         revision = EntryRevision.objects.create(

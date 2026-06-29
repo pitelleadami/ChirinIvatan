@@ -2,7 +2,7 @@
 
 Status: current screen contract
 Last updated: 2026-06-13
-Detailed rebuild source: `docs/SPEC-03_REBUILD_SPEC.md`
+Detailed companions: `docs/SYSTEM_REQUIREMENTS.md` and `docs/SPEC-03_DEVELOPER_HANDOFF_SPEC.md`
 
 This document lists every user-facing screen, who can use it, and what must be inside it.
 
