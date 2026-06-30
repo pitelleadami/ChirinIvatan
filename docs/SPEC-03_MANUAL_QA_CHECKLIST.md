@@ -203,6 +203,8 @@ Expected behavior on create/update/submit draft:
    - one reject: revision immediately becomes `rejected` and appears for the
      contributor under Needs Changes
    - flag approved entry from the live Folklore detail page with notes: entry `approved_under_review`
+   - the same account that flagged the entry cannot approve/reject/archive/return
+     it in that same re-review round
    - Reject/Archive during re-review: entry `archived` and removed from public view
    - Return for Fixing during re-review: assigned correction draft appears in Needs Changes
 

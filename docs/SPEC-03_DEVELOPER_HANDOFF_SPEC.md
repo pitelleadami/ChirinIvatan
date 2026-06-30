@@ -499,6 +499,9 @@ Frontend display:
   - Reject/Archive -> entry `archived` and removed from public view
   - Return for Fixing -> assigned correction draft appears as Needs Changes for the assignee
   - quorum approve -> entry back to `approved`
+- The actor who flagged an entry cannot approve, reject/archive, or return that
+  same entry for fixing in the re-review round they opened. Another eligible
+  reviewer/admin must decide the round.
 - Return for Fixing requires a selected approved source snapshot, assigned
   contributor, and non-empty fix instructions.
 
@@ -896,6 +899,8 @@ Screen: `Review Action Controls`
   - live Dictionary/Folklore entry details show flag-for-re-review controls for flaggable published entries
   - notes input required for reject and flag
   - disable duplicate action per same revision and review round if backend returns duplicate-review error
+- Governance rule: the user who opened a re-review round by flagging an entry
+  cannot be the deciding reviewer/admin in that same round.
 - Expected outcomes:
   - one reject immediately rejects a pending revision
   - in re-review, Reject/Archive removes the published entry from public view

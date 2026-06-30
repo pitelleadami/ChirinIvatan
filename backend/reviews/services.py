@@ -238,6 +238,13 @@ def _latest_folklore_flag_review(revision: FolkloreRevision):
     )
 
 
+def _ensure_flagger_is_not_rereview_decider(*, latest_flag, reviewer):
+    if latest_flag and latest_flag.reviewer_id == reviewer.id:
+        raise ValidationError(
+            "The reviewer who flagged this entry must wait for another eligible reviewer/admin to decide this re-review round."
+        )
+
+
 def _dictionary_revision_title(revision):
     if revision.entry_id and revision.entry:
         return revision.entry.term
@@ -505,6 +512,9 @@ def submit_folklore_review(
     else:
         target_round = 0
 
+    if is_rereview and decision != FolkloreReview.Decision.FLAG:
+        _ensure_flagger_is_not_rereview_decider(latest_flag=latest_flag, reviewer=reviewer)
+
     if FolkloreReview.objects.filter(
         folklore_revision=revision,
         reviewer=reviewer,
@@ -709,6 +719,9 @@ def submit_review(
         target_round = latest_flag.review_round if latest_flag else 1
     else:
         target_round = 0
+
+    if is_rereview and decision != Review.Decision.FLAG:
+        _ensure_flagger_is_not_rereview_decider(latest_flag=latest_flag, reviewer=reviewer)
 
     if Review.objects.filter(
         revision=revision,

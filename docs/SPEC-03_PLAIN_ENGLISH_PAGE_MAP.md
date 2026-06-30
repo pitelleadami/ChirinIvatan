@@ -415,6 +415,8 @@ Rules:
 - actionable review queues show newest eligible submissions first
 - items already reviewed by the signed-in reviewer/admin in the active round do
   not remain actionable for that same person
+- a reviewer/admin who flags a published entry cannot decide that same re-review
+  round; another eligible reviewer/admin must act
 
 ### 4.2 Public Detail Review Actions
 

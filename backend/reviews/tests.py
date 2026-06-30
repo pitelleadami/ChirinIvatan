@@ -138,6 +138,44 @@ class ReviewServicesTests(TestCase):
         self.assertIn("Confirmed issue.", notification.message)
         self.assertEqual(notification.target_url, "/admin-applications?tab=contributions")
 
+    def test_dictionary_flagger_cannot_decide_same_rereview_round(self):
+        entry, revision = self._approved_entry_with_revision()
+
+        submit_review(
+            revision=revision,
+            reviewer=self.reviewer1,
+            decision=Review.Decision.FLAG,
+            notes="Needs another reviewer.",
+        )
+
+        blocked_decisions = [
+            (Review.Decision.APPROVE, {}),
+            (Review.Decision.REJECT, {}),
+            (
+                Review.Decision.RETURN,
+                {
+                    "assigned_to_username": self.contributor.username,
+                    "source_revision_id": str(revision.id),
+                },
+            ),
+        ]
+        for decision, extra_kwargs in blocked_decisions:
+            with self.subTest(decision=decision):
+                with self.assertRaisesMessage(
+                    ValidationError,
+                    "must wait for another eligible reviewer/admin",
+                ):
+                    submit_review(
+                        revision=revision,
+                        reviewer=self.reviewer1,
+                        decision=decision,
+                        notes="Same flagger should not decide.",
+                        **extra_kwargs,
+                    )
+
+        entry.refresh_from_db()
+        self.assertEqual(entry.status, EntryStatus.APPROVED_UNDER_REVIEW)
+
     def test_rereview_can_return_revision_to_selected_contributor_and_restore_previous_snapshot(
         self,
     ):
@@ -1176,6 +1214,58 @@ class FolkloreReviewFlowTests(TestCase):
         self.assertIn("rejected after re-review", notification.message)
         self.assertIn("Reject on re-review", notification.message)
         self.assertEqual(notification.target_url, "/admin-applications?tab=contributions")
+
+    def test_folklore_flagger_cannot_decide_same_rereview_round(self):
+        revision = self._pending_folklore()
+        submit_folklore_review(
+            revision=revision,
+            reviewer=self.reviewer1,
+            decision=FolkloreReview.Decision.APPROVE,
+            notes="Looks good",
+        )
+        submit_folklore_review(
+            revision=revision,
+            reviewer=self.admin,
+            decision=FolkloreReview.Decision.APPROVE,
+            notes="Approve publish",
+        )
+        revision.refresh_from_db()
+        entry = revision.entry
+
+        submit_folklore_review(
+            revision=revision,
+            reviewer=self.reviewer1,
+            decision=FolkloreReview.Decision.FLAG,
+            notes="Needs another reviewer.",
+        )
+
+        blocked_decisions = [
+            (FolkloreReview.Decision.APPROVE, {}),
+            (FolkloreReview.Decision.REJECT, {}),
+            (
+                FolkloreReview.Decision.RETURN,
+                {
+                    "assigned_to_username": self.contributor.username,
+                    "source_revision_id": str(revision.id),
+                },
+            ),
+        ]
+        for decision, extra_kwargs in blocked_decisions:
+            with self.subTest(decision=decision):
+                with self.assertRaisesMessage(
+                    ValidationError,
+                    "must wait for another eligible reviewer/admin",
+                ):
+                    submit_folklore_review(
+                        revision=revision,
+                        reviewer=self.reviewer1,
+                        decision=decision,
+                        notes="Same flagger should not decide.",
+                        **extra_kwargs,
+                    )
+
+        entry.refresh_from_db()
+        self.assertEqual(entry.status, FolkloreEntry.Status.APPROVED_UNDER_REVIEW)
 
     def test_folklore_rereview_quorum_notifies_that_entry_remains_approved(self):
         revision = self._pending_folklore()
