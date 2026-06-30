@@ -2483,7 +2483,12 @@ def public_user_profile_view(request, username):
 
     gamification = build_gamification_profile_payload(user)
     if not is_own_profile:
-        for badge_group in ("dictionary_badges", "folklore_badges", "quality_badges"):
+        for badge_group in (
+            "reviewer_level_badges",
+            "dictionary_badges",
+            "folklore_badges",
+            "quality_badges",
+        ):
             gamification[badge_group] = [
                 badge for badge in gamification.get(badge_group, []) if badge.get("unlocked")
             ]

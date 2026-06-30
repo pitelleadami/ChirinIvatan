@@ -130,12 +130,50 @@ function allBadgesFromProfile(profile) {
   ]
 }
 
+function reviewerLevelBadgesFromProfile(profile, reviewerLevelData) {
+  const rows = profile?.gamification?.reviewer_level_badges || []
+  if (rows.length) {
+    return rows.map((badge) => {
+      const levelNumber =
+        Number(badge.level_number) || Number(String(badge.key || '').match(/\d+$/)?.[0]) || 0
+      return {
+        ...badge,
+        category: 'Reviewer',
+        image: getReviewerLevelImage(levelNumber),
+      }
+    })
+  }
+
+  const currentLevel = Number(reviewerLevelData?.level) || 0
+  if (currentLevel <= 0) return []
+  return [
+    {
+      key: `reviewer_level_${currentLevel}`,
+      name: reviewerLevelData.title || `Reviewer Level ${currentLevel}`,
+      level_number: currentLevel,
+      unlocked: true,
+      current_value: reviewerLevelData.current_count || 0,
+      threshold: reviewerLevelData.current_count || 0,
+      category: 'Reviewer',
+      image: getReviewerLevelImage(currentLevel),
+    },
+  ]
+}
+
 function badgeSortValue(badge) {
   if (badge.unlocked_at) {
     const parsed = Date.parse(badge.unlocked_at)
     if (Number.isFinite(parsed)) return parsed
   }
   return Number(badge.threshold) || 0
+}
+
+function earnedBadgePriority(badge) {
+  const levelNumber = Number(badge.level_number) || Number(String(badge.key || '').match(/\d+$/)?.[0]) || 0
+  const threshold = Number(badge.threshold) || 0
+  if (badge.category === 'Reviewer') return 300000 + levelNumber * 1000 + threshold
+  if (badge.category === 'Quality') return 200000 + threshold
+  return 100000 + threshold
 }
 
 function nextInProgressBadgesByCategory(badges) {
@@ -508,30 +546,21 @@ export default function PublicProfilePage({ currentUser }) {
   const isIncludedInLeaderboard = profile?.header?.include_in_leaderboard !== false
   const allBadges = allBadgesFromProfile(profile)
   const reviewerLevelData = profile?.gamification?.reviewer_level
-  const earnedReviewerLevelBadge = (() => {
-    const currentLevel = Number(reviewerLevelData?.level) || 0
-    if (currentLevel <= 0) return null
-    return {
-      key: `reviewer_level_${currentLevel}`,
-      name: reviewerLevelData.title || `Reviewer Level ${currentLevel}`,
-      unlocked: true,
-      current_value: reviewerLevelData.current_count || 0,
-      threshold: reviewerLevelData.current_count || 0,
-      category: 'Reviewer',
-      image: getReviewerLevelImage(currentLevel),
-    }
-  })()
-  const earnedBadges = [
-    ...(earnedReviewerLevelBadge ? [earnedReviewerLevelBadge] : []),
-    ...allBadges.filter((badge) => badge.unlocked),
-  ].sort((a, b) => badgeSortValue(a) - badgeSortValue(b))
+  const reviewerLevelBadges = reviewerLevelBadgesFromProfile(profile, reviewerLevelData)
+  const earnedReviewerLevelBadges = reviewerLevelBadges.filter((badge) => badge.unlocked)
+  const earnedBadges = [...earnedReviewerLevelBadges, ...allBadges.filter((badge) => badge.unlocked)].sort(
+    (a, b) => earnedBadgePriority(b) - earnedBadgePriority(a) || badgeSortValue(b) - badgeSortValue(a),
+  )
   const reviewerInProgressBadge = (() => {
     if (!isOwnProfile || !isReviewerOrAbove) return null
+    const nextBadge = reviewerLevelBadges.find((badge) => !badge.unlocked)
+    if (nextBadge) return nextBadge
     if (!reviewerLevelData || reviewerLevelData.next_threshold === null) return null
-    const nextLevel = (reviewerLevelData.level || 0) + 1
+    const nextLevel = (Number(reviewerLevelData.level) || 0) + 1
     return {
       key: `reviewer_level_${nextLevel}`,
       name: reviewerLevelData.next_title || `Reviewer Level ${nextLevel}`,
+      level_number: nextLevel,
       unlocked: false,
       current_value: reviewerLevelData.current_count || 0,
       threshold: reviewerLevelData.next_threshold,
@@ -543,8 +572,7 @@ export default function PublicProfilePage({ currentUser }) {
     ...(reviewerInProgressBadge ? [reviewerInProgressBadge] : []),
     ...nextInProgressBadgesByCategory(allBadges),
   ]
-  const reviewerAchievementBadges = [earnedReviewerLevelBadge, reviewerInProgressBadge].filter(Boolean)
-  const achievementGroups = achievementGroupsFromBadges([...allBadges, ...reviewerAchievementBadges])
+  const achievementGroups = achievementGroupsFromBadges([...allBadges, ...reviewerLevelBadges])
   const totalContributions = contributionTotal(profile?.contribution_summary)
   const fullName = nameWithPostNominals(
     profile?.header?.first_name,

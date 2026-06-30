@@ -2631,6 +2631,22 @@ class GamificationAdvancedFeaturesTests(TestCase):
         payload = build_gamification_profile_payload(self.user)
         self.assertEqual(payload["contributor_level"]["title"], "Custom Title")
 
+    def test_profile_payload_lists_all_reviewer_levels_earned(self):
+        stats, _ = UserContributionStats.objects.get_or_create(user=self.user)
+        stats.review_completed_total = 125
+        stats.save()
+
+        payload = build_gamification_profile_payload(self.user)
+        earned_reviewer_badges = [
+            badge for badge in payload["reviewer_level_badges"] if badge["unlocked"]
+        ]
+
+        self.assertEqual(
+            [badge["key"] for badge in earned_reviewer_badges],
+            ["reviewer_level_1", "reviewer_level_2", "reviewer_level_3"],
+        )
+        self.assertEqual(payload["reviewer_level"]["level"], 3)
+
     @patch("users.recognition._current_month_key", return_value="2026-03")
     def test_month_rollover_creates_municipality_winner_events(self, _mock_month):
         MunicipalityStats.objects.create(

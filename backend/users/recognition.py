@@ -234,6 +234,24 @@ def _badge_rows_from_rules(*, rules, current_value):
     return rows
 
 
+def _level_badge_rows_from_rules(*, track, rules, current_value):
+    rows = []
+    for rule in rules:
+        if rule.number <= 0:
+            continue
+        rows.append(
+            {
+                "key": f"{track}_level_{rule.number}",
+                "name": rule.title,
+                "level_number": rule.number,
+                "unlocked": current_value >= rule.threshold,
+                "current_value": current_value,
+                "threshold": rule.threshold,
+            }
+        )
+    return rows
+
+
 def _calculate_user_counters(user):
     # Authoritative counters are DB-derived, never frontend-derived.
     qs = ContributionEvent.objects.filter(user=user)
@@ -589,6 +607,11 @@ def build_gamification_profile_payload(user):
         rules["reviewer_levels"],
         stats.review_completed_total,
     )
+    reviewer_level_badges = _level_badge_rows_from_rules(
+        track="reviewer",
+        rules=rules["reviewer_levels"],
+        current_value=stats.review_completed_total,
+    )
 
     dictionary_badges, folklore_badges, quality_badges = _calculate_badges(
         rules=rules,
@@ -629,6 +652,7 @@ def build_gamification_profile_payload(user):
         },
         "contributor_level": contributor_level,
         "reviewer_level": reviewer_level,
+        "reviewer_level_badges": reviewer_level_badges,
         "dictionary_badges": dictionary_badges,
         "folklore_badges": folklore_badges,
         "quality_badges": quality_badges,
