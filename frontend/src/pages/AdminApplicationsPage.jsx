@@ -288,6 +288,11 @@ function contributionStatusDetail(row) {
   return `Last updated ${formatDate(row.updated_at || row.created_at)}`
 }
 
+function pendingContributionQuorumNote(row) {
+  if (contributionDisplayStatus(row) !== 'pending') return ''
+  return 'Waiting for reviewer quorum. Another eligible reviewer/admin can approve it, or a reviewer may return notes.'
+}
+
 function splitList(value) {
   return String(value || '')
     .split(/[,;\n]/)
@@ -5322,6 +5327,11 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
                       <p className="meta">Part of Speech: {contribution.part_of_speech}</p>
                     )}
                     <p className="meta">{contributionStatusDetail(contribution)}</p>
+                    {pendingContributionQuorumNote(contribution) && (
+                      <p className="contribution-quorum-note">
+                        {pendingContributionQuorumNote(contribution)}
+                      </p>
+                    )}
                     {(contribution.status === 'draft' || contribution.status === 'rejected') && (
                       <div className="admin-draft-actions">
                         <button
@@ -5447,6 +5457,11 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
                       <p className="meta">Municipality: {contribution.municipality_source}</p>
                     )}
                     <p className="meta">{contributionStatusDetail(contribution)}</p>
+                    {pendingContributionQuorumNote(contribution) && (
+                      <p className="contribution-quorum-note">
+                        {pendingContributionQuorumNote(contribution)}
+                      </p>
+                    )}
                     {(contribution.status === 'draft' || contribution.status === 'rejected') && (
                       <div className="admin-draft-actions">
                         <button

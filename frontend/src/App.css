@@ -3000,6 +3000,16 @@ button.danger:hover {
   line-height: 1.25;
 }
 
+.contribution-quorum-note {
+  border-left: 3px solid #b98a2c;
+  border-radius: 0 7px 7px 0;
+  padding: 8px 10px;
+  background: rgba(255, 248, 232, 0.72);
+  color: #5f4314;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .admin-draft-card .compact-button {
   justify-self: start;
 }

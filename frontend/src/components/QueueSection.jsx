@@ -12,7 +12,7 @@ import { formatSourceDisplay } from '../lib/sourceDisplay'
 
 function actionHint(mode, row) {
   if (mode === 'awaiting') {
-    return 'Your approval is recorded. This item is read-only for you while it waits for quorum.'
+    return 'Your approval is recorded. This item is waiting for another eligible reviewer/admin, so it is read-only for you.'
   }
   if (mode === 'published') {
     return 'This entry is already public. Flag only when it needs another review round.'
@@ -867,7 +867,7 @@ export default function QueueSection({
                 >
                   <span>
                     <strong>{titleText}</strong>
-                    <small>Your approval is recorded · {row.quorum_requirement}</small>
+                    <small>Your approval is recorded · waiting for another reviewer/admin</small>
                   </span>
                   <span className="queue-awaiting-toggle-end">
                     <span className={`badge status-${row.status}`}>{row.status}</span>
@@ -908,7 +908,7 @@ export default function QueueSection({
                     {row.reviewer_approvals === 1 ? '' : 's'} · {row.admin_approvals || 0} admin approval
                     {row.admin_approvals === 1 ? '' : 's'}
                   </span>
-                  <small>{row.quorum_requirement}</small>
+                  <small>{row.quorum_requirement}. Open for another eligible reviewer/admin.</small>
                 </div>
               )}
 
