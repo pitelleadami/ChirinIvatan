@@ -25,9 +25,12 @@ This project now has section comments inside core files. This guide tells you wh
    - Check `backend/reviews/services.py` quorum and state checks.
 2. If contributor/reviewer role does not activate:
    - Check `backend/users/role_onboarding.py` quorum + group assignment.
-3. If leaderboard/levels look wrong:
+3. If scheduled account deletion does not complete after the appeal window:
+   - Check `backend/users/management/commands/process_scheduled_account_deletions.py`.
+   - In production, confirm `chirin-account-deletions.timer` is active.
+4. If leaderboard/levels look wrong:
    - Check `ContributionEvent` rows, then run `python3 manage.py recompute_gamification`.
-4. If frontend POST fails with 403:
+5. If frontend POST fails with 403:
    - Check CSRF in `frontend/src/lib/api.js` and trusted origins in Django settings.
 
 ## How to adapt for another indigenous language

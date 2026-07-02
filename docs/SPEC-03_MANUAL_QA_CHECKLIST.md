@@ -35,16 +35,16 @@ Companion QA records:
 
 ## 0) QA Coverage Map
 
-| Area                | What This Checklist Confirms                                        |
-| ------------------- | ------------------------------------------------------------------- |
-| Access control      | unauthenticated, contributor, reviewer, and admin boundaries        |
-| Dictionary workflow | draft, submit, review, publish, variants, masking, revision view    |
-| Folklore workflow   | draft, upload, submit, review, publish, alternate versions          |
-| Governance          | quorum, rejection, re-review, archive/restore, self-review blocks   |
-| Public experience   | dictionary/folklore detail pages, shareable URLs, public profiles   |
-| Admin operations    | applications, people, messages, site content, resources, logs       |
-| Mobile behavior     | key browsing and admin lists remain usable on small screens         |
-| Preservation        | archived and historical records remain traceable, not silently lost |
+| Area                | What This Checklist Confirms                                                    |
+| ------------------- | ------------------------------------------------------------------------------- |
+| Access control      | unauthenticated, contributor, reviewer, and admin boundaries                    |
+| Dictionary workflow | draft, submit, review, publish, variants, masking, revision view                |
+| Folklore workflow   | draft, upload, submit, review, publish, alternate versions                      |
+| Governance          | quorum, rejection, re-review, archive/restore, self-review blocks               |
+| Public experience   | dictionary/folklore detail pages, shareable URLs, public profiles, share cards  |
+| Admin operations    | applications, people, account controls, messages, site content, resources, logs |
+| Mobile behavior     | key browsing and admin lists remain usable on small screens                     |
+| Preservation        | archived and historical records remain traceable, not silently lost             |
 
 Use this map when explaining the QA process: the checklist is not just a click
 test; it verifies the content lifecycle and accountability rules.
@@ -89,9 +89,50 @@ test; it verifies the content lifecycle and accountability rules.
 6. Expected:
    - HTTP 403 with reviewer/admin access error
 
+## 3.5) Admin People Account Controls
+
+1. Log in as an admin and open Steward's Desk -> People.
+2. Open an active contributor profile and expand Account Controls.
+3. Expected:
+   - `Role to grant` defaults to Reviewer when the user is not yet a reviewer.
+   - `Promote to Reviewer` grants reviewer access while keeping contributor access.
+4. Add account action notes, choose a deletion reason, and click `Schedule Deletion` on a test account only.
+5. Expected:
+   - account becomes inactive;
+   - pending deletion warning appears with due date and reason;
+   - public profile is hidden from non-admin visitors;
+   - deletion notice email is sent when the account has an email address.
+6. Add appeal/cancel notes and click `Cancel Scheduled Deletion`.
+7. Expected:
+   - pending deletion warning disappears;
+   - account is restored if it was active before scheduling;
+   - action log records schedule and cancel actions.
+
+## 3.6) Recognition Share Cards
+
+1. Open a public profile with earned dictionary, folklore, reviewer, or quality
+   badges.
+2. Click the single Share button on an earned badge.
+3. Expected:
+   - the share modal offers Square Post and Vertical Story;
+   - the generated image shows the badge artwork, a soft Chirin Ivatan heritage
+     style, and a short role/preservation statement;
+   - the image uses subtle gold accents without obscuring text or badge art;
+   - Download Image & Copy Caption downloads the chosen image format;
+   - copied caption matches the badge family: dictionary language preservation,
+     folklore memory/storytelling, reviewer accuracy/stewardship, or quality care/trust.
+
 ---
 
 ## 4) Dictionary QA from Site/Admin
+
+## 4.0) Dictionary Public Highlight Checks
+
+1. Open the public dictionary page.
+2. Confirm Word of the Day displays the selected headword on one line, including
+   long words, without splitting a word letter-by-letter.
+3. Confirm the date in the live-entry count uses the current date/month.
+4. Confirm the Word of the Day open-entry button loads the correct entry detail.
 
 ## A. Contributor Dictionary Draft Builder
 

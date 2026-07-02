@@ -90,6 +90,11 @@ python3 manage.py test users reviews dictionary folklore
 
 - [ ] role application create/my/decide works
 - [ ] invitation endpoint works for reviewer/admin
+- [ ] admin account controls can grant missing role access, including contributor-to-reviewer promotion
+- [ ] admin account controls can schedule account deletion only with reason + notes
+- [ ] scheduled account deletion deactivates login and exposes pending deletion state to admins
+- [ ] scheduled account deletion can be canceled with notes
+- [ ] `process_scheduled_account_deletions --dry-run` runs without errors
 - [ ] public profile includes accountability labels + gamification block
 - [ ] `GET /api/site-content` includes maintenance fields
 - [ ] when maintenance is enabled, non-admin public API calls return controlled `503`
@@ -122,13 +127,18 @@ python3 manage.py test users reviews dictionary folklore
 - [ ] upload image minimum is `200px x 200px`
 - [ ] Application cards paginate 5 per page; recent invitations paginate 8 per page
 - [ ] Public Profile and Leaderboards load correctly
+- [ ] earned badge share modal renders badge art, square/story formats, heritage-stewardship line, and family-specific copied captions
+- [ ] profile/municipality/Hall of Stewards share cards download clear square/story images and copy captions
+- [ ] Dictionary Word of the Day keeps long headwords on one line without splitting words
 - [ ] Steward's Desk menu hides Edit Profile and Role Center, keeps Help as FAQs, and no longer exposes a standalone User Manual
+- [ ] Steward's Desk menu does not advertise Django Admin Console as a normal admin-control action
 - [ ] FAQs include former manual guidance with role-aware sections for visitor/contributor/reviewer/admin users
 - [ ] Admin Site Content can edit role-aware FAQ sections and upload FAQ screenshots/graphs under `/media/site/faq/`
 - [ ] Admin Site Content can enable/disable maintenance mode and edit the visitor message
 - [ ] Maintenance screen appears for visitors/non-admins and still allows admin login
 - [ ] Admin People tab shows per-person action logs capped at 500 displayed rows without deleting audit records
 - [ ] Admin People profile shows `Approved, not joined` for unclaimed approved applicants, can resend setup link, and reveals email history only after `View email log`
+- [ ] Admin People Account Controls show role grant/revoke and scheduled-deletion controls with required notes
 
 ---
 

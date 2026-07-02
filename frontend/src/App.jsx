@@ -146,8 +146,6 @@ export default function App() {
   const isLogin = pathname === ROUTES.login
   const isDictionaryView = pathname === ROUTES.dictionaryView
   const isFolkloreView = pathname === ROUTES.folkloreView
-  const apiBase = import.meta.env.VITE_API_BASE || ''
-  const adminHref = `${apiBase}/admin/`
   const userGroups = currentUser.groups || []
   const isAdminUser = currentUser.is_superuser || userGroups.includes('Admin')
   const isConsultantUser = userGroups.includes('Consultant')
@@ -155,7 +153,6 @@ export default function App() {
   const isContributorUser = userGroups.includes('Contributor')
   const canUseContributorTools = isAdminUser || isReviewerUser || isConsultantUser || isContributorUser
   const canUseReviewerTools = isAdminUser || isReviewerUser || isConsultantUser
-  const canOpenAdmin = currentUser.is_authenticated && isAdminUser
   const isMaintenanceMode =
     authChecked && siteContentLoaded && siteContent.maintenance_enabled && !isAdminUser && !isLogin
 
@@ -510,17 +507,6 @@ export default function App() {
                       <button className="top-link-button" onClick={() => closeMenusAndNavigate(ROUTES.faqs)}>
                         FAQs
                       </button>
-                      {canOpenAdmin && (
-                        <a
-                          className="top-admin-link"
-                          href={adminHref}
-                          target="_blank"
-                          rel="noreferrer"
-                          onClick={() => setIsToolsMenuOpen(false)}
-                        >
-                          Django Admin Console
-                        </a>
-                      )}
                     </div>
                   </div>
                 </details>

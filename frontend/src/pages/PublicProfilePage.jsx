@@ -379,7 +379,7 @@ function BadgeCard({
                 type="button"
                 className="badge-share-icon-btn"
                 title="Share badge"
-                onClick={() => onShare?.(badge)}
+                onClick={() => onShare?.({ ...badge, image })}
               >
                 <svg
                   viewBox="0 0 24 24"
@@ -604,7 +604,7 @@ export default function PublicProfilePage({ currentUser }) {
       return `I earned the ${displayName} badge on Chirin Ivatan. Every story shared helps keep Ivatan memory, wisdom, and cultural imagination alive.`
     }
     if (category.includes('reviewer')) {
-      return `I earned the ${displayName} recognition on Chirin Ivatan. Careful review is part of cultural stewardship: protecting accuracy, context, and trust in what we pass on.`
+      return `I earned the ${displayName} recognition on Chirin Ivatan. As a steward of Ivatan heritage, I help protect the care, accuracy, context, and trust behind what we pass on.`
     }
     if (category.includes('quality') || category.includes('accuracy')) {
       return `I earned the ${displayName} badge on Chirin Ivatan. Cultural preservation asks for care, accuracy, and respect, and I am proud to help keep that standard alive.`
@@ -639,10 +639,12 @@ export default function PublicProfilePage({ currentUser }) {
 
   function shareBadge(badge) {
     if (!profile?.header?.username) return
+    const image = badge.image || getBadgeImageByKey(badge.key)
+    const shareBadgeData = { ...badge, image }
     const displayName = getBadgeDisplayName(badge)
     setShareFeedback('')
     setShareDialog({
-      badge,
+      badge: shareBadgeData,
       format: 'square',
       dataUrl: '',
       status: 'Preparing share image...',

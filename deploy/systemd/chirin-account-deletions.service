@@ -1,0 +1,9 @@
+[Unit]
+Description=Process Chirin Ivatan scheduled account deletions
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/srv/chirin/backend
+EnvironmentFile=/srv/chirin/backend/.env.production
+ExecStart=/srv/chirin/backend/.venv/bin/python manage.py process_scheduled_account_deletions

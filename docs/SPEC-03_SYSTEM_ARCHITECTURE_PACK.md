@@ -358,6 +358,9 @@ Notes:
 - `APPROVED_UNDER_REVIEW` means a published entry was flagged but not yet removed.
 - `ARCHIVED` means hidden from normal public use but still preserved.
 - Permanent deletion is not part of the normal content lifecycle.
+- Account deletion is a separate admin governance workflow: admins schedule
+  account identity removal with notes and a 30-day appeal window, while approved
+  archive content remains preserved.
 
 ## 2.4 Folklore Revision State Machine
 

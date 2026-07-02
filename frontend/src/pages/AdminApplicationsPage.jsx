@@ -38,6 +38,15 @@ const INVITE_ENDORSEMENTS = {
     'I understand that inviting someone to Chirin Ivatan is an act of trust and accountability. I believe this person will contribute respectfully, honestly, and in good faith toward the preservation of Ivatan language and folklore.',
 }
 const REVOKABLE_ROLES = ['contributor', 'reviewer', 'consultant', 'admin']
+const GRANTABLE_ROLES = ['contributor', 'reviewer', 'consultant', 'admin']
+const ACCOUNT_DELETION_REASONS = [
+  { value: 'suspicious_or_fraudulent', label: 'Suspicious or fraudulent account' },
+  { value: 'harmful_behavior', label: 'Harmful behavior' },
+  { value: 'mission_violation', label: 'Acts against the Chirin Ivatan mission' },
+  { value: 'spam_or_abuse', label: 'Spam or abuse' },
+  { value: 'user_requested', label: 'User-requested deletion' },
+  { value: 'other', label: 'Other' },
+]
 const CONTRIBUTIONS_PER_PAGE = 5
 const APPLICATIONS_PER_PAGE = 5
 const MOBILE_PEOPLE_PER_PAGE = 5
@@ -353,9 +362,27 @@ function preferredRoleToRevoke(person) {
   )
 }
 
+function grantableRolesForPerson(person) {
+  const groups = userRoleSet(person)
+  return GRANTABLE_ROLES.filter((role) => {
+    if (role === 'admin') return !groups.has('Admin') && !person?.is_superuser
+    return !groups.has(roleLabel(role))
+  })
+}
+
+function preferredRoleToGrant(person) {
+  const roles = grantableRolesForPerson(person)
+  return ['reviewer', 'contributor', 'consultant', 'admin'].find((role) => roles.includes(role)) || 'reviewer'
+}
+
 function revokeRoleButtonLabel(role) {
   if (role === 'reviewer') return 'Demote to Contributor'
   return `Revoke ${roleLabel(role)} Access`
+}
+
+function grantRoleButtonLabel(role) {
+  if (role === 'reviewer') return 'Promote to Reviewer'
+  return `Grant ${roleLabel(role)} Access`
 }
 
 const EMPTY_EMAIL_INVITE = {
@@ -656,6 +683,8 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
   const [actingId, setActingId] = useState('')
   const [accountActionNotes, setAccountActionNotes] = useState('')
   const [roleToRevoke, setRoleToRevoke] = useState('contributor')
+  const [roleToGrant, setRoleToGrant] = useState('reviewer')
+  const [accountDeletionReason, setAccountDeletionReason] = useState('suspicious_or_fraudulent')
   const [accountActionLoading, setAccountActionLoading] = useState('')
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
@@ -1237,6 +1266,8 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
     setShowAccountControls(false)
     setAccountActionNotes('')
     setRoleToRevoke(preferredRoleToRevoke(person))
+    setRoleToGrant(preferredRoleToGrant(person))
+    setAccountDeletionReason('suspicious_or_fraudulent')
     setError('')
   }
 
@@ -1248,6 +1279,8 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
     setShowAccountControls(false)
     setAccountActionNotes('')
     setRoleToRevoke('contributor')
+    setRoleToGrant('reviewer')
+    setAccountDeletionReason('suspicious_or_fraudulent')
   }
 
   function applyUpdatedPerson(person) {
@@ -1258,6 +1291,36 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
       const availableRoles = revokableRolesForPerson(person)
       return availableRoles.includes(currentRole) ? currentRole : preferredRoleToRevoke(person)
     })
+    setRoleToGrant((currentRole) => {
+      const availableRoles = grantableRolesForPerson(person)
+      return availableRoles.includes(currentRole) ? currentRole : preferredRoleToGrant(person)
+    })
+  }
+
+  function applyGrantedRole(person, role, payload) {
+    const nextGroups = new Set(person?.groups || [])
+    nextGroups.add('Contributor')
+    if (['reviewer', 'consultant', 'admin'].includes(role)) nextGroups.add('Reviewer')
+    if (role === 'consultant') nextGroups.add('Consultant')
+    if (role === 'admin') nextGroups.add('Admin')
+
+    const nextRecord = payload?.onboarding_record_id
+      ? {
+          role: payload.role || role,
+          method: payload.method || 'invited',
+          accountability_label: payload.accountability_label || `${roleLabel(role)} access granted`,
+          created_at: new Date().toISOString(),
+        }
+      : null
+    const updatedPerson = {
+      ...person,
+      groups: Array.from(nextGroups),
+      onboarding_records: nextRecord
+        ? [nextRecord, ...(person?.onboarding_records || [])]
+        : person?.onboarding_records || [],
+    }
+    applyUpdatedPerson(updatedPerson)
+    return updatedPerson
   }
 
   async function updatePersonLeaderboardVisibility(person, nextValue) {
@@ -1353,7 +1416,15 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
   async function runAccountAction(person, action, options = {}) {
     if (!person?.username) return
     const notes = accountActionNotes.trim()
-    const actionsNeedingNotes = ['deactivate', 'revoke-role', 'flag-suspicious', 'clear-flag', 'confirm-flag']
+    const actionsNeedingNotes = [
+      'deactivate',
+      'revoke-role',
+      'flag-suspicious',
+      'clear-flag',
+      'confirm-flag',
+      'schedule-deletion',
+      'cancel-deletion',
+    ]
     if (actionsNeedingNotes.includes(action) && !notes) {
       setError('Add account action notes before continuing.')
       return
@@ -1378,6 +1449,15 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
       } else if (action === 'revoke-role') {
         endpoint = `/api/admin/users/${encodeURIComponent(person.username)}/roles/revoke`
         body = { role: roleToRevoke, notes }
+      } else if (action === 'grant-role') {
+        endpoint = '/api/users/role-invitations'
+        body = { username: person.username, role: roleToGrant, notes }
+      } else if (action === 'schedule-deletion') {
+        endpoint = `/api/admin/users/${encodeURIComponent(person.username)}/deletion`
+        body = { reason: accountDeletionReason, notes }
+      } else if (action === 'cancel-deletion') {
+        endpoint = `/api/admin/users/${encodeURIComponent(person.username)}/deletion/cancel`
+        body = { notes }
       } else if (action === 'flag-suspicious') {
         endpoint = `/api/admin/users/${encodeURIComponent(person.username)}/suspicious-flag`
         body = { notes }
@@ -1390,8 +1470,12 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       })
+      let activityPerson = payload.user || person
       if (payload.user) applyUpdatedPerson(payload.user)
-      if (showActivityLog) await loadPersonActivity(payload.user || person)
+      if (action === 'grant-role') {
+        activityPerson = applyGrantedRole(person, roleToGrant, payload)
+      }
+      if (showActivityLog) await loadPersonActivity(activityPerson)
       if (action !== 'password-reset') setAccountActionNotes('')
       const successMessages = {
         activate: 'Account reactivated.',
@@ -1402,6 +1486,13 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
           roleToRevoke === 'reviewer'
             ? 'Reviewer access removed. Contributor access remains active.'
             : `${roleLabel(roleToRevoke)} access revoked.`,
+        'grant-role':
+          roleToGrant === 'reviewer'
+            ? `${displayName(person)} is now a Reviewer.`
+            : `${roleLabel(roleToGrant)} access granted to ${displayName(person)}.`,
+        'schedule-deletion':
+          payload.warning || `${displayName(person)} was deactivated and scheduled for deletion in 30 days.`,
+        'cancel-deletion': 'Scheduled account deletion canceled.',
         'flag-suspicious': 'Account flagged for review.',
         'clear-flag': 'Suspicious-account flag cleared.',
         'confirm-flag': 'Suspicious-account flag confirmed.',
@@ -2953,8 +3044,11 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
 
   const selectedRevokableRoles = revokableRolesForPerson(selectedActivityUser)
   const selectedCanRevokeRole = selectedRevokableRoles.includes(roleToRevoke)
+  const selectedGrantableRoles = grantableRolesForPerson(selectedActivityUser)
+  const selectedCanGrantRole = selectedGrantableRoles.includes(roleToGrant)
   const selectedPendingActivationApplication =
     selectedActivityUser?.pending_activation_applications?.[0] || null
+  const selectedPendingDeletion = selectedActivityUser?.pending_account_deletion || null
   const selectedEmailLog = selectedActivityUser?.email_log || []
 
   if (!isAuthenticated) {
@@ -4074,7 +4168,7 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
                           rows={3}
                           value={accountActionNotes}
                           onChange={(event) => setAccountActionNotes(event.target.value)}
-                          placeholder="Required for deactivation, role revocation, suspicious flags, and flag resolution."
+                          placeholder="Required for deactivation, role revocation, suspicious flags, deletion scheduling, and appeal/cancel decisions."
                         />
                       </label>
                       <div className="admin-account-action-grid">
@@ -4125,6 +4219,105 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
                           {accountActionLoading === 'flag-suspicious' ? 'Flagging...' : 'Flag Suspicious'}
                         </button>
                       </div>
+                      <div className="admin-role-grant-row">
+                        <label className="field" htmlFor="admin-role-grant-select">
+                          <span>Role to grant</span>
+                          <select
+                            id="admin-role-grant-select"
+                            value={roleToGrant}
+                            onChange={(event) => setRoleToGrant(event.target.value)}
+                            disabled={selectedGrantableRoles.length === 0}
+                          >
+                            {selectedGrantableRoles.length === 0 ? (
+                              <option value={roleToGrant}>No grantable roles</option>
+                            ) : (
+                              selectedGrantableRoles.map((role) => (
+                                <option key={role} value={role}>
+                                  {roleLabel(role)}
+                                </option>
+                              ))
+                            )}
+                          </select>
+                          {roleToGrant === 'reviewer' && selectedCanGrantRole && (
+                            <small className="hint">
+                              This keeps contributor access and adds reviewer tools immediately.
+                            </small>
+                          )}
+                        </label>
+                        <button
+                          type="button"
+                          className="compact-button"
+                          disabled={
+                            Boolean(accountActionLoading) ||
+                            !selectedCanGrantRole ||
+                            selectedActivityUser.username === currentUser.username
+                          }
+                          onClick={() => runAccountAction(selectedActivityUser, 'grant-role')}
+                        >
+                          {accountActionLoading === 'grant-role'
+                            ? 'Updating...'
+                            : grantRoleButtonLabel(roleToGrant)}
+                        </button>
+                      </div>
+                      {selectedPendingDeletion && (
+                        <div className="admin-account-deletion-warning">
+                          <div>
+                            <strong>Deletion scheduled</strong>
+                            <p>
+                              {selectedPendingDeletion.deletion_reason_label || 'Reason recorded'} · due{' '}
+                              {formatDate(selectedPendingDeletion.scheduled_for)}
+                            </p>
+                            <p className="meta">
+                              The account remains inactive during the 30-day appeal window.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            className="compact-button"
+                            disabled={Boolean(accountActionLoading)}
+                            onClick={() => runAccountAction(selectedActivityUser, 'cancel-deletion')}
+                          >
+                            {accountActionLoading === 'cancel-deletion'
+                              ? 'Canceling...'
+                              : 'Cancel Scheduled Deletion'}
+                          </button>
+                        </div>
+                      )}
+                      {!selectedPendingDeletion && (
+                        <div className="admin-account-deletion-row">
+                          <label className="field" htmlFor="admin-account-deletion-reason">
+                            <span>Deletion reason</span>
+                            <select
+                              id="admin-account-deletion-reason"
+                              value={accountDeletionReason}
+                              onChange={(event) => setAccountDeletionReason(event.target.value)}
+                            >
+                              {ACCOUNT_DELETION_REASONS.map((reason) => (
+                                <option key={reason.value} value={reason.value}>
+                                  {reason.label}
+                                </option>
+                              ))}
+                            </select>
+                            <small className="hint">
+                              Schedules a 30-day appeal window, deactivates login, hides public profile
+                              surfaces, and emails the account owner.
+                            </small>
+                          </label>
+                          <button
+                            type="button"
+                            className="ghost compact-button danger"
+                            disabled={
+                              Boolean(accountActionLoading) ||
+                              selectedActivityUser.username === currentUser.username
+                            }
+                            onClick={() => runAccountAction(selectedActivityUser, 'schedule-deletion')}
+                          >
+                            {accountActionLoading === 'schedule-deletion'
+                              ? 'Scheduling...'
+                              : 'Schedule Deletion'}
+                          </button>
+                        </div>
+                      )}
                       <div className="admin-role-revoke-row">
                         <label className="field" htmlFor="admin-role-revoke-select">
                           <span>Role to revoke</span>

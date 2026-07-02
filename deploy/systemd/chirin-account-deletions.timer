@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily Chirin Ivatan scheduled account deletion processor
+
+[Timer]
+OnCalendar=*-*-* 03:20:00
+Persistent=true
+Unit=chirin-account-deletions.service
+
+[Install]
+WantedBy=timers.target

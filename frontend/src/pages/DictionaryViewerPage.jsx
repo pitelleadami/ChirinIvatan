@@ -597,6 +597,8 @@ export default function DictionaryViewerPage({ currentUser }) {
     const sourceRows = wordOfDayRows.length ? wordOfDayRows : latestRows
     return pickDailyWord(sourceRows)
   }, [latestRows, wordOfDayRows])
+  const wordOfDayTerm = wordOfDay ? normalizeHeadword(wordOfDay.term) : ''
+  const wordOfDayTermLength = Math.max(1, wordOfDayTerm.replace(/\s+/g, '').length)
   const showingFilteredList = Boolean(searchTerm.trim() || letter !== 'All')
   const emptySearchActionLabel = currentUser?.is_authenticated ? 'add this term' : 'join the Digital Yaru'
   const emptyFilterActionLabel = currentUser?.is_authenticated ? 'add one' : 'join the Digital Yaru'
@@ -942,7 +944,7 @@ export default function DictionaryViewerPage({ currentUser }) {
           <article className="word-of-day-card">
             <div className="word-of-day-copy">
               <p className="profile-kicker">Word of the Day</p>
-              <h3>{normalizeHeadword(wordOfDay.term)}</h3>
+              <h3 style={{ '--word-of-day-length': wordOfDayTermLength }}>{wordOfDayTerm}</h3>
               {wordOfDay.meaning && (
                 <p className="word-of-day-meaning">{capitalizeFirst(wordOfDay.meaning)}</p>
               )}

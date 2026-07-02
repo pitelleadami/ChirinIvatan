@@ -1,5 +1,6 @@
 import json
 import tempfile
+from datetime import timedelta
 from unittest.mock import patch
 from urllib.parse import urlparse
 
@@ -8,7 +9,9 @@ from django.contrib.auth.models import Group
 from django.core import mail
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.management import call_command
 from django.test import TestCase, override_settings
+from django.utils import timezone
 
 from dictionary.models import Entry, EntryRevision, EntryStatus
 from folklore.models import FolkloreEntry
@@ -2467,6 +2470,98 @@ class AdminAccountControlTests(TestCase):
                 target_user=self.user,
                 action=AdminAccountAction.Action.REVOKE_ROLE,
                 role="reviewer",
+            ).exists()
+        )
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        DEFAULT_FROM_EMAIL="admin@chirinivatan.com",
+        ACCOUNT_APPEAL_EMAIL="appeals@chirinivatan.com",
+    )
+    def test_admin_can_schedule_account_deletion_with_email_notice(self):
+        response = self.client.post(
+            f"/api/admin/users/{self.user.username}/deletion",
+            data=json.dumps(
+                {
+                    "reason": "mission_violation",
+                    "notes": "Repeated behavior against the site's mission.",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.user.refresh_from_db()
+        self.assertFalse(self.user.is_active)
+        action = AdminAccountAction.objects.get(
+            target_user=self.user,
+            action=AdminAccountAction.Action.SCHEDULE_ACCOUNT_DELETION,
+        )
+        self.assertEqual(action.deletion_status, AdminAccountAction.DeletionStatus.PENDING)
+        self.assertEqual(action.deletion_reason, "mission_violation")
+        self.assertIsNotNone(action.scheduled_for)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("30 days to appeal", mail.outbox[0].body)
+        self.assertIn("appeals@chirinivatan.com", mail.outbox[0].body)
+        self.assertEqual(
+            response.json()["user"]["pending_account_deletion"]["action_id"], str(action.id)
+        )
+
+    def test_admin_can_cancel_scheduled_account_deletion(self):
+        schedule = self.client.post(
+            f"/api/admin/users/{self.user.username}/deletion",
+            data=json.dumps({"reason": "spam_or_abuse", "notes": "spam pattern"}),
+            content_type="application/json",
+        )
+        self.assertEqual(schedule.status_code, 201)
+
+        response = self.client.post(
+            f"/api/admin/users/{self.user.username}/deletion/cancel",
+            data=json.dumps({"notes": "Appeal accepted after identity check."}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.is_active)
+        action = AdminAccountAction.objects.get(
+            target_user=self.user,
+            action=AdminAccountAction.Action.SCHEDULE_ACCOUNT_DELETION,
+        )
+        self.assertEqual(action.deletion_status, AdminAccountAction.DeletionStatus.CANCELED)
+        self.assertTrue(
+            AdminAccountAction.objects.filter(
+                target_user=self.user,
+                action=AdminAccountAction.Action.CANCEL_ACCOUNT_DELETION,
+            ).exists()
+        )
+
+    def test_scheduled_deletion_processor_anonymizes_due_accounts(self):
+        action = AdminAccountAction.objects.create(
+            target_user=self.user,
+            admin=self.admin,
+            action=AdminAccountAction.Action.SCHEDULE_ACCOUNT_DELETION,
+            notes="No appeal received.",
+            status_before="active",
+            status_after="scheduled_for:test",
+            deletion_status=AdminAccountAction.DeletionStatus.PENDING,
+            deletion_reason="spam_or_abuse",
+            scheduled_for=timezone.now() - timedelta(days=1),
+        )
+
+        call_command("process_scheduled_account_deletions")
+
+        self.user.refresh_from_db()
+        action.refresh_from_db()
+        self.assertFalse(self.user.is_active)
+        self.assertTrue(self.user.username.startswith("deleted-account-"))
+        self.assertEqual(self.user.email, "")
+        self.assertFalse(self.user.groups.exists())
+        self.assertEqual(action.deletion_status, AdminAccountAction.DeletionStatus.COMPLETED)
+        self.assertTrue(
+            AdminAccountAction.objects.filter(
+                target_user=self.user,
+                action=AdminAccountAction.Action.COMPLETE_ACCOUNT_DELETION,
             ).exists()
         )
 

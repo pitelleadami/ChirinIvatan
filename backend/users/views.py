@@ -16,12 +16,14 @@ import sys
 import urllib.parse
 import urllib.request
 import uuid
+from datetime import timedelta
 
 from django.conf import settings
 from django.contrib.auth import authenticate, get_user_model, login, logout
 from django.contrib.auth.forms import PasswordResetForm
 from django.contrib.auth.models import Group
 from django.contrib.auth.password_validation import validate_password
+from django.contrib.sessions.models import Session
 from django.core import signing
 from django.core.exceptions import ValidationError
 from django.core.files.storage import default_storage
@@ -89,6 +91,15 @@ from users.role_onboarding import (
 
 User = get_user_model()
 ADMIN_ACTIVITY_LIMIT = 500
+ACCOUNT_DELETION_APPEAL_DAYS = 30
+ACCOUNT_DELETION_REASONS = {
+    "suspicious_or_fraudulent": "Suspicious or fraudulent account",
+    "harmful_behavior": "Harmful behavior",
+    "mission_violation": "Acts against the Chirin Ivatan mission",
+    "spam_or_abuse": "Spam or abuse",
+    "user_requested": "User-requested deletion",
+    "other": "Other",
+}
 ADMIN_OVERVIEW_RECENT_LIMIT = 5
 TURNSTILE_TEST_TOKEN = "test-turnstile-token"
 
@@ -753,6 +764,7 @@ def _serialize_admin_user(request, user):
         .select_related("admin")
         .order_by("-created_at")[:12]
     )
+    pending_deletion = _pending_account_deletion_for_user(user).first()
 
     return {
         "user_id": user.id,
@@ -834,6 +846,9 @@ def _serialize_admin_user(request, user):
             status=RoleApplication.Status.PENDING
         ).count(),
         "pending_account_flags": _serialize_account_flags(user),
+        "pending_account_deletion": (
+            _admin_account_action_payload(pending_deletion) if pending_deletion else None
+        ),
     }
 
 
@@ -888,6 +903,13 @@ def _admin_account_action_payload(row):
         "status_before": row.status_before,
         "status_after": row.status_after,
         "flag_status": row.flag_status,
+        "deletion_status": row.deletion_status,
+        "deletion_reason": row.deletion_reason,
+        "deletion_reason_label": ACCOUNT_DELETION_REASONS.get(
+            row.deletion_reason, row.deletion_reason
+        ),
+        "scheduled_for": row.scheduled_for.isoformat() if row.scheduled_for else None,
+        "completed_at": row.completed_at.isoformat() if row.completed_at else None,
         "resolved_by": row.resolved_by.username if row.resolved_by else "",
         "resolved_at": row.resolved_at.isoformat() if row.resolved_at else None,
         "resolution_notes": row.resolution_notes,
@@ -900,6 +922,14 @@ def _pending_account_flags_for_user(user):
         target_user=user,
         action=AdminAccountAction.Action.FLAG_SUSPICIOUS,
         flag_status=AdminAccountAction.FlagStatus.PENDING,
+    ).select_related("admin", "resolved_by")
+
+
+def _pending_account_deletion_for_user(user):
+    return AdminAccountAction.objects.filter(
+        target_user=user,
+        action=AdminAccountAction.Action.SCHEDULE_ACCOUNT_DELETION,
+        deletion_status=AdminAccountAction.DeletionStatus.PENDING,
     ).select_related("admin", "resolved_by")
 
 
@@ -920,6 +950,9 @@ def _record_admin_account_action(
     status_before="",
     status_after="",
     flag_status=AdminAccountAction.FlagStatus.NONE,
+    deletion_status=AdminAccountAction.DeletionStatus.NONE,
+    deletion_reason="",
+    scheduled_for=None,
 ):
     return AdminAccountAction.objects.create(
         target_user=target_user,
@@ -930,6 +963,65 @@ def _record_admin_account_action(
         status_before=status_before,
         status_after=status_after,
         flag_status=flag_status,
+        deletion_status=deletion_status,
+        deletion_reason=deletion_reason,
+        scheduled_for=scheduled_for,
+    )
+
+
+def _send_account_deletion_notice(*, target_user, admin, action):
+    if not target_user.email:
+        return False
+    reason_label = ACCOUNT_DELETION_REASONS.get(action.deletion_reason, action.deletion_reason)
+    scheduled_for = timezone.localtime(action.scheduled_for) if action.scheduled_for else None
+    appeal_email = getattr(settings, "ACCOUNT_APPEAL_EMAIL", "") or getattr(
+        settings, "DEFAULT_FROM_EMAIL", ""
+    )
+    subject = "Chirin Ivatan account deletion scheduled"
+    due_text = scheduled_for.strftime("%B %d, %Y") if scheduled_for else "after 30 days"
+    message = (
+        "Chirin Ivatan\n\n"
+        f"Your account @{target_user.username} has been deactivated and scheduled for deletion/anonymization on {due_text}.\n\n"
+        f"Reason category: {reason_label}\n"
+        f"Administrator notes: {action.notes}\n\n"
+        "You have 30 days to appeal this action. To appeal, email the Chirin Ivatan administrators "
+        f"at {appeal_email} and include your username and explanation.\n\n"
+        "If no administrator cancels the deletion before the deadline, your login account and public profile identity "
+        "will be removed. Approved cultural archive contributions may remain preserved with account attribution anonymized."
+    )
+    send_mail(
+        subject,
+        message,
+        getattr(settings, "DEFAULT_FROM_EMAIL", None),
+        [target_user.email],
+        fail_silently=False,
+    )
+    return True
+
+
+def _clear_user_sessions(user):
+    user_id = str(user.pk)
+    for session in Session.objects.all():
+        try:
+            if str(session.get_decoded().get("_auth_user_id")) == user_id:
+                session.delete()
+        except Exception:
+            continue
+
+
+def _hide_profile_for_deletion(user):
+    profile = _safe_profile(user)
+    if not profile:
+        return
+    profile.include_in_leaderboard = False
+    profile.show_on_yaru_chart = False
+    profile.show_live_contributions = False
+    profile.save(
+        update_fields=[
+            "include_in_leaderboard",
+            "show_on_yaru_chart",
+            "show_live_contributions",
+        ]
     )
 
 
@@ -2421,6 +2513,8 @@ def public_user_profile_view(request, username):
     user = User.objects.filter(username__iexact=username).first()
     if not user:
         raise Http404("User not found.")
+    if not user.is_active and not (request.user.is_authenticated and is_admin(request.user)):
+        raise Http404("User not found.")
 
     profile = _safe_profile(user)
     is_own_profile = request.user.is_authenticated and request.user.pk == user.pk
@@ -3249,6 +3343,145 @@ def admin_user_status_view(request, username):
         status_after=after,
     )
     return JsonResponse({"user": _serialize_admin_user(request, target_user)})
+
+
+@require_http_methods(["POST"])
+@transaction.atomic
+def admin_user_schedule_deletion_view(request, username):
+    auth_error = _require_authenticated(request)
+    if auth_error:
+        return auth_error
+    if not is_admin(request.user):
+        return JsonResponse({"detail": "Admin access required."}, status=403)
+
+    target_user = User.objects.select_for_update().filter(username=username).first()
+    if not target_user:
+        return JsonResponse({"detail": "User not found."}, status=404)
+    if target_user.id == request.user.id:
+        return JsonResponse(
+            {"detail": "You cannot schedule your own account for deletion."}, status=400
+        )
+    if is_admin(target_user) and _active_admin_count() <= 1:
+        return JsonResponse(
+            {"detail": "Cannot schedule deletion for the final active admin."}, status=400
+        )
+    if _pending_account_deletion_for_user(target_user).exists():
+        return JsonResponse(
+            {"detail": "This account already has a pending scheduled deletion."}, status=400
+        )
+
+    payload, parse_error = _parse_json_body(request)
+    if parse_error:
+        return parse_error
+    reason = str(payload.get("reason", "") or "").strip()
+    notes = str(payload.get("notes", "") or "").strip()
+    if reason not in ACCOUNT_DELETION_REASONS:
+        return JsonResponse({"detail": "Choose a valid account deletion reason."}, status=400)
+    if not notes:
+        return JsonResponse({"detail": "Scheduled account deletion requires notes."}, status=400)
+
+    before = "active" if target_user.is_active else "inactive"
+    scheduled_for = timezone.now() + timedelta(days=ACCOUNT_DELETION_APPEAL_DAYS)
+    target_user.is_active = False
+    target_user.save(update_fields=["is_active"])
+    _hide_profile_for_deletion(target_user)
+    _clear_user_sessions(target_user)
+
+    action = _record_admin_account_action(
+        target_user=target_user,
+        admin=request.user,
+        action=AdminAccountAction.Action.SCHEDULE_ACCOUNT_DELETION,
+        notes=notes,
+        status_before=before,
+        status_after=f"scheduled_for:{scheduled_for.isoformat()}",
+        deletion_status=AdminAccountAction.DeletionStatus.PENDING,
+        deletion_reason=reason,
+        scheduled_for=scheduled_for,
+    )
+    email_sent = False
+    warning = ""
+    try:
+        email_sent = _send_account_deletion_notice(
+            target_user=target_user,
+            admin=request.user,
+            action=action,
+        )
+        if not email_sent:
+            warning = "Account has no email address, so no deletion notice could be sent."
+    except Exception as exc:
+        warning = (
+            "Account deletion was scheduled, but the email notice could not be delivered. "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+    target_user.refresh_from_db()
+    return JsonResponse(
+        {
+            "detail": "Account deletion scheduled.",
+            "email_sent": email_sent,
+            "warning": warning,
+            "deletion": _admin_account_action_payload(action),
+            "user": _serialize_admin_user(request, target_user),
+        },
+        status=201,
+    )
+
+
+@require_http_methods(["POST"])
+@transaction.atomic
+def admin_user_cancel_deletion_view(request, username):
+    auth_error = _require_authenticated(request)
+    if auth_error:
+        return auth_error
+    if not is_admin(request.user):
+        return JsonResponse({"detail": "Admin access required."}, status=403)
+
+    target_user = User.objects.select_for_update().filter(username=username).first()
+    if not target_user:
+        return JsonResponse({"detail": "User not found."}, status=404)
+    pending = _pending_account_deletion_for_user(target_user).select_for_update().first()
+    if not pending:
+        return JsonResponse(
+            {"detail": "This account has no pending scheduled deletion."}, status=400
+        )
+
+    payload, parse_error = _parse_json_body(request)
+    if parse_error:
+        return parse_error
+    notes = str(payload.get("notes", "") or "").strip()
+    if not notes:
+        return JsonResponse(
+            {"detail": "Canceling a scheduled deletion requires notes."}, status=400
+        )
+
+    pending.deletion_status = AdminAccountAction.DeletionStatus.CANCELED
+    pending.resolved_by = request.user
+    pending.resolved_at = timezone.now()
+    pending.resolution_notes = notes
+    pending.save(
+        update_fields=["deletion_status", "resolved_by", "resolved_at", "resolution_notes"]
+    )
+
+    if pending.status_before == "active" and not target_user.is_active:
+        target_user.is_active = True
+        target_user.save(update_fields=["is_active"])
+
+    _record_admin_account_action(
+        target_user=target_user,
+        admin=request.user,
+        action=AdminAccountAction.Action.CANCEL_ACCOUNT_DELETION,
+        notes=notes,
+        status_before="deletion_pending",
+        status_after="deletion_canceled",
+        deletion_status=AdminAccountAction.DeletionStatus.CANCELED,
+    )
+    return JsonResponse(
+        {
+            "detail": "Scheduled account deletion canceled.",
+            "deletion": _admin_account_action_payload(pending),
+            "user": _serialize_admin_user(request, target_user),
+        }
+    )
 
 
 @require_http_methods(["POST"])

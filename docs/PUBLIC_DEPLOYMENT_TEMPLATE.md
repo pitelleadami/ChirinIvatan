@@ -11,6 +11,8 @@ private hostnames, backup paths, credentials, or operator-only procedures.
   `/api/` routing.
 - PostgreSQL for production data.
 - Environment variables stored outside version control.
+- A scheduler such as systemd timers or cron for recurring maintenance commands
+  such as scheduled account deletion processing.
 
 ## Public-Safe Environment Pattern
 
@@ -34,7 +36,8 @@ Required production categories:
 4. Copy backend code and frontend build artifacts to the server.
 5. Run Django migrations and static collection.
 6. Restart the backend service.
-7. Verify health checks and core user workflows.
+7. Install or verify recurring maintenance timers/cron jobs.
+8. Verify health checks and core user workflows.
 
 ## Private Operator Notes
 
@@ -43,7 +46,7 @@ The following should remain private:
 - actual server IP addresses
 - SSH users and access patterns
 - real Nginx production config
-- real systemd service files
+- real production systemd service files and timer installation commands
 - production backup/restore commands and storage paths
 - private beta password or account credentials
 - exact database names, usernames, and hostnames

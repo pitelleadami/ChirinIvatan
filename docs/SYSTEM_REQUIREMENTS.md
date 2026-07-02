@@ -248,7 +248,9 @@ The system must store:
   attribution;
 - contribution events, recognition events, user contribution statistics, and
   gamification settings;
-- admin account actions and relevant audit records.
+- admin account actions and relevant audit records, including role changes,
+  suspicious-account handling, scheduled account deletion, appeal/cancel state,
+  and final anonymization state.
 
 The current ERD and detailed data model are documented in `docs/ERD.md` and
 `DATA_MODEL.md`.

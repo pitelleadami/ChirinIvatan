@@ -270,12 +270,21 @@ class AdminAccountAction(models.Model):
         FLAG_SUSPICIOUS = "flag_suspicious", "Flag Suspicious"
         CLEAR_SUSPICIOUS_FLAG = "clear_suspicious_flag", "Clear Suspicious Flag"
         CONFIRM_SUSPICIOUS_FLAG = "confirm_suspicious_flag", "Confirm Suspicious Flag"
+        SCHEDULE_ACCOUNT_DELETION = "schedule_account_deletion", "Schedule Account Deletion"
+        CANCEL_ACCOUNT_DELETION = "cancel_account_deletion", "Cancel Account Deletion"
+        COMPLETE_ACCOUNT_DELETION = "complete_account_deletion", "Complete Account Deletion"
 
     class FlagStatus(models.TextChoices):
         NONE = "none", "None"
         PENDING = "pending", "Pending"
         CLEARED = "cleared", "Cleared"
         CONFIRMED = "confirmed", "Confirmed"
+
+    class DeletionStatus(models.TextChoices):
+        NONE = "none", "None"
+        PENDING = "pending", "Pending"
+        CANCELED = "canceled", "Canceled"
+        COMPLETED = "completed", "Completed"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     target_user = models.ForeignKey(
@@ -298,6 +307,14 @@ class AdminAccountAction(models.Model):
         choices=FlagStatus.choices,
         default=FlagStatus.NONE,
     )
+    deletion_status = models.CharField(
+        max_length=16,
+        choices=DeletionStatus.choices,
+        default=DeletionStatus.NONE,
+    )
+    deletion_reason = models.CharField(max_length=64, blank=True, default="")
+    scheduled_for = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
     resolved_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -314,6 +331,7 @@ class AdminAccountAction(models.Model):
         indexes = [
             models.Index(fields=["target_user", "created_at"]),
             models.Index(fields=["action", "flag_status", "created_at"]),
+            models.Index(fields=["action", "deletion_status", "scheduled_for"]),
         ]
 
     def __str__(self):

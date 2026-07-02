@@ -143,6 +143,10 @@ erDiagram
         string   status_before
         string   status_after
         string   flag_status
+        string   deletion_status
+        string   deletion_reason
+        datetime scheduled_for
+        datetime completed_at
         datetime resolved_at
         text     resolution_notes
         datetime created_at
@@ -483,7 +487,7 @@ erDiagram
 | Leaderboard             | `MunicipalityStats` and `UserContributionStats` are pre-computed aggregates refreshed by background tasks; `MunicipalityMonthlyWinner` records the per-metric monthly champion                                                                                                                                        |
 | Multi-approver          | `Entry.last_approved_by` is M2M — tracks every reviewer who approved the current revision                                                                                                                                                                                                                             |
 | Role pipeline           | `RoleInvitation → RoleOnboardingRecord` (invite path) or `RoleApplication → RoleApplicationDecision → RoleOnboardingRecord` (application path)                                                                                                                                                                        |
-| Audit trail             | `AdminAccountAction` logs privileged account operations, including activation/deactivation, role revocation, suspicious-account handling, password reset sends, and approved-applicant setup reminders.                                                                                                               |
+| Audit trail             | `AdminAccountAction` logs privileged account operations, including activation/deactivation, role grant/revocation, suspicious-account handling, scheduled account deletion, password reset sends, and approved-applicant setup reminders.                                                                             |
 | Contribution credit     | `ContributionEvent` is the canonical credit ledger; four nullable FKs (to Entry, EntryRevision, FolkloreEntry, FolkloreRevision) with unique constraints prevent double-counting                                                                                                                                      |
 
 ## Design Rationale Notes
@@ -546,6 +550,7 @@ authority, not just ordinary login access.
 ### Why Keep Admin Actions?
 
 `AdminAccountAction` records sensitive actions such as account activation,
-deactivation, role changes, flags, and password/setup reminders. This gives the
-project an operational audit trail and helps future maintainers understand what
-happened to an account without relying on memory.
+deactivation, role changes, flags, scheduled account deletion, and
+password/setup reminders. This gives the project an operational audit trail and
+helps future maintainers understand what happened to an account without relying
+on memory.

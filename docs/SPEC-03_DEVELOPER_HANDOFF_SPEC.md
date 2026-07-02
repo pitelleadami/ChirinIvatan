@@ -1003,6 +1003,11 @@ Screen: `Admin People Activity Log`
 - Admins can resend the approved applicant setup link through `POST /api/admin/users/<username>/approval-reminder`.
 - `GET /api/admin/users` includes `email_log` rows for setup reminders and password reset messages sent to the selected person.
 - The People modal should hide email history until the admin clicks `View email log`.
+- Account Controls allow admins to grant missing role access directly, including promoting an active contributor to reviewer.
+- Account Controls allow admins to schedule account deletion with a required reason category and notes.
+- Scheduling account deletion immediately deactivates login, hides public profile surfaces, records an audit action, and sends a deletion notice email with a 30-day appeal window.
+- Account Controls allow admins to cancel a pending scheduled deletion after appeal review.
+- The daily `process_scheduled_account_deletions` command anonymizes unappealed due accounts while preserving approved archive history.
 - Render the managed consultant profile panel after the people directory as the final People-section tool.
 - Include actions such as:
   - contribution credits
@@ -1013,6 +1018,7 @@ Screen: `Admin People Activity Log`
   - role application decisions
   - role invitations sent
   - account email actions such as password reset and approved applicant setup reminders
+  - account deletion schedule/cancel/completion actions
 - UI/API should show the latest 500 rows per person.
 - Do not auto-delete older audit records simply because the list exceeds 500; cap retrieval/display while preserving audit history.
 

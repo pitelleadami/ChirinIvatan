@@ -32,7 +32,6 @@ Must include:
   - Add New Dictionary Entry
   - Add New Folklore Entry
   - FAQs
-  - Django Admin Console for admins
   - Log Out
 - Mobile menu.
 - Notification bell for authenticated users, with unread count and linked recent updates.
@@ -500,6 +499,12 @@ Must support:
 - view email log on demand for setup reminders and password reset emails
 - resend setup link for approved applicants who have not joined yet
 - show `Approved, not joined` status for approved applicants who have not created credentials
+- grant missing role access directly from Account Controls, including promoting an active contributor to reviewer
+- revoke role access directly from Account Controls, including demoting a reviewer back to contributor
+- schedule account deletion from Account Controls with a required reason category and notes
+- send a deletion notice email with a 30-day appeal window when deletion is scheduled
+- allow admins to cancel a scheduled deletion after appeal review
+- process unappealed scheduled deletions after 30 days by removing login/public identity while preserving approved archive history
 - edit public visibility flags
 - hide/show from Yaru chart
 - hide/show live contributions
@@ -549,6 +554,8 @@ Use for:
 - admin-level data correction
 
 Must not replace public/admin React workflows for normal use.
+This route remains available by direct URL for privileged backend maintenance,
+but it is not advertised as a normal menu item in the React admin workspace.
 
 ---
 

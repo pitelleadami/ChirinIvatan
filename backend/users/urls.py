@@ -20,8 +20,10 @@ from users.views import (
     admin_role_applications_view,
     admin_user_activity_view,
     admin_user_approval_reminder_view,
+    admin_user_cancel_deletion_view,
     admin_user_password_reset_view,
     admin_user_revoke_role_view,
+    admin_user_schedule_deletion_view,
     admin_user_status_view,
     admin_user_suspicious_flag_view,
     admin_users_view,
@@ -150,6 +152,16 @@ urlpatterns = [
         "api/admin/users/<str:username>/password-reset",
         admin_user_password_reset_view,
         name="admin_user_password_reset",
+    ),
+    path(
+        "api/admin/users/<str:username>/deletion",
+        admin_user_schedule_deletion_view,
+        name="admin_user_schedule_deletion",
+    ),
+    path(
+        "api/admin/users/<str:username>/deletion/cancel",
+        admin_user_cancel_deletion_view,
+        name="admin_user_cancel_deletion",
     ),
     path(
         "api/admin/users/<str:username>/approval-reminder",
