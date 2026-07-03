@@ -22,6 +22,7 @@ Must include:
   - Folklore
   - Hall of Stewards
   - FAQs
+  - Policies
   - Log In
 - Authenticated Workspace menu:
   - My Profile
@@ -32,6 +33,7 @@ Must include:
   - Add New Dictionary Entry
   - Add New Folklore Entry
   - FAQs
+  - Policies
   - Log Out
 - Mobile menu.
 - Notification bell for authenticated users, with unread count and linked recent updates.
@@ -209,7 +211,37 @@ Must show:
 - account setup flow for approved applicants
 - popup/feedback after application submission
 
-### 2.9 Maintenance Screen
+Consent requirements:
+
+- Role applications require Contributor & Stewardship Policy acceptance before submission.
+- Approved applicant account setup and invitation account setup require Terms & Conditions, Privacy Policy, and Contributor & Stewardship Policy acceptance before credentials are created.
+
+### 2.9 Policies & Consent
+
+Route: `/policies`
+
+Visitor can:
+
+- read the current admin-managed policy text
+- jump directly to a policy section from consent links
+
+Must show:
+
+- Terms & Conditions
+- Privacy Policy
+- Contributor & Stewardship Policy
+- Media Upload Policy
+- Information Security Policy
+
+Acceptance requirements:
+
+- Terms & Conditions: required when creating an account.
+- Privacy Policy: required when creating an account.
+- Contributor & Stewardship Policy: required before applying for or accepting a stewardship role.
+- Media Upload Policy: required only when uploading photo, audio, or video media.
+- Information Security Policy: informational only; no checkbox is required.
+
+### 2.10 Maintenance Screen
 
 Virtual screen shown when admin pauses the site.
 
@@ -627,6 +659,7 @@ Admin:
 - all access
 - people management
 - site content
+- policy and consent text management
 - maintenance mode
 - admin overrides
 - leaderboard visibility

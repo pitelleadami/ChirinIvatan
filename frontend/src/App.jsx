@@ -16,6 +16,7 @@ import LoginPage from './pages/LoginPage'
 import AboutProjectPage from './pages/AboutProjectPage'
 import YaruPage from './pages/YaruPage'
 import FaqPage from './pages/FaqPage'
+import PoliciesPage from './pages/PoliciesPage'
 import ResourcesPage from './pages/ResourcesPage'
 import AdminApplicationsPage from './pages/AdminApplicationsPage'
 import DictionaryViewerPage from './pages/DictionaryViewerPage'
@@ -507,6 +508,12 @@ export default function App() {
                       <button className="top-link-button" onClick={() => closeMenusAndNavigate(ROUTES.faqs)}>
                         FAQs
                       </button>
+                      <button
+                        className="top-link-button"
+                        onClick={() => closeMenusAndNavigate(ROUTES.policies)}
+                      >
+                        Policies
+                      </button>
                     </div>
                   </div>
                 </details>
@@ -520,6 +527,13 @@ export default function App() {
                   onClick={() => navigate(ROUTES.faqs)}
                 >
                   FAQs
+                </button>
+                <button
+                  className={activeClass(ROUTES.policies)}
+                  {...activeProps(ROUTES.policies)}
+                  onClick={() => navigate(ROUTES.policies)}
+                >
+                  Policies
                 </button>
               </>
             )}
@@ -563,6 +577,7 @@ export default function App() {
             {pathname === ROUTES.about && <AboutProjectPage />}
             {pathname === ROUTES.yaru && <YaruPage currentUser={currentUser} />}
             {pathname === ROUTES.resources && <ResourcesPage currentUser={currentUser} />}
+            {pathname === ROUTES.policies && <PoliciesPage />}
             {(pathname === ROUTES.faqs || pathname === ROUTES.manual) && (
               <FaqPage currentUser={currentUser} />
             )}

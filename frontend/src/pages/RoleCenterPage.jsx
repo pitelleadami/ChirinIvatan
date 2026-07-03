@@ -258,11 +258,11 @@ export default function RoleCenterPage({ currentUser = {} }) {
             <button
               type="button"
               className="inline-link-button policy-modal-link"
-              onClick={() => setPolicyModal('agreement')}
+              onClick={() => setPolicyModal('stewardship')}
             >
-              Agreement
+              Contributor & Stewardship Policy
             </button>{' '}
-            and{' '}
+            and understand the{' '}
             <button
               type="button"
               className="inline-link-button policy-modal-link"
@@ -279,11 +279,25 @@ export default function RoleCenterPage({ currentUser = {} }) {
 
   function renderPolicyModal() {
     if (!policyModal) return null
-    const isAgreement = policyModal === 'agreement'
-    const title = isAgreement ? 'Contributor Agreement' : 'Privacy Policy'
-    const paragraphs = isAgreement
-      ? siteContent.contributor_agreement_paragraphs
-      : siteContent.privacy_notice_paragraphs
+    const policyConfig = {
+      terms: {
+        title: 'Terms & Conditions',
+        paragraphs: siteContent.terms_conditions_paragraphs,
+      },
+      privacy: {
+        title: 'Privacy Policy',
+        paragraphs: siteContent.privacy_notice_paragraphs,
+      },
+      stewardship: {
+        title: 'Contributor & Stewardship Policy',
+        paragraphs:
+          siteContent.contributor_stewardship_policy_paragraphs ||
+          siteContent.contributor_agreement_paragraphs,
+      },
+    }
+    const currentPolicy = policyConfig[policyModal] || policyConfig.stewardship
+    const title = currentPolicy.title
+    const paragraphs = currentPolicy.paragraphs || []
     return (
       <div
         className="celebration-backdrop policy-modal-backdrop"
@@ -348,6 +362,7 @@ export default function RoleCenterPage({ currentUser = {} }) {
         username: current[applicationId]?.username || '',
         password: current[applicationId]?.password || '',
         passwordConfirm: current[applicationId]?.passwordConfirm || '',
+        policyAccepted: Boolean(current[applicationId]?.policyAccepted),
         [field]: value,
       },
     }))
@@ -449,7 +464,7 @@ export default function RoleCenterPage({ currentUser = {} }) {
     }
     if (!applicantPolicyAccepted) {
       setApplicantFormError(
-        'Review and accept the policy and contributor agreement before submitting your application.',
+        'Review and accept the Contributor & Stewardship Policy before submitting your application.',
       )
       setError('')
       return
@@ -677,6 +692,10 @@ export default function RoleCenterPage({ currentUser = {} }) {
       setError('Username, password, and confirmation are required.')
       return
     }
+    if (!claimRow.policyAccepted) {
+      setError('Review and accept the account, privacy, and stewardship policies before setting credentials.')
+      return
+    }
     if (!USERNAME_PATTERN.test(username)) {
       setError(USERNAME_HELP_TEXT)
       return
@@ -711,6 +730,7 @@ export default function RoleCenterPage({ currentUser = {} }) {
           username: '',
           password: '',
           passwordConfirm: '',
+          policyAccepted: false,
         },
       }))
       setActivationCelebration({
@@ -1189,21 +1209,29 @@ export default function RoleCenterPage({ currentUser = {} }) {
                     onChange={(event) => setInvitationPolicyAccepted(event.target.checked)}
                   />
                   <span>
-                    I have read the{' '}
+                    I agree to the{' '}
                     <button
                       type="button"
                       className="inline-link-button policy-modal-link"
-                      onClick={() => setPolicyModal('agreement')}
+                      onClick={() => setPolicyModal('terms')}
                     >
-                      Agreement
-                    </button>{' '}
-                    and{' '}
+                      Terms & Conditions
+                    </button>
+                    ,{' '}
                     <button
                       type="button"
                       className="inline-link-button policy-modal-link"
                       onClick={() => setPolicyModal('privacy')}
                     >
                       Privacy Policy
+                    </button>{' '}
+                    and{' '}
+                    <button
+                      type="button"
+                      className="inline-link-button policy-modal-link"
+                      onClick={() => setPolicyModal('stewardship')}
+                    >
+                      Contributor & Stewardship Policy
                     </button>
                     .
                   </span>
@@ -1675,8 +1703,53 @@ export default function RoleCenterPage({ currentUser = {} }) {
                             />
                           </label>
                         </div>
+                        <div className="policy-consent-panel compact-policy-consent">
+                          <label
+                            className="checkbox-inline policy-consent-check"
+                            htmlFor={`claim-policy-consent-${row.application_id}`}
+                          >
+                            <input
+                              id={`claim-policy-consent-${row.application_id}`}
+                              type="checkbox"
+                              checked={Boolean(claimForms[row.application_id]?.policyAccepted)}
+                              onChange={(event) =>
+                                updateClaimField(row.application_id, 'policyAccepted', event.target.checked)
+                              }
+                            />
+                            <span>
+                              I agree to the{' '}
+                              <button
+                                type="button"
+                                className="inline-link-button policy-modal-link"
+                                onClick={() => setPolicyModal('terms')}
+                              >
+                                Terms & Conditions
+                              </button>
+                              ,{' '}
+                              <button
+                                type="button"
+                                className="inline-link-button policy-modal-link"
+                                onClick={() => setPolicyModal('privacy')}
+                              >
+                                Privacy Policy
+                              </button>{' '}
+                              and{' '}
+                              <button
+                                type="button"
+                                className="inline-link-button policy-modal-link"
+                                onClick={() => setPolicyModal('stewardship')}
+                              >
+                                Contributor & Stewardship Policy
+                              </button>
+                              .
+                            </span>
+                          </label>
+                        </div>
                         <div className="actions">
-                          <button disabled={loading} onClick={() => claimRoleAccess(row)}>
+                          <button
+                            disabled={loading || !claimForms[row.application_id]?.policyAccepted}
+                            onClick={() => claimRoleAccess(row)}
+                          >
                             {loading ? 'Saving...' : 'Set My Login Credentials'}
                           </button>
                           <button className="ghost" disabled={loading} onClick={() => navigate(ROUTES.login)}>

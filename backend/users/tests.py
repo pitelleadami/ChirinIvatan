@@ -624,9 +624,12 @@ class SiteContentApiTests(TestCase):
         self.assertEqual(payload["yaru_heading"], "The Digital Yaru")
         self.assertFalse(payload["maintenance_enabled"])
         self.assertIn("temporarily paused", payload["maintenance_message"])
+        self.assertTrue(payload["terms_conditions_paragraphs"])
         self.assertTrue(payload["privacy_notice_paragraphs"])
         self.assertTrue(payload["media_upload_policy_paragraphs"])
         self.assertTrue(payload["contributor_agreement_paragraphs"])
+        self.assertTrue(payload["contributor_stewardship_policy_paragraphs"])
+        self.assertTrue(payload["information_security_policy_paragraphs"])
 
     def test_admin_can_update_site_content(self):
         self.client.force_login(self.admin_user)
@@ -649,9 +652,11 @@ class SiteContentApiTests(TestCase):
                     "about_final_quote": "Closing",
                     "yaru_heading": "Digital Yaru",
                     "yaru_intro_paragraphs": ["Yaru intro"],
+                    "terms_conditions_paragraphs": ["Terms"],
                     "privacy_notice_paragraphs": ["Privacy", ""],
                     "media_upload_policy_paragraphs": ["Media policy"],
-                    "contributor_agreement_paragraphs": ["Contributor agreement"],
+                    "contributor_stewardship_policy_paragraphs": ["Contributor stewardship"],
+                    "information_security_policy_paragraphs": ["Security policy"],
                     "maintenance_enabled": True,
                     "maintenance_message": "We are updating the archive tonight.",
                     "support_statements": [
@@ -698,9 +703,14 @@ class SiteContentApiTests(TestCase):
         self.assertEqual(payload["footer_center_text"], "Center footer")
         self.assertEqual(payload["about_heading"], "About Chirin")
         self.assertEqual(payload["about_intro_paragraphs"], ["Intro one"])
+        self.assertEqual(payload["terms_conditions_paragraphs"], ["Terms"])
         self.assertEqual(payload["privacy_notice_paragraphs"], ["Privacy"])
         self.assertEqual(payload["media_upload_policy_paragraphs"], ["Media policy"])
-        self.assertEqual(payload["contributor_agreement_paragraphs"], ["Contributor agreement"])
+        self.assertEqual(payload["contributor_agreement_paragraphs"], ["Contributor stewardship"])
+        self.assertEqual(
+            payload["contributor_stewardship_policy_paragraphs"], ["Contributor stewardship"]
+        )
+        self.assertEqual(payload["information_security_policy_paragraphs"], ["Security policy"])
         self.assertTrue(payload["maintenance_enabled"])
         self.assertEqual(payload["maintenance_message"], "We are updating the archive tonight.")
         self.assertEqual(payload["support_statements"][0]["name"], "Supporter")

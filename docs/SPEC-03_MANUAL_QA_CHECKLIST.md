@@ -452,7 +452,7 @@ Mark GO only if all are true:
 5. Folklore conditional validation rules behave exactly as expected.
 6. Public visibility and masking rules are correct.
 7. Revision history limits and audience visibility are correct.
-8. Admin-managed site content, maintenance mode, and leaderboard participation settings work.
+8. Admin-managed site content, policy text, maintenance mode, and leaderboard participation settings work.
 9. Notification events, unread state, and target navigation work.
 10. My Contributions shows all four statuses and rejection feedback.
 11. Invitation onboarding appears once and persists dismissal.

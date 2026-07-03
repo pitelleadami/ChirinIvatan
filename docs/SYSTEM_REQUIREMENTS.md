@@ -171,12 +171,28 @@ The system must:
 The system must:
 
 - allow admins to manage public site content sections;
+- allow admins to manage Terms & Conditions, Privacy Policy, Contributor &
+  Stewardship Policy, Media Upload Policy, and Information Security Policy text;
 - allow admins to manage downloadable learning/resource files;
 - allow admins to inspect users, role status, applications, messages, and action
   logs;
 - allow maintenance-mode messaging when needed;
 - provide export/backup-oriented operational support through private operator
   runbooks.
+
+### Policy and Consent
+
+The system must:
+
+- show a public `/policies` page with the current admin-managed policy text;
+- require Terms & Conditions and Privacy Policy acceptance when creating an
+  account through approved application claiming or invitation claiming;
+- require Contributor & Stewardship Policy acceptance before role applications
+  or accepted stewardship invitations;
+- require Media Upload Policy acceptance only when a dictionary or folklore
+  draft includes uploaded media;
+- present the Information Security Policy as public informational guidance
+  without requiring checkbox acceptance.
 
 ## 4. Non-Functional Requirements
 

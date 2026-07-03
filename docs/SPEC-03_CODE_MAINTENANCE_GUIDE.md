@@ -40,6 +40,7 @@ This project now has section comments inside core files. This guide tells you wh
 3. Add language-specific fields to dictionary/folklore models via migrations.
 4. Keep `ContributionEvent` as the single source of contribution credit.
 5. Keep role/accountability flows unchanged unless governance policy changes.
+6. Keep policy acceptance checkpoints aligned with `docs/SYSTEM_REQUIREMENTS.md`: account creation accepts Terms/Privacy/Stewardship, role applications accept Stewardship, media uploads accept Media Upload Policy only when media is present, and Information Security remains informational.
 
 ## Safe change strategy
 

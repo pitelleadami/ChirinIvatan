@@ -249,8 +249,11 @@ erDiagram
         json     support_statements
         json     partner_details
         json     faq_sections
+        json     terms_conditions_paragraphs
         json     privacy_notice_paragraphs
+        json     media_upload_policy_paragraphs
         json     contributor_agreement_paragraphs
+        json     information_security_policy_paragraphs
         bool     maintenance_enabled
         text     maintenance_message
         datetime updated_at

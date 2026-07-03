@@ -134,6 +134,7 @@ python3 manage.py test users reviews dictionary folklore
 - [ ] Steward's Desk menu does not advertise Django Admin Console as a normal admin-control action
 - [ ] FAQs include former manual guidance with role-aware sections for visitor/contributor/reviewer/admin users
 - [ ] Admin Site Content can edit role-aware FAQ sections and upload FAQ screenshots/graphs under `/media/site/faq/`
+- [ ] Admin Site Content can edit all five policy texts, `/policies` shows them, and consent links open the right policy section/modal
 - [ ] Admin Site Content can enable/disable maintenance mode and edit the visitor message
 - [ ] Maintenance screen appears for visitors/non-admins and still allows admin login
 - [ ] Admin People tab shows per-person action logs capped at 500 displayed rows without deleting audit records

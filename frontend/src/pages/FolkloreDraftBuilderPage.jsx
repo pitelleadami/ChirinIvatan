@@ -1683,8 +1683,7 @@ export default function FolkloreDraftBuilderPage({ currentUser = {} }) {
                   onChange={(event) => setMediaPolicyAccepted(event.target.checked)}
                 />
                 <span>
-                  I have read and agree to the{' '}
-                  <a href={`${ROUTES.faqs}#how-review-works`}>Media Upload Policy</a>.
+                  I have read and agree to the <a href={`${ROUTES.policies}#media`}>Media Upload Policy</a>.
                 </span>
               </label>
             )}

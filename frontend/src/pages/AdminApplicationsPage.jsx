@@ -454,9 +454,13 @@ function siteContentToForm(payload) {
     about_final_quote: content.about_final_quote || '',
     yaru_heading: content.yaru_heading || '',
     yaru_intro_text: paragraphsToText(content.yaru_intro_paragraphs),
+    terms_conditions_text: paragraphsToText(content.terms_conditions_paragraphs),
     privacy_notice_text: paragraphsToText(content.privacy_notice_paragraphs),
     media_upload_policy_text: paragraphsToText(content.media_upload_policy_paragraphs),
-    contributor_agreement_text: paragraphsToText(content.contributor_agreement_paragraphs),
+    contributor_stewardship_policy_text: paragraphsToText(
+      content.contributor_stewardship_policy_paragraphs || content.contributor_agreement_paragraphs,
+    ),
+    information_security_policy_text: paragraphsToText(content.information_security_policy_paragraphs),
     support_statements: rowsForSiteEditor(content.support_statements, EMPTY_SUPPORT_STATEMENT),
     partner_details: rowsForSiteEditor(content.partner_details, EMPTY_PARTNER_DETAIL).map((row) => ({
       name: row.name || '',
@@ -487,9 +491,12 @@ function siteContentFromForm(form) {
     about_final_quote: form.about_final_quote,
     yaru_heading: form.yaru_heading,
     yaru_intro_paragraphs: textToParagraphs(form.yaru_intro_text),
+    terms_conditions_paragraphs: textToParagraphs(form.terms_conditions_text),
     privacy_notice_paragraphs: textToParagraphs(form.privacy_notice_text),
     media_upload_policy_paragraphs: textToParagraphs(form.media_upload_policy_text),
-    contributor_agreement_paragraphs: textToParagraphs(form.contributor_agreement_text),
+    contributor_agreement_paragraphs: textToParagraphs(form.contributor_stewardship_policy_text),
+    contributor_stewardship_policy_paragraphs: textToParagraphs(form.contributor_stewardship_policy_text),
+    information_security_policy_paragraphs: textToParagraphs(form.information_security_policy_text),
     maintenance_enabled: Boolean(form.maintenance_enabled),
     maintenance_message: form.maintenance_message,
     support_statements: form.support_statements
@@ -5372,13 +5379,22 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
                   <p className="profile-kicker">Governance</p>
                   <h2>Policy & Consent Text</h2>
                   <p className="muted">
-                    Separate paragraphs with a blank line. These appear on role application and media upload
-                    screens.
+                    Separate paragraphs with a blank line. These appear on account setup, role application,
+                    public policy, and media upload screens.
                   </p>
                 </div>
               </div>
+              <label className="field" htmlFor="site-terms-conditions">
+                <span>Terms & Conditions</span>
+                <textarea
+                  id="site-terms-conditions"
+                  rows={7}
+                  value={siteContentForm.terms_conditions_text}
+                  onChange={(event) => setSiteContentField('terms_conditions_text', event.target.value)}
+                />
+              </label>
               <label className="field" htmlFor="site-privacy-notice">
-                <span>Editable privacy notice</span>
+                <span>Privacy Policy</span>
                 <textarea
                   id="site-privacy-notice"
                   rows={6}
@@ -5386,8 +5402,19 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
                   onChange={(event) => setSiteContentField('privacy_notice_text', event.target.value)}
                 />
               </label>
+              <label className="field" htmlFor="site-contributor-stewardship-policy">
+                <span>Contributor & Stewardship Policy</span>
+                <textarea
+                  id="site-contributor-stewardship-policy"
+                  rows={7}
+                  value={siteContentForm.contributor_stewardship_policy_text}
+                  onChange={(event) =>
+                    setSiteContentField('contributor_stewardship_policy_text', event.target.value)
+                  }
+                />
+              </label>
               <label className="field" htmlFor="site-media-upload-policy">
-                <span>Media upload policy</span>
+                <span>Media Upload Policy</span>
                 <textarea
                   id="site-media-upload-policy"
                   rows={6}
@@ -5395,13 +5422,15 @@ export default function AdminApplicationsPage({ currentUser, onAuthChange }) {
                   onChange={(event) => setSiteContentField('media_upload_policy_text', event.target.value)}
                 />
               </label>
-              <label className="field" htmlFor="site-contributor-agreement">
-                <span>Contributor agreement text</span>
+              <label className="field" htmlFor="site-information-security-policy">
+                <span>Information Security Policy (informational)</span>
                 <textarea
-                  id="site-contributor-agreement"
+                  id="site-information-security-policy"
                   rows={6}
-                  value={siteContentForm.contributor_agreement_text}
-                  onChange={(event) => setSiteContentField('contributor_agreement_text', event.target.value)}
+                  value={siteContentForm.information_security_policy_text}
+                  onChange={(event) =>
+                    setSiteContentField('information_security_policy_text', event.target.value)
+                  }
                 />
               </label>
             </section>

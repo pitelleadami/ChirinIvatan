@@ -94,9 +94,11 @@ class SiteContentSettings(models.Model):
     support_statements = models.JSONField(default=list, blank=True)
     partner_details = models.JSONField(default=list, blank=True)
     faq_sections = models.JSONField(default=list, blank=True)
+    terms_conditions_paragraphs = models.JSONField(default=list, blank=True)
     privacy_notice_paragraphs = models.JSONField(default=list, blank=True)
     media_upload_policy_paragraphs = models.JSONField(default=list, blank=True)
     contributor_agreement_paragraphs = models.JSONField(default=list, blank=True)
+    information_security_policy_paragraphs = models.JSONField(default=list, blank=True)
     beta_locked = models.BooleanField(default=True)
     maintenance_enabled = models.BooleanField(default=False)
     maintenance_message = models.TextField(

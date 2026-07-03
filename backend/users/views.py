@@ -260,6 +260,22 @@ DEFAULT_SITE_CONTENT = {
     "support_statements": [],
     "partner_details": [],
     "faq_sections": [],
+    "terms_conditions_paragraphs": [
+        (
+            "These Terms & Conditions explain how Chirin Ivatan may be used as a community "
+            "dictionary, folklore archive, and stewardship platform for Ivatan heritage."
+        ),
+        (
+            "By creating an account or using protected features, users agree to participate "
+            "respectfully, provide truthful account information, and avoid activity that harms "
+            "the archive, contributors, or the communities represented here."
+        ),
+        (
+            "Accounts, submissions, and access privileges may be reviewed, limited, suspended, "
+            "or removed when needed to protect cultural integrity, site security, or the mission "
+            "of Chirin Ivatan."
+        ),
+    ],
     "privacy_notice_paragraphs": [
         (
             "Chirin Ivatan collects account and contribution details only to manage role access, "
@@ -290,6 +306,32 @@ DEFAULT_SITE_CONTENT = {
         (
             "Contributors understand that submissions may be reviewed, edited for clarity, returned "
             "for changes, or declined when they do not meet archive standards."
+        ),
+    ],
+    "contributor_stewardship_policy_paragraphs": [
+        (
+            "By applying for a role or submitting content, contributors agree to share accurate, "
+            "respectful information and to provide source details when material is not personally "
+            "known, created, or recorded."
+        ),
+        (
+            "Contributors understand that submissions may be reviewed, edited for clarity, returned "
+            "for changes, or declined when they do not meet archive standards."
+        ),
+    ],
+    "information_security_policy_paragraphs": [
+        (
+            "Chirin Ivatan protects account and archive data through role-based access, review "
+            "workflows, backups, and administrative controls appropriate for a cultural heritage "
+            "platform."
+        ),
+        (
+            "Users should protect their passwords, avoid sharing accounts, and report suspicious "
+            "messages, account activity, or media uploads to the site administrators."
+        ),
+        (
+            "Security practices may be updated as the system grows, with priority given to account "
+            "safety, data integrity, and responsible stewardship of contributed cultural materials."
         ),
     ],
     "maintenance_enabled": False,
@@ -560,6 +602,9 @@ def _site_content_payload(row=None):
         "support_statements": row.support_statements or [],
         "partner_details": row.partner_details or [],
         "faq_sections": row.faq_sections or [],
+        "terms_conditions_paragraphs": (
+            row.terms_conditions_paragraphs or DEFAULT_SITE_CONTENT["terms_conditions_paragraphs"]
+        ),
         "privacy_notice_paragraphs": row.privacy_notice_paragraphs
         or DEFAULT_SITE_CONTENT["privacy_notice_paragraphs"],
         "media_upload_policy_paragraphs": (
@@ -569,6 +614,14 @@ def _site_content_payload(row=None):
         "contributor_agreement_paragraphs": (
             row.contributor_agreement_paragraphs
             or DEFAULT_SITE_CONTENT["contributor_agreement_paragraphs"]
+        ),
+        "contributor_stewardship_policy_paragraphs": (
+            row.contributor_agreement_paragraphs
+            or DEFAULT_SITE_CONTENT["contributor_agreement_paragraphs"]
+        ),
+        "information_security_policy_paragraphs": (
+            row.information_security_policy_paragraphs
+            or DEFAULT_SITE_CONTENT["information_security_policy_paragraphs"]
         ),
         "beta_locked": bool(row.beta_locked),
         "maintenance_enabled": bool(row.maintenance_enabled),
@@ -1781,6 +1834,9 @@ def site_content_view(request):
     row.support_statements = _sanitize_support_statements(payload.get("support_statements", []))
     row.partner_details = _sanitize_partner_details(payload.get("partner_details", []))
     row.faq_sections = _sanitize_faq_sections(payload.get("faq_sections", []))
+    row.terms_conditions_paragraphs = _sanitize_paragraphs(
+        payload.get("terms_conditions_paragraphs", [])
+    )
     row.privacy_notice_paragraphs = _sanitize_paragraphs(
         payload.get("privacy_notice_paragraphs", [])
     )
@@ -1788,7 +1844,13 @@ def site_content_view(request):
         payload.get("media_upload_policy_paragraphs", [])
     )
     row.contributor_agreement_paragraphs = _sanitize_paragraphs(
-        payload.get("contributor_agreement_paragraphs", [])
+        payload.get(
+            "contributor_stewardship_policy_paragraphs",
+            payload.get("contributor_agreement_paragraphs", []),
+        )
+    )
+    row.information_security_policy_paragraphs = _sanitize_paragraphs(
+        payload.get("information_security_policy_paragraphs", [])
     )
     row.maintenance_enabled = _payload_bool(payload.get("maintenance_enabled"))
     row.maintenance_message = (

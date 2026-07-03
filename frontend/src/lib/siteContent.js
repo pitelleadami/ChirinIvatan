@@ -36,6 +36,11 @@ export const DEFAULT_SITE_CONTENT = {
   support_statements: [],
   partner_details: [],
   faq_sections: [],
+  terms_conditions_paragraphs: [
+    'These Terms & Conditions explain how Chirin Ivatan may be used as a community dictionary, folklore archive, and stewardship platform for Ivatan heritage.',
+    'By creating an account or using protected features, users agree to participate respectfully, provide truthful account information, and avoid activity that harms the archive, contributors, or the communities represented here.',
+    'Accounts, submissions, and access privileges may be reviewed, limited, suspended, or removed when needed to protect cultural integrity, site security, or the mission of Chirin Ivatan.',
+  ],
   privacy_notice_paragraphs: [
     'Chirin Ivatan collects account and contribution details only to manage role access, review submissions, credit contributors, and protect the integrity of the archive.',
     'Submitted names, contact details, affiliation notes, and contribution history may be reviewed by authorized stewards for moderation, accountability, and support.',
@@ -48,6 +53,15 @@ export const DEFAULT_SITE_CONTENT = {
     'By applying for a role or submitting content, contributors agree to share accurate, respectful information and to provide source details when material is not personally known, created, or recorded.',
     'Contributors understand that submissions may be reviewed, edited for clarity, returned for changes, or declined when they do not meet archive standards.',
   ],
+  contributor_stewardship_policy_paragraphs: [
+    'By applying for a role or submitting content, contributors agree to share accurate, respectful information and to provide source details when material is not personally known, created, or recorded.',
+    'Contributors understand that submissions may be reviewed, edited for clarity, returned for changes, or declined when they do not meet archive standards.',
+  ],
+  information_security_policy_paragraphs: [
+    'Chirin Ivatan protects account and archive data through role-based access, review workflows, backups, and administrative controls appropriate for a cultural heritage platform.',
+    'Users should protect their passwords, avoid sharing accounts, and report suspicious messages, account activity, or media uploads to the site administrators.',
+    'Security practices may be updated as the system grows, with priority given to account safety, data integrity, and responsible stewardship of contributed cultural materials.',
+  ],
   maintenance_enabled: false,
   maintenance_message: 'Chirin Ivatan is temporarily paused for maintenance. Please check back soon.',
 }
@@ -58,9 +72,12 @@ const PARAGRAPH_KEYS = [
   'about_rationale_paragraphs',
   'about_future_paragraphs',
   'yaru_intro_paragraphs',
+  'terms_conditions_paragraphs',
   'privacy_notice_paragraphs',
   'media_upload_policy_paragraphs',
   'contributor_agreement_paragraphs',
+  'contributor_stewardship_policy_paragraphs',
+  'information_security_policy_paragraphs',
 ]
 
 export function normalizeParagraphs(value, fallback = []) {
@@ -89,6 +106,12 @@ export function normalizeSiteContent(payload = {}) {
   PARAGRAPH_KEYS.forEach((key) => {
     normalized[key] = normalizeParagraphs(payload?.[key], DEFAULT_SITE_CONTENT[key])
   })
+  if (!payload?.contributor_stewardship_policy_paragraphs) {
+    normalized.contributor_stewardship_policy_paragraphs = normalized.contributor_agreement_paragraphs
+  }
+  if (!payload?.contributor_agreement_paragraphs) {
+    normalized.contributor_agreement_paragraphs = normalized.contributor_stewardship_policy_paragraphs
+  }
   normalized.support_statements = Array.isArray(payload?.support_statements) ? payload.support_statements : []
   normalized.partner_details = Array.isArray(payload?.partner_details) ? payload.partner_details : []
   normalized.faq_sections = Array.isArray(payload?.faq_sections) ? payload.faq_sections : []

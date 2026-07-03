@@ -972,6 +972,20 @@ Screen: `FAQs and Guides`
 - Builder Learn More links must target FAQ anchors such as `#guide-pronunciation`, `#guide-variants`, `#guide-inflected-forms`, `#guide-usage-notes`, `#guide-etymology`, and `#guide-sources`.
 - `/manual` remains only as a compatibility redirect to `/faqs`.
 
+Screen: `Policies & Consent`
+
+- Public route: `/policies`.
+- Admin-managed policy text is stored on `SiteContentSettings` as paragraph arrays for:
+  - `terms_conditions_paragraphs`
+  - `privacy_notice_paragraphs`
+  - `contributor_agreement_paragraphs` exposed to the frontend as `contributor_stewardship_policy_paragraphs`
+  - `media_upload_policy_paragraphs`
+  - `information_security_policy_paragraphs`
+- Account creation through approved-application claiming or invitation claiming requires Terms & Conditions, Privacy Policy, and Contributor & Stewardship Policy acceptance.
+- Role applications require Contributor & Stewardship Policy acceptance and display Privacy Policy context.
+- Media upload forms require Media Upload Policy acceptance only when uploaded media is present.
+- Information Security Policy is public informational guidance and does not require checkbox acceptance.
+
 Screen: `Applications / Invitations`
 
 - Applications tab should not show a separate “Loaded” count card.
